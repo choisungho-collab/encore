@@ -1,0 +1,7 @@
+flask
+psutil
+requests
+boto3
+waitress
+windows-capture
+pyaudiowpatch
