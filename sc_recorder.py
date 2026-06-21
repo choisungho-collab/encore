@@ -160,6 +160,35 @@ def free_port(pref=8000):
     except OSError:
         s2 = socket.socket(); s2.bind(("0.0.0.0", 0)); p = s2.getsockname()[1]; s2.close(); return p
 
+def open_app(url):
+    """주소창·탭 없는 단독 앱 창으로 갤러리를 연다 (Edge/Chrome --app 모드).
+    윈도우엔 Edge 가 항상 깔려 있어 별도 설치 불필요. 못 찾으면 일반 브라우저로 폴백."""
+    try:
+        cand = []
+        for _n in ("msedge", "chrome"):
+            _p = shutil.which(_n)
+            if _p: cand.append(_p)
+        for _base in (os.environ.get("ProgramFiles", r"C:\Program Files"),
+                      os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")):
+            cand.append(os.path.join(_base, "Microsoft", "Edge", "Application", "msedge.exe"))
+            cand.append(os.path.join(_base, "Google", "Chrome", "Application", "chrome.exe"))
+        _la = os.environ.get("LOCALAPPDATA", "")
+        if _la: cand.append(os.path.join(_la, "Google", "Chrome", "Application", "chrome.exe"))
+        _prof = os.path.join(DATA_DIR, "appwin")
+        try: os.makedirs(_prof, exist_ok=True)
+        except Exception: pass
+        for _exe in cand:
+            if _exe and os.path.isfile(_exe):
+                subprocess.Popen([_exe, "--app=" + url, "--user-data-dir=" + _prof,
+                                  "--no-first-run", "--no-default-browser-check",
+                                  "--window-size=1240,840"])
+                return True
+    except Exception:
+        pass
+    try: webbrowser.open(url)
+    except Exception: pass
+    return False
+
 def load_or_make_config():
     if os.path.isfile(CONFIG_PATH):
         cfg = json.load(open(CONFIG_PATH, encoding="utf-8"))
@@ -1229,6 +1258,7 @@ def _player_hero(name, av, games, wr, avg, rc):
 PAGE = r"""<!doctype html><html lang="ko"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ENCORE — Brood War Archive</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='3.5' y='13' width='3.4' height='8' rx='1.1' fill='%233D8BFF'/%3E%3Crect x='9' y='8' width='3.4' height='13' rx='1.1' fill='%233D8BFF'/%3E%3Crect x='14.5' y='4' width='3.4' height='17' rx='1.1' fill='%2362A1FF'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/sun-typeface/SUIT@2/fonts/variable/woff2/SUIT-Variable.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/sun-typeface/SUITE@2/fonts/variable/woff2/SUITE-Variable.css">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -1394,6 +1424,7 @@ def gallery():
 MATCH_TEMPLATE = r"""<!doctype html><html lang="ko"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>__TITLE__ · ENCORE</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='3.5' y='13' width='3.4' height='8' rx='1.1' fill='%233D8BFF'/%3E%3Crect x='9' y='8' width='3.4' height='13' rx='1.1' fill='%233D8BFF'/%3E%3Crect x='14.5' y='4' width='3.4' height='17' rx='1.1' fill='%2362A1FF'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/sun-typeface/SUIT@2/fonts/variable/woff2/SUIT-Variable.css">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/sun-typeface/SUITE@2/fonts/variable/woff2/SUITE-Variable.css">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -2787,7 +2818,7 @@ def run_gui(cfg, url):
         l.bind("<Enter>", lambda e: l.config(fg=INK)); l.bind("<Leave>", lambda e: l.config(fg=color))
         return l
     def open_gallery():
-        try: webbrowser.open(url)
+        try: open_app(url)
         except Exception: pass
     def open_folder():
         try:
@@ -2942,7 +2973,7 @@ def main():
         return
     # 이미 실행 중이면(자동 실행 + 수동 실행 겹침) 갤러리만 열고 종료
     if not _single_instance():
-        try: webbrowser.open(cfg.get("gallery_url") or f"http://localhost:{cfg.get('port',8000)}")
+        try: open_app(cfg.get("gallery_url") or f"http://localhost:{cfg.get('port',8000)}")
         except Exception: pass
         return
     try: _LOGFILE["p"] = os.path.join(DATA_DIR, "recorder.log")
@@ -2975,7 +3006,7 @@ def main():
         g = cfg.get("gallery_url") or ""
         if g:
             log(f"갤러리 → {g}")
-            try: webbrowser.open(g)
+            try: open_app(g)
             except Exception: pass
         print("-" * 56); recorder_loop(cfg); return
     if mode == "server":
@@ -2985,7 +3016,7 @@ def main():
     if mode == "all":
         start_server(port, block=False); time.sleep(1.0)
         log(f"갤러리 → {url}")
-        try: webbrowser.open(url)
+        try: open_app(url)
         except Exception: pass
         # 보기 좋은 상태창(GUI). 윈도우 + tkinter 가능하면 GUI로, 아니면 콘솔로.
         if sys.platform == "win32" and (cfg.get("ui", "window") != "console"):
