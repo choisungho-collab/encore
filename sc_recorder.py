@@ -91,6 +91,7 @@ DB_PATH    = os.path.join(DATA_DIR, "matches.db")
 CONFIG_PATH= os.path.join(HERE, "config.json")
 WEB_DIR    = os.path.join(BUNDLE_DIR, "web")
 FPS        = 30
+_ENCORE_ICON = "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"
 FPS_GAME   = 23.81
 REC_STATE  = {"rec": False, "text": "대기 중", "game": None}   # 실시간 녹화 상태(웹 표시용)
 for d in (DATA_DIR, UPLOAD_DIR, REC_DIR): os.makedirs(d, exist_ok=True)
@@ -285,6 +286,13 @@ def ensure_ffmpeg():
             member = next(n for n in z.namelist() if n.lower().endswith("/bin/ffmpeg.exe"))
             with z.open(member) as src, open(local, "wb") as dst:
                 shutil.copyfileobj(src, dst)
+            try:
+                pm = next((n for n in z.namelist() if n.lower().endswith("/bin/ffprobe.exe")), None)
+                if pm:
+                    with z.open(pm) as src, open(os.path.join(HERE, "ffprobe.exe"), "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+            except Exception:
+                pass
             log(f"ffmpeg 준비 완료. (출처: {label})")
             return local
         except Exception as e:
@@ -369,6 +377,61 @@ UNIT_SUPPLY = {
 }
 # 기존 유닛에서 전환되는 모프(이미 카운트됨 → 보급 중복 방지)
 MORPH_FROM_UNIT = {"Lurker","Guardian","Devourer","Archon","Dark Archon"}
+# === 자원 비용 테이블 (BW 표준값) — 명령당 (미네랄, 가스). 저글링/스커지=쌍 비용, 변태유닛=추가비용만 ===
+UNIT_MG = {
+ "Probe":(50,0),"Zealot":(100,0),"Dragoon":(125,50),"High Templar":(50,150),"Dark Templar":(125,100),
+ "Archon":(0,0),"Dark Archon":(0,0),"Reaver":(200,100),"Shuttle":(200,0),"Observer":(25,75),
+ "Scout":(275,125),"Corsair":(150,100),"Carrier":(350,250),"Arbiter":(100,350),"Interceptor":(25,0),"Scarab":(15,0),
+ "SCV":(50,0),"Marine":(50,0),"Firebat":(50,25),"Medic":(50,25),"Ghost":(25,75),
+ "Vulture":(75,0),"Siege Tank":(150,100),"Goliath":(100,50),"Wraith":(150,100),"Valkyrie":(250,125),
+ "Dropship":(100,100),"Science Vessel":(100,225),"Battlecruiser":(400,300),"Nuclear Missile":(200,200),
+ "Drone":(50,0),"Zergling":(50,0),"Hydralisk":(75,25),"Mutalisk":(100,100),"Scourge":(25,75),
+ "Queen":(100,100),"Ultralisk":(200,200),"Defiler":(50,150),"Infested Terran":(100,50),"Overlord":(100,0),
+ "Lurker":(50,100),"Guardian":(50,100),"Devourer":(150,50),
+}
+MORPH_SUP_DELTA = {"Lurker":1,"Guardian":0,"Devourer":0,"Archon":0,"Dark Archon":0}
+BUILD_MG = {
+ "Nexus":(400,0),"Pylon":(100,0),"Gateway":(150,0),"Assimilator":(100,0),"Forge":(150,0),
+ "Cybernetics Core":(200,0),"Photon Cannon":(150,0),"Shield Battery":(100,0),"Citadel of Adun":(150,100),
+ "Templar Archives":(150,200),"Robotics Facility":(200,200),"Observatory":(50,100),"Robotics Support Bay":(150,100),
+ "Stargate":(150,150),"Fleet Beacon":(300,200),"Arbiter Tribunal":(200,150),
+ "Command Center":(400,0),"Supply Depot":(100,0),"Refinery":(100,0),"Barracks":(150,0),"Engineering Bay":(125,0),
+ "Bunker":(100,0),"Academy":(150,0),"Missile Turret":(75,0),"Factory":(200,100),"Starport":(150,100),
+ "Armory":(100,50),"Science Facility":(100,150),"Comsat Station":(50,50),"Nuclear Silo":(100,100),
+ "Machine Shop":(50,50),"Control Tower":(50,50),"Covert Ops":(50,50),"Physics Lab":(50,50),
+ "Hatchery":(300,0),"Creep Colony":(75,0),"Spawning Pool":(200,0),"Evolution Chamber":(75,0),
+ "Hydralisk Den":(100,50),"Extractor":(50,0),"Spire":(200,150),"Queens Nest":(150,100),
+ "Nydus Canal":(150,0),"Defiler Mound":(100,100),"Ultralisk Cavern":(150,200),
+ "Lair":(150,100),"Hive":(200,150),"Sunken Colony":(50,0),"Spore Colony":(50,0),"Greater Spire":(100,150),
+}
+UPGRADE_MG = {
+ "Protoss Ground Weapons":(100,100),"Protoss Ground Armor":(100,100),"Protoss Plasma Shields":(200,200),
+ "Protoss Air Weapons":(100,100),"Protoss Air Armor":(100,100),"Singularity Charge (Dragoon Range)":(150,150),
+ "Leg Enhancement (Zealot Speed)":(150,150),"Gravitic Drive (Shuttle Speed)":(200,200),"Scarab Damage":(200,200),
+ "Reaver Capacity":(200,200),"Gravitic Boosters (Observer Speed)":(150,150),"Sensor Array (Observer Sight)":(150,150),
+ "Khaydarin Amulet (Templar Energy)":(150,150),"Apial Sensors (Scout Sight)":(100,100),"Carrier Capacity":(100,100),
+ "Gravitic Thrusters (Scout Speed)":(200,200),"Khaydarin Core (Arbiter Energy)":(150,150),
+ "Terran Infantry Weapons":(100,100),"Terran Infantry Armor":(100,100),"Terran Vehicle Weapons":(100,100),
+ "Terran Vehicle Plating":(100,100),"Terran Ship Weapons":(100,100),"Terran Ship Plating":(100,100),
+ "U-238 Shells (Marine Range)":(150,150),"Caduceus Reactor (Medic Energy)":(150,150),"Ion Thrusters (Vulture Speed)":(100,100),
+ "Charon Boosters (Goliath Range)":(100,100),"Apollo Reactor (Wraith Energy)":(200,200),"Yamato Gun":(100,100),
+ "Colossus Reactor (Battlecruiser Energy)":(200,200),"Titan Reactor (Science Vessel Energy)":(150,150),
+ "Moebius Reactor (Ghost Energy)":(150,150),"Ocular Implants (Ghost Sight)":(100,100),
+ "Zerg Carapace":(150,150),"Zerg Melee Attacks":(100,100),"Zerg Missile Attacks":(100,100),
+ "Zerg Flyer Carapace":(150,150),"Zerg Flyer Attacks":(100,100),"Muscular Augments (Hydralisk Speed)":(150,150),
+ "Grooved Spines (Hydralisk Range)":(150,150),"Pneumatized Carapace (Overlord Speed)":(150,150),
+ "Ventral Sacs (Overlord Transport)":(200,200),"Metabolic Boost (Zergling Speed)":(100,100),
+ "Adrenal Glands (Zergling Attack)":(200,200),"Anabolic Synthesis (Ultralisk Speed)":(150,150),
+ "Chitinous Plating (Ultralisk Armor)":(150,150),"Antennae (Overlord Sight)":(150,150),
+}
+TECH_MG = {
+ "Psionic Storm":(200,200),"Hallucination":(150,150),"Recall":(150,150),"Stasis Field":(150,150),
+ "Disruption Web":(200,200),"Mind Control":(200,200),"Maelstrom":(100,100),"Stim Packs":(100,100),
+ "Lockdown":(200,200),"EMP Shockwave":(200,200),"Irradiate":(200,200),"Yamato Gun":(100,100),
+ "Cloaking Field":(150,150),"Personnel Cloaking":(100,100),"Restoration":(100,100),"Optical Flare":(100,100),
+ "Spider Mines":(100,100),"Tank Siege Mode":(150,150),"Lurker Aspect":(200,200),"Burrowing":(100,100),
+ "Plague":(150,150),"Consume":(100,100),"Ensnare":(100,100),"Spawn Broodlings":(100,100),
+}
 PROD_BUILDINGS = {"Gateway","Robotics Facility","Stargate","Barracks","Factory","Starport","Hatchery"}
 # 서플(보급) 건물 — 추가로 지을수록 인구 한도가 뚫림. Z는 오버로드(유닛)로 따로 셈.
 SUPPLY_BLD = {"Pylon","Supply Depot"}
@@ -385,6 +448,16 @@ def _upgrade_level(frames, gap=2400, cap=3):
     for fr in fs[1:]:
         if fr - last >= gap: lv += 1; last = fr
     return min(lv, cap)
+def _cum_at_bins(events, total_sec, step):
+    """(frame,value) 이벤트 → 시간 구간마다 누적값 리스트."""
+    if not events or total_sec <= 0: return []
+    ev = sorted((f/FPS_GAME, v) for f, v in events)
+    out = []; i = 0; c = 0.0; b = 1; nb = int(total_sec/step) + 1
+    while b <= nb:
+        bt = b*step
+        while i < len(ev) and ev[i][0] <= bt: c += ev[i][1]; i += 1
+        out.append(c); b += 1
+    return out
 def extract_analysis(rep_path):
     out = _run([SCREP, "-cmds", rep_path], capture_output=True, timeout=120).stdout
     d = json.loads(out); h = d["Header"]; comp = d.get("Computed", {}) or {}
@@ -398,7 +471,7 @@ def extract_analysis(rep_path):
         players[pid] = {"id": pid, "name": p.get("Name"), "race": (p.get("Race") or {}).get("ShortName"), "rl": _rl,
             "team": p.get("Team"), "color": "#%06x" % ((p.get("Color") or {}).get("RGB", 8421504)),
             "apm": pd.get("APM"), "eapm": pd.get("EAPM"), "build": [], "units": Counter(), "up_fr": defaultdict(list),
-            "unit_first": {}, "townhalls": [], "apm_series": [0]*nbins, "supply_events": [],
+            "unit_first": {}, "townhalls": [], "apm_series": [0]*nbins, "supply_events": [], "cost_events": [],
             "cmd_mix": Counter(), "hotkey_n": 0, "groups": set(), "drops": 0, "pings": 0,
             "scout_bases": set(), "scout_first_fr": None, "atk_first_fr": None, "drop_first_fr": None,
             "aggr_series": [0]*nbins, "train_frames": [],
@@ -439,21 +512,24 @@ def extract_analysis(rep_path):
         uname = (c.get("Unit") or {}).get("Name")
         if tn == "Build":
             pl["build"].append({"t": mmss(f), "name": uname, "cat": "building"})
+            pl["cost_events"].append((f,)+BUILD_MG.get(uname,(0,0)))
             if uname in TOWN_HALLS: pl["townhalls"].append({"t": mmss(f), "name": uname})
         elif tn == "Building Morph":
             pl["build"].append({"t": mmss(f), "name": uname, "cat": "morph"})
+            pl["cost_events"].append((f,)+BUILD_MG.get(uname,(0,0)))
         elif tn == "Upgrade":
             up = (c.get("Upgrade") or {}).get("Name") or uname or "Upgrade"
             pl["up_fr"][up].append(f)
-            if up not in seen_up[pid]: seen_up[pid].add(up); pl["build"].append({"t": mmss(f), "name": up, "cat": "upgrade"})
+            if up not in seen_up[pid]: seen_up[pid].add(up); pl["build"].append({"t": mmss(f), "name": up, "cat": "upgrade"}); pl["cost_events"].append((f,)+UPGRADE_MG.get(up,(0,0)))
         elif tn == "Leave Game":
             leaves.append((f, pid))
         elif tn == "Tech":
             tech = (c.get("Tech") or {}).get("Name") or uname or "Tech"
-            if tech not in seen_up[pid]: seen_up[pid].add(tech); pl["build"].append({"t": mmss(f), "name": tech, "cat": "tech"})
+            if tech not in seen_up[pid]: seen_up[pid].add(tech); pl["build"].append({"t": mmss(f), "name": tech, "cat": "tech"}); pl["cost_events"].append((f,)+TECH_MG.get(tech,(0,0)))
         elif tn in ("Train", "Train Fighter", "Unit Morph"):
             if uname:
                 pl["units"][uname] += 1
+                pl["cost_events"].append((f,)+UNIT_MG.get(uname,(0,0)))
                 if uname not in pl["unit_first"]: pl["unit_first"][uname] = mmss(f)
                 if tn == "Train" or (tn == "Unit Morph" and uname not in MORPH_FROM_UNIT):
                     pl["supply_events"].append((f, UNIT_SUPPLY.get(uname, 1)))
@@ -469,6 +545,12 @@ def extract_analysis(rep_path):
         rl = pl.get("rl") if pl.get("rl") in ("P","T","Z") else _coach_race(pl["race"], list(pl["units"]))
         atk_lv = max([_upgrade_level(pl["up_fr"].get(n, [])) for n in GND_ATK.get(rl, [])] or [0])
         arm_lv = max([_upgrade_level(pl["up_fr"].get(n, [])) for n in GND_ARM.get(rl, [])] or [0])
+        _tot_sec = frames/FPS_GAME if frames else 0
+        _step = max(5.0, (_tot_sec or 60)/80.0)
+        _supc = _cum_at_bins([(fr,sp) for fr,sp in pl["supply_events"]], _tot_sec, _step)
+        _minc = _cum_at_bins([(fr,m) for fr,m,g in pl["cost_events"]], _tot_sec, _step)
+        _gasc = _cum_at_bins([(fr,g) for fr,m,g in pl["cost_events"]], _tot_sec, _step)
+        resource_series = [{"t":round((i+1)*_step),"sup":round(_supc[i]),"min":round(_minc[i]),"gas":round(_gasc[i])} for i in range(len(_supc))]
         sup_name, sup_ko = SUPPLY_KO.get(rl, ("Pylon", "서플"))
         sup_bld = (pl["units"].get("Overlord", 0) if rl == "Z" else sum(1 for b in pl["build"] if b["name"] == sup_name))
         sup_cap = sup_bld * 8 + 9   # 대략적 인구 한도 (본진 보급 + 서플건물/오버로드 ×8)
@@ -486,7 +568,7 @@ def extract_analysis(rep_path):
             "prod_max_gap": (round(max([(tf[i]-tf[i-1])/FPS_GAME for i in range(1,len(tf))] or [0])) if (tf:=sorted(pl["train_frames"])) else 0),
             "prod_active": (round(100*len(set(int(x/FPS_GAME//60) for x in tf))/max(1,(max(set(int(x/FPS_GAME//60) for x in tf))-min(set(int(x/FPS_GAME//60) for x in tf))+1))) if tf else 0),
             "cmd_mix": dict(pl["cmd_mix"]),
-            "max_supply": min(cum, 200), "total_supply": cum, "supply200": t200, "prod": prodn,
+            "max_supply": min(cum, 200), "total_supply": cum, "supply200": t200, "prod": prodn, "resource_series": resource_series,
             "atk_lv": atk_lv, "arm_lv": arm_lv, "supply_bld": sup_bld, "supply_cap": sup_cap, "supply_ko": sup_ko,
             "main_prod_n": mp_n, "main_prod_ko": mp_ko,
             "summary": {"buildings": sum(1 for b in pl["build"] if b["cat"] in ("building", "morph")),
@@ -1052,6 +1134,48 @@ def _trim_lead(video_path, game_len_sec, lead=6.0):
     except Exception as e:
         log(f"영상 트림 건너뜀(원본 유지): {e}")
 
+def _ffprobe_dur(path):
+    probe = None
+    if FFMPEG:
+        c = (FFMPEG[:-10] + "ffprobe.exe") if FFMPEG.lower().endswith("ffmpeg.exe") else FFMPEG.replace("ffmpeg", "ffprobe")
+        if os.path.isfile(c): probe = c
+    probe = probe or shutil.which("ffprobe")
+    if not probe: return None
+    try:
+        r = _run([probe, "-v", "error", "-show_entries", "format=duration",
+                  "-of", "default=nw=1:nk=1", path], capture_output=True, timeout=20)
+        return float((r.stdout or "0").strip() or 0)
+    except Exception:
+        return None
+
+CLIP_KINDS = {"battle", "gg", "drop"}
+def make_clips(video_path, highlights, game_len_sec, out_dir, lead=6.0, maxn=3, dur=30.0, pre=12.0):
+    """하이라이트(교전·드랍·GG) 지점에서 짧은 공유용 클립 생성 → [(highlight_idx, local_path), ...]."""
+    if not FFMPEG or not highlights: return []
+    vdur = _ffprobe_dur(video_path)
+    offset = (vdur - game_len_sec) if (vdur and game_len_sec and vdur > game_len_sec + 0.5) else lead
+    offset = max(0.0, min(offset, 60.0))
+    cand = [(i, h) for i, h in enumerate(highlights) if h.get("kind") in CLIP_KINDS]
+    def _pr(ih):
+        h = ih[1]; lbl = h.get("label") or ""
+        if "최대" in lbl: return 0
+        return {"gg": 1, "drop": 2, "battle": 3}.get(h.get("kind"), 9)
+    cand.sort(key=_pr); cand = cand[:maxn]
+    cand.sort(key=lambda ih: ih[1].get("sec", 0))
+    made = []
+    for idx, h in cand:
+        vstart = max(0.0, (h.get("sec", 0) or 0) + offset - pre)
+        clip = os.path.join(out_dir, f"clip{idx}.mp4")
+        try:
+            _run([FFMPEG, "-y", "-loglevel", "error", "-ss", f"{vstart:.2f}", "-i", video_path,
+                  "-t", f"{dur:.0f}", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+                  "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", clip], timeout=180)
+            if os.path.isfile(clip) and os.path.getsize(clip) > 5000:
+                made.append((idx, clip))
+        except Exception:
+            pass
+    return made
+
 def ingest(video_path, rep_path, uploader=None):
     if not video_path or not os.path.isfile(video_path) or os.path.getsize(video_path) < 10000:
         log("영상이 비어있어 등록 생략."); return
@@ -1102,6 +1226,17 @@ def ingest(video_path, rep_path, uploader=None):
                 except Exception: pass
         except Exception as e:
             log(f"분석 실패(계속 진행): {e}")
+        try:
+            if analysis and analysis.get("highlights"):
+                _clips = make_clips(video_path, analysis["highlights"], _gsec or 0, base)
+                for _ci, _cl in _clips:
+                    try: analysis["highlights"][_ci]["clip"] = sb_upload(_cl, f"clips/{gid}_{_ci}.mp4", "video/mp4")
+                    except Exception: pass
+                    try: os.remove(_cl)
+                    except OSError: pass
+                if _clips: log(f"  하이라이트 클립 {len(_clips)}개 생성·업로드")
+        except Exception as _e:
+            log(f"클립 생성 생략: {_e}")
         try:
             video_url = sb_upload(video_path, f"videos/{gid}.mp4", "video/mp4")
             thumb_url = sb_upload(tmp_thumb, f"thumbs/{gid}.jpg", "image/jpeg") if has_thumb else None
@@ -1943,10 +2078,13 @@ def run_gui(cfg, url):
     import tkinter as tk
     BG="#0F1013"; INK="#ECEEF2"; DIM="#9AA0AA"; FAINT="#636872"
     JADE="#3D8BFF"; REC="#E8694C"; AMB="#E0B441"; LINE="#23272E"; KOR="Malgun Gothic"
-    W = 332
+    W = 430
     root = tk.Tk(); root.title("ENCORE"); root.configure(bg=BG)
-    root.geometry(f"{W}x112"); root.resizable(False, True)
-    st = {"open": False}
+    try: root.iconphoto(True, tk.PhotoImage(data=_ENCORE_ICON))
+    except Exception: pass
+    BASE_H, SET_H, LOG_H = 172, 182, 206
+    root.geometry(f"{W}x{BASE_H}"); root.resizable(False, True)
+    st = {"log": False, "settings": False}
 
     head = tk.Frame(root, bg=BG); head.pack(fill="x", padx=14, pady=(10,0))
     mk = tk.Canvas(head, width=17, height=13, bg=BG, highlightthickness=0); mk.pack(side="left", pady=(2,0))
@@ -1971,12 +2109,7 @@ def run_gui(cfg, url):
     logtxt = tk.Text(logwrap, bg="#0C0D10", fg=DIM, font=("Consolas",8), bd=0, padx=9, pady=7,
                      height=9, wrap="word", state="disabled")
 
-    foot = tk.Frame(root, bg=BG); foot.pack(side="bottom", fill="x", padx=14, pady=(0,9))
-    def link(parent, text, cmd, color=DIM):
-        l = tk.Label(parent, text=text, bg=BG, fg=color, font=(KOR,8), cursor="hand2")
-        l.bind("<Button-1>", lambda e: cmd())
-        l.bind("<Enter>", lambda e: l.config(fg=INK)); l.bind("<Leave>", lambda e: l.config(fg=color))
-        return l
+    # === 콜백 ===
     def open_gallery():
         try: open_app(url)
         except Exception: pass
@@ -1988,30 +2121,94 @@ def run_gui(cfg, url):
         try: root.destroy()
         except Exception: pass
         os._exit(0)
+    _sbe = sb_enabled()
+    def do_sync():
+        set_log(True); threading.Thread(target=lambda: sync_existing_to_cloud(), daemon=True).start()
+    def do_reanalyze():
+        set_log(True); threading.Thread(target=lambda: reanalyze_all(), daemon=True).start()
+    def _save_cfg():
+        try: json.dump(cfg, open(CONFIG_PATH, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+        except Exception as e: log(f"설정 저장 실패: {e}")
+
+    # === 녹화 설정 패널 (접이식) ===
+    PANEL = "#0B0C0F"
+    optwrap = tk.Frame(root, bg=PANEL, highlightbackground=LINE, highlightthickness=1)
+    tk.Label(optwrap, text="녹화 설정", bg=PANEL, fg=DIM, font=(KOR,8,"bold")).pack(anchor="w", padx=13, pady=(9,3))
+    SCALE_OPTS=[("자동 (최상)","auto"),("원본 해상도","source"),("1080p","1080"),("720p","720"),("480p","480")]
+    ENC_OPTS=[("자동 (GPU 우선)","auto"),("GPU · NVENC","nvenc"),("CPU · x264","x264")]
+    CAP_OPTS=[("자동","auto"),("WGC (전체화면 OK)","wgc"),("DDA","ddagrab"),("GDI","gdigrab")]
+    MON_OPTS=[("자동","auto"),("모니터 1","0"),("모니터 2","1"),("모니터 3","2")]
+    def opt_row(label, opts, key):
+        row = tk.Frame(optwrap, bg=PANEL); row.pack(fill="x", padx=13, pady=2)
+        tk.Label(row, text=label, bg=PANEL, fg=FAINT, font=(KOR,8), width=6, anchor="w").pack(side="left")
+        cur = str(cfg.get(key, "auto")); m = {l: v for l, v in opts}
+        curlbl = next((l for l, v in opts if v == cur), opts[0][0])
+        var = tk.StringVar(value=curlbl)
+        def on_sel(lbl, k=key, mp=m, lb=label):
+            cfg[k] = mp[lbl]; _save_cfg(); log(f"설정: {lb} → {lbl} (다음 녹화부터 적용)")
+        om = tk.OptionMenu(row, var, *[l for l, _ in opts], command=on_sel)
+        om.config(bg="#1A1D24", fg=INK, font=(KOR,8), activebackground="#262B33", activeforeground=INK,
+                  relief="flat", bd=0, highlightthickness=0, anchor="w", padx=9, pady=3, cursor="hand2")
+        try: om["menu"].config(bg="#15171C", fg=INK, activebackground=JADE, activeforeground="#fff", font=(KOR,8), bd=0)
+        except Exception: pass
+        om.pack(side="left", fill="x", expand=True)
+    opt_row("화질", SCALE_OPTS, "scale")
+    opt_row("인코더", ENC_OPTS, "encoder")
+    opt_row("캡처", CAP_OPTS, "capture")
+    opt_row("모니터", MON_OPTS, "output_idx")
+    tk.Label(optwrap, text="기본값(자동)이 최상 화질 — GPU로 게임 끊김 없이 녹화합니다", bg=PANEL, fg=FAINT,
+             font=(KOR,7), wraplength=W-44, justify="left").pack(anchor="w", padx=13, pady=(3,9))
+
+    # === 패널 토글 + 리사이즈 ===
+    def _resize():
+        h = BASE_H + (SET_H if st["settings"] else 0) + (LOG_H if st["log"] else 0)
+        root.geometry(f"{W}x{h}")
     def set_log(open_):
-        st["open"] = open_
+        if open_ and st["settings"]: set_settings(False)
+        st["log"] = open_
         if open_:
-            root.geometry(f"{W}x318"); logwrap.pack(fill="both", expand=True, padx=11, pady=(2,7))
+            logwrap.pack(fill="both", expand=True, padx=11, pady=(0,7))
             if LAST_ERR.get("msg"): errbar.config(text="\u26a0 " + LAST_ERR["msg"]); errbar.pack(fill="x", pady=(0,5))
             else: errbar.pack_forget()
-            logtxt.pack(fill="both", expand=True); logtog.config(text="닫기 \u25b4")
+            logtxt.pack(fill="both", expand=True); logtog.config(text="로그 \u25b4")
         else:
-            logwrap.pack_forget(); root.geometry(f"{W}x112"); logtog.config(text="로그 \u25be")
-    def toggle_log(): set_log(not st["open"])
-    logtog = link(foot, "로그 \u25be", toggle_log, FAINT); logtog.pack(side="right")
-    link(foot, "종료", do_quit).pack(side="right", padx=(0,10))
-    link(foot, "갤러리", open_gallery, JADE).pack(side="left")
-    tk.Label(foot, text="·", bg=BG, fg=LINE, font=(KOR,8)).pack(side="left", padx=5)
-    link(foot, "폴더", open_folder).pack(side="left")
-    if sb_enabled():
-        def do_sync():
-            set_log(True); threading.Thread(target=lambda: sync_existing_to_cloud(), daemon=True).start()
-        tk.Label(foot, text="·", bg=BG, fg=LINE, font=(KOR,8)).pack(side="left", padx=5)
-        link(foot, "업로드", do_sync, JADE).pack(side="left")
-        def do_reanalyze():
-            set_log(True); threading.Thread(target=lambda: reanalyze_all(), daemon=True).start()
-        tk.Label(foot, text="·", bg=BG, fg=LINE, font=(KOR,8)).pack(side="left", padx=5)
-        link(foot, "재분석", do_reanalyze, JADE).pack(side="left")
+            logwrap.pack_forget(); logtog.config(text="로그 \u25be")
+        _resize()
+    def set_settings(open_):
+        if open_ and st["log"]: set_log(False)
+        st["settings"] = open_
+        if open_: optwrap.pack(fill="x", padx=12, pady=(2,2)); settog.config(text="\u2699 설정 \u25b4", fg=JADE)
+        else: optwrap.pack_forget(); settog.config(text="\u2699 설정", fg=DIM)
+        _resize()
+    def toggle_log(): set_log(not st["log"])
+    def toggle_settings(): set_settings(not st["settings"])
+
+    # === 버튼 헬퍼 ===
+    def btn(parent, text, cmd, primary=False):
+        base = JADE if primary else "#1A1D24"; hov = "#5BA3E0" if primary else "#272C34"; fg = "#FFFFFF" if primary else INK
+        b = tk.Label(parent, text=text, bg=base, fg=fg, font=(KOR,9,"bold"), padx=16, pady=9, cursor="hand2")
+        b.bind("<Button-1>", lambda e: cmd())
+        b.bind("<Enter>", lambda e: b.config(bg=hov)); b.bind("<Leave>", lambda e: b.config(bg=base))
+        return b
+    def link(parent, text, cmd, color=DIM):
+        l = tk.Label(parent, text=text, bg=BG, fg=color, font=(KOR,8,"bold"), cursor="hand2")
+        l.bind("<Button-1>", lambda e: cmd())
+        l.bind("<Enter>", lambda e: l.config(fg=INK)); l.bind("<Leave>", lambda e: l.config(fg=color))
+        return l
+
+    # === 액션 버튼 행 ===
+    acts = tk.Frame(root, bg=BG); acts.pack(fill="x", padx=13, pady=(9,0))
+    btn(acts, "갤러리", open_gallery, primary=True).pack(side="left")
+    btn(acts, "폴더 열기", open_folder).pack(side="left", padx=(7,0))
+    if _sbe:
+        btn(acts, "업로드", do_sync).pack(side="left", padx=(7,0))
+        btn(acts, "재분석", do_reanalyze).pack(side="left", padx=(7,0))
+
+    # === 푸터 (토글 + 종료) ===
+    foot = tk.Frame(root, bg=BG); foot.pack(side="bottom", fill="x", padx=15, pady=(8,10))
+    settog = link(foot, "\u2699 설정", toggle_settings, DIM); settog.pack(side="left")
+    logtog = link(foot, "로그 \u25be", toggle_log, FAINT); logtog.pack(side="left", padx=(15,0))
+    link(foot, "종료", do_quit, FAINT).pack(side="right")
     root.protocol("WM_DELETE_WINDOW", do_quit)
 
     def _prep_and_run():
@@ -2033,7 +2230,7 @@ def run_gui(cfg, url):
         for _ in range(150):
             try: line = GUI_Q.get_nowait()
             except Exception: break
-            if st["open"]:
+            if st["log"]:
                 logtxt.config(state="normal"); logtxt.insert("end", line + "\n"); appended = True
         if appended:
             n = int(logtxt.index("end-1c").split(".")[0])
@@ -2050,7 +2247,7 @@ def run_gui(cfg, url):
             games_lbl.config(text=(f"경기 {n} · {e[0]}" if e else f"경기 {n}"))
         except Exception: pass
         if LAST_ERR.get("msg") and (time.time() - LAST_ERR.get("t", 0) < 8):
-            if not st["open"]: set_log(True)
+            if not st["log"]: set_log(True)
             else: errbar.config(text="\u26a0 " + LAST_ERR["msg"])
         root.after(500, poll)
 
