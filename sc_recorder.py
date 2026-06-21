@@ -441,6 +441,23 @@ GND_ARM = {"P":["Protoss Ground Armor"],   "T":["Terran Infantry Armor","Terran 
 # 종족별 주력 생산건물 — 물량의 핵심 (개수 = 한방 후 remax 속도)
 MAIN_PROD = {"P":("Gateway","게이트웨이"), "T":("Barracks","배럭"), "Z":("Hatchery","해처리")}
 SUPPLY_KO = {"P":("Pylon","파일런"), "T":("Supply Depot","서플라이 디팟"), "Z":("Overlord","오버로드")}
+WORKER_NAME = {"P":"Probe","T":"SCV","Z":"Drone"}
+WORKER_KO   = {"P":"프로브","T":"SCV","Z":"드론"}
+# 공방(공격/방어) 업그레이드: screp명 → 한글 라벨 (선수가 실제 연구한 것만 표시)
+COMBAT_UP = {
+ "P":[("Protoss Ground Weapons","지상 공격"),("Protoss Ground Armor","지상 방어"),("Protoss Plasma Shields","실드"),("Protoss Air Weapons","공중 공격"),("Protoss Air Armor","공중 방어")],
+ "T":[("Terran Infantry Weapons","보병 공격"),("Terran Infantry Armor","보병 방어"),("Terran Vehicle Weapons","기계 공격"),("Terran Vehicle Plating","기계 방어"),("Terran Ship Weapons","함선 공격"),("Terran Ship Plating","함선 방어")],
+ "Z":[("Zerg Melee Attacks","근접 공격"),("Zerg Missile Attacks","원거리 공격"),("Zerg Carapace","지상 방어"),("Zerg Flyer Attacks","공중 공격"),("Zerg Flyer Carapace","공중 방어")],
+}
+def _up_level_times(frames, gap=2400, cap=3):
+    """업글 커맨드 프레임들 → 레벨별 시작 시각. 연구시간보다 가까운 재클릭(연타)은 한 레벨로 묶음(_upgrade_level과 동일 기준)."""
+    if not frames: return []
+    fs = sorted(frames); out = [mmss(fs[0])]; last = fs[0]
+    for fr in fs[1:]:
+        if fr - last >= gap:
+            out.append(mmss(fr)); last = fr
+            if len(out) >= cap: break
+    return out[:cap]
 def _upgrade_level(frames, gap=2400, cap=3):
     """업글 커맨드 프레임들 → 실제 레벨 추정. 연구시간(~gap프레임)보다 가까운 재클릭(연타)은 한 레벨로 묶음."""
     if not frames: return 0
@@ -529,6 +546,7 @@ def extract_analysis(rep_path):
         elif tn in ("Train", "Train Fighter", "Unit Morph"):
             if uname:
                 pl["units"][uname] += 1
+                if uname in ("Probe","SCV","Drone"): pl.setdefault("worker_fr", []).append(f)
                 pl["cost_events"].append((f,)+UNIT_MG.get(uname,(0,0)))
                 if uname not in pl["unit_first"]: pl["unit_first"][uname] = mmss(f)
                 if tn == "Train" or (tn == "Unit Morph" and uname not in MORPH_FROM_UNIT):
@@ -545,6 +563,9 @@ def extract_analysis(rep_path):
         rl = pl.get("rl") if pl.get("rl") in ("P","T","Z") else _coach_race(pl["race"], list(pl["units"]))
         atk_lv = max([_upgrade_level(pl["up_fr"].get(n, [])) for n in GND_ATK.get(rl, [])] or [0])
         arm_lv = max([_upgrade_level(pl["up_fr"].get(n, [])) for n in GND_ARM.get(rl, [])] or [0])
+        _ut = [{"ko": ko, "lv": _up_level_times(pl["up_fr"].get(nm, []))} for (nm, ko) in COMBAT_UP.get(rl, []) if pl["up_fr"].get(nm)]
+        _wf = sorted(pl.get("worker_fr", []))
+        _wms = {str(n): mmss(_wf[n-1]) for n in (10, 20, 30, 40, 50) if len(_wf) >= n}
         _tot_sec = frames/FPS_GAME if frames else 0
         _step = max(5.0, (_tot_sec or 60)/80.0)
         _supc = _cum_at_bins([(fr,sp) for fr,sp in pl["supply_events"]], _tot_sec, _step)
@@ -569,6 +590,7 @@ def extract_analysis(rep_path):
             "prod_active": (round(100*len(set(int(x/FPS_GAME//60) for x in tf))/max(1,(max(set(int(x/FPS_GAME//60) for x in tf))-min(set(int(x/FPS_GAME//60) for x in tf))+1))) if tf else 0),
             "cmd_mix": dict(pl["cmd_mix"]),
             "max_supply": min(cum, 200), "total_supply": cum, "supply200": t200, "prod": prodn, "resource_series": resource_series,
+            "up_timed": _ut, "worker_ms": _wms, "worker_ko": WORKER_KO.get(rl, "일꾼"),
             "atk_lv": atk_lv, "arm_lv": arm_lv, "supply_bld": sup_bld, "supply_cap": sup_cap, "supply_ko": sup_ko,
             "main_prod_n": mp_n, "main_prod_ko": mp_ko,
             "summary": {"buildings": sum(1 for b in pl["build"] if b["cat"] in ("building", "morph")),
@@ -1217,7 +1239,6 @@ def ingest(video_path, rep_path, uploader=None):
         if _gl and video_path and os.path.isfile(video_path): _trim_lead(video_path, _gl)
     except Exception: pass
     if sb_writable():
-        tmp_thumb = os.path.join(base, "thumb.jpg"); has_thumb = make_thumb(video_path, tmp_thumb)
         analysis = None
         try:
             if rdst:
@@ -1226,6 +1247,10 @@ def ingest(video_path, rep_path, uploader=None):
                 except Exception: pass
         except Exception as e:
             log(f"분석 실패(계속 진행): {e}")
+        _tt = None
+        try: _tt = _thumb_time((analysis or {}).get("highlights"), video_path, _gl)
+        except Exception: pass
+        tmp_thumb = os.path.join(base, "thumb.jpg"); has_thumb = make_thumb(video_path, tmp_thumb, at=_tt)
         try:
             if analysis and analysis.get("highlights"):
                 _clips = make_clips(video_path, analysis["highlights"], _gsec or 0, base)
@@ -1279,9 +1304,12 @@ def ingest(video_path, rep_path, uploader=None):
 # ===================== 5. 갤러리 서버 (ENCORE UI) =====================
 import logging; logging.getLogger("werkzeug").setLevel(logging.ERROR)
 
-def make_thumb(video, out):
+def make_thumb(video, out, at=None):
     if not FFMPEG: return False
-    for ts in ("120", "60", "20", "5", "1", "0.5"):
+    cands = []
+    if at is not None and at > 0: cands.append(f"{float(at):.2f}")
+    cands += ["120", "60", "20", "5", "1", "0.5"]
+    for ts in cands:
         try:
             _run([FFMPEG, "-y", "-loglevel", "error", "-ss", ts, "-i", video,
                             "-frames:v", "1", "-vf", "scale=640:-2", out], timeout=30)
@@ -1290,6 +1318,23 @@ def make_thumb(video, out):
         except Exception:
             pass
     return False
+
+def _thumb_time(highlights, video_path, game_len_sec):
+    """가장 극적인 순간(최대 교전 우선 → 후반 교전 → 드랍)의 영상 시각.
+    영상 길이로 게임 시작 오프셋을 역산해 게임시각 → 영상시각으로 변환(트림 여부 무관)."""
+    if not highlights: return None
+    battles = [h for h in highlights if h.get("kind") == "battle" and h.get("sec") is not None]
+    pick = next((h for h in battles if h.get("label") == "최대 교전"), None)
+    if not pick and battles: pick = max(battles, key=lambda h: h.get("sec") or 0)
+    if not pick:
+        drops = [h for h in highlights if h.get("kind") == "drop" and h.get("sec") is not None]
+        pick = drops[0] if drops else None
+    if not pick: return None
+    s = float(pick.get("sec") or 0)
+    if game_len_sec and s >= float(game_len_sec) - 4: s = max(0.0, float(game_len_sec) - 12)
+    dur = _ffprobe_dur(video_path)
+    if dur and game_len_sec: return max(0.0, dur - float(game_len_sec)) + s
+    return s + 6.0
 
 def esc(s): return html.escape(str(s)) if s is not None else ""
 def _team_color(players, t):
@@ -2334,7 +2379,7 @@ def main():
         return
     # 이미 실행 중이면(자동 실행 + 수동 실행 겹침) 갤러리만 열고 종료
     if not _single_instance():
-        try: open_app(cfg.get("gallery_url") or f"http://localhost:{cfg.get('port',8000)}")
+        try: open_app((cfg.get("gallery_url") or "https://encorestar.netlify.app/").rstrip("/"))
         except Exception: pass
         return
     try: _LOGFILE["p"] = os.path.join(DATA_DIR, "recorder.log")
