@@ -54,7 +54,7 @@ HERE       = APP_DIR
 def ensure_deps():
     if getattr(sys, "frozen", False): return   # exe(번들)면 패키지가 이미 포함됨
     need = []
-    for mod, pkg in [("flask", "flask"), ("psutil", "psutil"), ("requests", "requests")]:
+    for mod, pkg in [("psutil", "psutil"), ("requests", "requests")]:
         try: __import__(mod)
         except ImportError: need.append(pkg)
     if need:
@@ -69,7 +69,6 @@ ensure_deps()
 
 import psutil, requests
 import urllib.request, zipfile, io, webbrowser, re, html, shutil
-from flask import Flask, request, send_file, abort, Response, jsonify
 
 # ===================== 경로 / 전역 =====================
 def _data_root():
@@ -359,7 +358,7 @@ def parse_rep(path):
 
 def mmss(fr): sx = max(0, fr)/FPS_GAME; return f"{int(sx//60)}:{int(sx%60):02d}"
 TOWN_HALLS = {"Command Center", "Nexus", "Hatchery"}
-# 빨무 데이터용 — 유닛 표시 보급값(인구). 전사 미반영 누계 추정에 사용.
+# 스타크래프트 데이터용 — 유닛 표시 보급값(인구). 전사 미반영 누계 추정에 사용.
 UNIT_SUPPLY = {
  "Probe":1,"Zealot":2,"Dragoon":2,"High Templar":2,"Dark Templar":2,"Archon":4,"Dark Archon":4,
  "Reaver":4,"Shuttle":2,"Observer":1,"Scout":3,"Corsair":2,"Carrier":6,"Arbiter":4,
@@ -376,7 +375,7 @@ SUPPLY_BLD = {"Pylon","Supply Depot"}
 # 종족 지상 공격/방어 업그레이드 이름(screp Upgrade.Name). 같은 업글을 여러 번 = 그게 레벨(몇업).
 GND_ATK = {"P":["Protoss Ground Weapons"], "T":["Terran Infantry Weapons","Terran Vehicle Weapons"], "Z":["Zerg Melee Attacks","Zerg Missile Attacks"]}
 GND_ARM = {"P":["Protoss Ground Armor"],   "T":["Terran Infantry Armor","Terran Vehicle Plating"],   "Z":["Zerg Carapace"]}
-# 종족별 주력 생산건물 — 빨무에서 물량의 핵심 (개수 = 한방 후 remax 속도)
+# 종족별 주력 생산건물 — 물량의 핵심 (개수 = 한방 후 remax 속도)
 MAIN_PROD = {"P":("Gateway","게이트웨이"), "T":("Barracks","배럭"), "Z":("Hatchery","해처리")}
 SUPPLY_KO = {"P":("Pylon","파일런"), "T":("Supply Depot","서플라이 디팟"), "Z":("Overlord","오버로드")}
 def _upgrade_level(frames, gap=2400, cap=3):
@@ -399,13 +398,44 @@ def extract_analysis(rep_path):
         players[pid] = {"id": pid, "name": p.get("Name"), "race": (p.get("Race") or {}).get("ShortName"), "rl": _rl,
             "team": p.get("Team"), "color": "#%06x" % ((p.get("Color") or {}).get("RGB", 8421504)),
             "apm": pd.get("APM"), "eapm": pd.get("EAPM"), "build": [], "units": Counter(), "up_fr": defaultdict(list),
-            "unit_first": {}, "townhalls": [], "apm_series": [0]*nbins, "supply_events": []}
+            "unit_first": {}, "townhalls": [], "apm_series": [0]*nbins, "supply_events": [],
+            "cmd_mix": Counter(), "hotkey_n": 0, "groups": set(), "drops": 0, "pings": 0,
+            "scout_bases": set(), "scout_first_fr": None, "atk_first_fr": None, "drop_first_fr": None,
+            "aggr_series": [0]*nbins, "train_frames": [],
+            "start": ((pd.get("StartLocation") or {}).get("X"), (pd.get("StartLocation") or {}).get("Y"))}
         order.append(pid)
+    NEAR2 = 800*800   # 적 본진 반경^2 (정찰/공격 판정)
+    enemy_starts = {}
+    for _pid in players:
+        _tm = players[_pid]["team"]
+        enemy_starts[_pid] = [players[o]["start"] for o in players
+                              if players[o]["team"] != _tm and players[o]["start"][0] is not None]
     for c in d.get("Commands", {}).get("Cmds", []):
         pid = c.get("PlayerID"); pl = players.get(pid)
         if pl is None: continue
         f = c.get("Frame", 0); tn = (c.get("Type") or {}).get("Name")
         b = min(nbins-1, int(f/FPS_GAME//60)); pl["apm_series"][b] += 1
+        pl["cmd_mix"][tn] += 1
+        if tn in ("Right Click", "Targeted Order"):
+            _ps = c.get("Pos") or {}; _x = _ps.get("X"); _y = _ps.get("Y")
+            if _x is not None:
+                for (_ex, _ey) in enemy_starts.get(pid, []):
+                    if _ex is not None and (_x-_ex)**2 + (_y-_ey)**2 <= NEAR2:
+                        _mf = f/FPS_GAME/60
+                        if _mf < 5:
+                            pl["scout_bases"].add((_ex, _ey))
+                            if pl["scout_first_fr"] is None: pl["scout_first_fr"] = f
+                        if _mf >= 4:
+                            pl["aggr_series"][b] += 1
+                            if pl["atk_first_fr"] is None: pl["atk_first_fr"] = f
+                        break
+        elif tn == "Hotkey":
+            pl["hotkey_n"] += 1; _g = c.get("Group")
+            if (c.get("HotkeyType") or {}).get("Name") == "Assign" and _g is not None: pl["groups"].add(_g)
+        elif tn == "Unload":
+            pl["drops"] += 1
+            if pl["drop_first_fr"] is None: pl["drop_first_fr"] = f
+        elif tn == "Minimap Ping": pl["pings"] += 1
         uname = (c.get("Unit") or {}).get("Name")
         if tn == "Build":
             pl["build"].append({"t": mmss(f), "name": uname, "cat": "building"})
@@ -427,6 +457,7 @@ def extract_analysis(rep_path):
                 if uname not in pl["unit_first"]: pl["unit_first"][uname] = mmss(f)
                 if tn == "Train" or (tn == "Unit Morph" and uname not in MORPH_FROM_UNIT):
                     pl["supply_events"].append((f, UNIT_SUPPLY.get(uname, 1)))
+                    pl["train_frames"].append(f)
     res = []
     for pid in order:
         pl = players[pid]; us = sorted(pl["units"].items(), key=lambda kv: -kv[1])
@@ -446,7 +477,15 @@ def extract_analysis(rep_path):
         res.append({"id": pl["id"], "name": pl["name"], "race": pl["race"], "rl": rl, "team": pl["team"],
             "color": pl["color"], "apm": pl["apm"], "eapm": pl["eapm"], "build": pl["build"],
             "units": [{"name": k, "n": v, "first": pl["unit_first"].get(k)} for k, v in us],
-            "townhalls": pl["townhalls"], "apm_series": pl["apm_series"],
+            "townhalls": pl["townhalls"], "apm_series": pl["apm_series"], "aggr_series": pl["aggr_series"],
+            "scout_first": (mmss(pl["scout_first_fr"]) if pl["scout_first_fr"] is not None else None),
+            "scouted": len(pl["scout_bases"]),
+            "atk_first": (mmss(pl["atk_first_fr"]) if pl["atk_first_fr"] is not None else None),
+            "hotkey": pl["hotkey_n"], "groups": len(pl["groups"]), "drops": pl["drops"], "pings": pl["pings"],
+            "drop_first": (mmss(pl["drop_first_fr"]) if pl["drop_first_fr"] is not None else None),
+            "prod_max_gap": (round(max([(tf[i]-tf[i-1])/FPS_GAME for i in range(1,len(tf))] or [0])) if (tf:=sorted(pl["train_frames"])) else 0),
+            "prod_active": (round(100*len(set(int(x/FPS_GAME//60) for x in tf))/max(1,(max(set(int(x/FPS_GAME//60) for x in tf))-min(set(int(x/FPS_GAME//60) for x in tf))+1))) if tf else 0),
+            "cmd_mix": dict(pl["cmd_mix"]),
             "max_supply": min(cum, 200), "total_supply": cum, "supply200": t200, "prod": prodn,
             "atk_lv": atk_lv, "arm_lv": arm_lv, "supply_bld": sup_bld, "supply_cap": sup_cap, "supply_ko": sup_ko,
             "main_prod_n": mp_n, "main_prod_ko": mp_ko,
@@ -475,42 +514,57 @@ def _mmss_to_sec(t):
     try: m, s = str(t).split(":"); return int(m)*60 + int(s)
     except Exception: return 0
 def compute_highlights(a):
-    """리플레이 기반 하이라이트: 최대 교전·게임체인저 테크·첫 확장·GG/퇴장(승부처)."""
+    """리플레이 명령 기반 하이라이트: 실제 교전(다수 동시 활동 + 적진 액션) · 게임체인저 테크 · 첫 확장 · 첫 드랍 · GG."""
     players = a.get("players") or []
     out = []
-    # 1) 교전 — 전원 분당 활동량(APM) 합의 국소 피크. 가장 큰 게 '최대 교전'.
     nb = max((len(p.get("apm_series") or []) for p in players), default=0)
     if nb >= 3:
-        total = [0]*nb
+        intensity = [0]*nb; frontline = [0]*nb; meds = {}
         for p in players:
-            for i, v in enumerate(p.get("apm_series") or []):
-                if i < nb: total[i] += v
+            body = [v for v in (p.get("apm_series") or []) if v > 0]
+            meds[p.get("id")] = (sorted(body)[len(body)//2] if body else 0)
+        for p in players:
+            s = p.get("apm_series") or []; ag = p.get("aggr_series") or []
+            for i in range(nb):
+                if i < len(s): intensity[i] += s[i]
+                if i < len(ag): frontline[i] += ag[i]
+        contested = [0]*nb
+        for i in range(nb):
+            cc = 0
+            for p in players:
+                s = p.get("apm_series") or []
+                if i < len(s) and s[i] > 0 and s[i] >= meds.get(p.get("id"), 0): cc += 1
+            contested[i] = cc
+        score = [0.0]*nb
+        for i in range(nb):
+            sc = intensity[i] * (1 + 0.4*max(0, contested[i]-1)) + 5*frontline[i]
+            if contested[i] < 2: sc *= 0.4
+            score[i] = sc
         cand = []
         for i in range(1, nb):
-            nxt = total[i+1] if i+1 < nb else 0
-            if total[i] > 0 and total[i] >= total[i-1] and total[i] >= nxt:
-                cand.append((total[i], i))
+            nxt = score[i+1] if i+1 < nb else 0
+            if score[i] > 0 and score[i] >= score[i-1] and score[i] >= nxt:
+                cand.append((score[i], i, frontline[i]))
         cand.sort(reverse=True)
         picked = []
-        for v, i in cand:
-            if all(abs(i-j) >= 2 for _, j in picked): picked.append((v, i))
+        for v, i, fl in cand:
+            if all(abs(i-j) >= 2 for _, j, _ in picked): picked.append((v, i, fl))
             if len(picked) >= 3: break
         maxv = picked[0][0] if picked else 0
-        for v, i in sorted(picked, key=lambda x: x[1]):
-            out.append({"sec": i*60, "t": f"{i}:00",
-                        "label": "최대 교전" if v == maxv else "교전 피크", "kind": "battle"})
-    # 2) 게임체인저 테크 — 임팩트 유닛 첫 등장
+        for v, i, fl in sorted(picked, key=lambda x: x[1]):
+            lbl = "최대 교전" if v == maxv else ("주요 교전" if fl > 0 else "교전 피크")
+            out.append({"sec": i*60, "t": f"{i}:00", "label": lbl, "kind": "battle"})
+    # 게임체인저 테크 — 임팩트 유닛 첫 등장
     firsts = {}
     for p in players:
         for u in (p.get("units") or []):
             nm = u.get("name"); ft = u.get("first")
             if nm in TECH_UNITS and ft:
                 sec = _mmss_to_sec(ft)
-                if nm not in firsts or sec < firsts[nm][0]:
-                    firsts[nm] = (sec, ft, p.get("name"))
+                if nm not in firsts or sec < firsts[nm][0]: firsts[nm] = (sec, ft, p.get("name"))
     for nm, (sec, ft, who) in sorted(firsts.items(), key=lambda kv: kv[1][0])[:4]:
         out.append({"sec": sec, "t": ft, "label": f"첫 {TECH_UNITS[nm]}", "who": who, "kind": "tech"})
-    # 3) 첫 확장 — 가장 빠른 2번째 타운홀
+    # 첫 확장
     exp = None
     for p in players:
         ths = p.get("townhalls") or []
@@ -518,16 +572,24 @@ def compute_highlights(a):
             sec = _mmss_to_sec(ths[1].get("t"))
             if exp is None or sec < exp[0]: exp = (sec, ths[1].get("t"), p.get("name"))
     if exp: out.append({"sec": exp[0], "t": exp[1], "label": "첫 확장", "who": exp[2], "kind": "expand"})
-    # 4) GG / 퇴장 — 누가 GG 치고 나가는 순간 = 무조건 하이라이트(경기의 승부처)
+    # 첫 드랍 견제
+    drop = None
+    for p in players:
+        df = p.get("drop_first")
+        if df:
+            sec = _mmss_to_sec(df)
+            if drop is None or sec < drop[0]: drop = (sec, df, p.get("name"))
+    if drop and drop[0] >= 180:
+        out.append({"sec": drop[0], "t": drop[1], "label": "첫 드랍 견제", "who": drop[2], "kind": "drop"})
+    # GG / 퇴장
     leaves = a.get("leaves") or []
     for idx, L in enumerate(leaves):
-        last = (idx == len(leaves) - 1)
-        nm = L.get("name") or "선수"
+        last = (idx == len(leaves) - 1); nm = L.get("name") or "선수"
         out.append({"sec": L.get("sec", 0), "t": L.get("t", ""),
-                    "label": ("GG — 경기 종료" if last else f"{nm} GG·퇴장"),
-                    "who": nm, "kind": "gg"})
+                    "label": ("GG — 경기 종료" if last else f"{nm} GG·퇴장"), "who": nm, "kind": "gg"})
     out.sort(key=lambda hh: hh["sec"])
     return out
+
 
 # ===================== 4. 인게스트 (영상+리플레이 등록) =====================
 def db():
@@ -581,136 +643,6 @@ def set_analysis(mid, js):
     if sb_enabled(): return sb_set_analysis(mid, js)
     c = db(); c.execute("UPDATE matches SET analysis=? WHERE id=?", (js, mid)); c.commit(); c.close()
 # ===================== 코치 리포트 (규칙 기반, API 불필요) =====================
-COACH_SUPPLY={"Zergling":.5,"Hydralisk":1,"Mutalisk":2,"Lurker":2,"Scourge":.5,"Ultralisk":4,"Defiler":2,"Queen":2,"Guardian":2,"Devourer":2,"Drone":1,
- "Marine":1,"Firebat":1,"Medic":1,"Ghost":1,"SCV":1,"Vulture":2,"Siege Tank (Tank Mode)":2,"Siege Tank (Siege Mode)":2,"Goliath":2,"Wraith":2,"Valkyrie":3,"Dropship":2,"Science Vessel":2,"Battlecruiser":6,
- "Zealot":2,"Dragoon":2,"High Templar":2,"Dark Templar":2,"Archon":4,"Dark Archon":4,"Reaver":4,"Shuttle":2,"Observer":1,"Scout":3,"Corsair":2,"Carrier":6,"Arbiter":4,"Probe":1}
-COACH_WORKERS={"SCV","Drone","Probe"}
-COACH_GAS={"Refinery","Assimilator","Extractor"}
-COACH_PROD={"T":{"Barracks","Factory","Starport"},"P":{"Gateway","Robotics Facility","Stargate"},"Z":{"Hatchery","Lair","Hive"}}
-COACH_WIN_TECH={"Z":{"Defiler":"디파일러","Lurker":"러커","Ultralisk":"울트라","Guardian":"가디언"},
- "T":{"Science Vessel":"사이언스베슬","Siege Tank (Tank Mode)":"시즈탱크","Battlecruiser":"배틀크루저"},
- "P":{"High Templar":"하이템플러","Archon":"아콘","Reaver":"리버","Arbiter":"아비터","Carrier":"캐리어"}}
-COACH_UKR={"Marine":"마린","Firebat":"파벳","Medic":"메딕","Vulture":"벌처","Goliath":"골리앗","Wraith":"레이스","Dropship":"드랍십","Science Vessel":"베슬","Valkyrie":"발키리","Battlecruiser":"배틀","Ghost":"고스트",
- "Siege Tank (Tank Mode)":"탱크","Siege Tank (Siege Mode)":"탱크","Zealot":"질럿","Dragoon":"드라군","High Templar":"하템","Dark Templar":"다크","Archon":"아콘","Reaver":"리버","Corsair":"커세어","Carrier":"캐리어","Arbiter":"아비터","Scout":"스카웃","Shuttle":"셔틀",
- "Zergling":"저글링","Hydralisk":"히드라","Mutalisk":"뮤탈","Lurker":"러커","Ultralisk":"울트라","Defiler":"디파일러","Guardian":"가디언","Devourer":"디바우러","Scourge":"스컬지","Queen":"퀸"}
-COACH_RACEKR={"T":"테란","P":"토스","Z":"저그","R":"랜덤"}
-def _coach_sec(t):
-    try: m,sx=str(t).split(":"); return int(m)*60+int(sx)
-    except Exception: return 99999
-def _coach_race(r, unames=None):
-    r=(r or "").lower()
-    if "toss" in r or "prot" in r: return "P"
-    if "zerg" in r: return "Z"
-    if "terr" in r: return "T"
-    if r in ("p","pro"): return "P"
-    if r in ("z","zer"): return "Z"
-    if r in ("t","ter"): return "T"
-    # "ran"/"random"/불명 → 유닛으로 추정
-    if unames:
-        n=set(unames)
-        if n & {"SCV","Marine","Vulture","Goliath","Wraith","Siege Tank (Tank Mode)","Siege Tank"}: return "T"
-        if n & {"Probe","Zealot","Dragoon","Dark Templar","Carrier","Corsair"}: return "P"
-        if n & {"Drone","Zergling","Hydralisk","Mutalisk","Lurker"}: return "Z"
-    return "T"
-def _coach_first(build, names):
-    for b in build:
-        if b.get("name") in names: return b.get("t")
-    return None
-def coach_player(p, peers):
-    unames=[u["name"] for u in p.get("units",[])]
-    race=_coach_race(p.get("race"), unames); build=p.get("build",[])
-    units={u["name"]:u for u in p.get("units",[])}
-    pts=[]
-    def T(tone,k,ti,tx): pts.append({"tone":tone,"k":k,"t":ti,"x":tx})
-    gas=_coach_first(build, COACH_GAS)
-    prodset=COACH_PROD[race]; prod_n=sum(1 for b in build if b.get("name") in prodset)
-    ups=[b for b in build if b.get("cat") in ("upgrade","tech")]; up_n=len(ups); up1=ups[0]["t"] if ups else None
-    exp=p["townhalls"][0]["t"] if p.get("townhalls") else None
-    army=sum(units[n]["n"]*COACH_SUPPLY.get(n,1) for n in units if n not in COACH_WORKERS)
-    workers=sum(units[n]["n"] for n in units if n in COACH_WORKERS)
-    combat=sorted([(n,units[n]["n"]) for n in units if n not in COACH_WORKERS], key=lambda kv:-kv[1])
-    top=combat[0] if combat else None
-    apm=p.get("apm"); eapm=p.get("eapm"); series=p.get("apm_series") or [0]
-    timings={"gas":gas,"prod":prod_n,"up_n":up_n,"up1":up1,"exp":exp,"army":round(army),"workers":workers,
-             "max_supply":p.get("max_supply"),"supply200":p.get("supply200"),"total_supply":p.get("total_supply"),"tcount":len(p.get("townhalls",[])),
-             "atk_lv":p.get("atk_lv"),"arm_lv":p.get("arm_lv"),"supply_bld":p.get("supply_bld"),"supply_ko":p.get("supply_ko"),"main_prod_n":p.get("main_prod_n"),"main_prod_ko":p.get("main_prod_ko")}
-    bnames={b.get("name") for b in build}
-    # 빨무 핵심 1: 감지 수단(다크/럴커/클로킹/마인 대비). 저그는 오버로드가 자동 감지라 제외.
-    if race=="P" and "Observer" not in units and "Photon Cannon" not in bnames:
-        T("warn","det","감지 수단 없음","옵저버도 포토캐논도 안 보여. 빠른무한에선 상대 다크템플러·러커·벌처 마인을 못 보면 병력이 그냥 녹아. 옵저버 1~2기는 필수야.")
-    elif race=="T" and "Science Vessel" not in units and "Missile Turret" not in bnames:
-        T("tip","det","감지 수단 부족","베슬도 터렛도 안 보여. 상대 다크·러커·클로킹 레이스·드랍 대비로 터렛이나 베슬을 챙겨두는 게 안전해.")
-    # 빨무 핵심 2: 일꾼 = 돈 = 물량. 자원 50덩이를 캐는 맵이라 일꾼 많을수록(~50기) 경제가 강함.
-    if workers>=40:
-        T("good","worker","일꾼 "+str(workers)+"기 — 경제 탄탄","일꾼을 넉넉히 뽑았네. 빠른무한은 자원 덩이를 일꾼으로 캐는 물량 싸움이라 일꾼=돈=병력이야. 경제 기반이 좋아 — 그만큼 병력·업글이 빠르게 나와.")
-    elif workers<24:
-        T("tip","worker","일꾼 "+str(workers)+"기 — 부족","일꾼이 적은 편이야. 빠른무한은 자원이 50덩이라 일꾼을 ~50기까지 꾸준히 뽑아야 돈이 넘쳐서 물량이 터져. 견제로 일꾼이 잘려도 바로 다시 채우는 게 중요해.")
-    # 빨무 핵심 3: 멀티 = 일꾼 생산기지 추가 = 경제·견제 복구력. 본진 하나면 견제 한 방에 터짐.
-    tc=len(p.get("townhalls",[]))
-    if tc>=2:
-        T("good","exp","멀티 "+str(tc)+"개 확보","멀티(추가 생산기지)를 잡았네. 빠른무한은 일꾼 생산처가 많을수록 견제로 일꾼이 잘려도 빨리 복구되고, 일꾼을 더 많이 굴려 물량도 빨라져. 좋은 판단이야.")
-    else:
-        T("tip","exp","본진 하나 — 멀티 권장","일꾼 생산기지가 본진 하나뿐이야. 빠른무한은 상대 견제(드랍/스플래시)로 뭉친 일꾼이 한 번에 몰살되면 본진 하나로는 복구가 느려 게임이 터질 수 있어. 멀티로 생산기지를 늘리면 훨씬 안전하고 물량도 빨라져.")
-    peer_prod=[c["prod"] for c in peers if c]
-    avg_prod=sum(peer_prod)/len(peer_prod) if peer_prod else prod_n
-    if prod_n < max(3, avg_prod*0.7):
-        T("tip","prod","생산 건물 "+str(prod_n)+"개","생산 건물이 다른 선수 평균("+("%.0f"%avg_prod)+")보다 적어. 빠른무한은 한방 싸움 뒤 다시 꽉 채우기(remax)가 핵심이라, 생산 건물을 늘리면 회복이 빨라져.")
-    elif prod_n >= max(6, avg_prod*1.2):
-        T("good","prod","생산력 좋음 "+str(prod_n)+"개","생산 건물을 넉넉히 지어서 병력 보충이 빨랐어. 이게 빠른무한의 기본기야.")
-    a_=p.get("atk_lv"); r_=p.get("arm_lv"); haslv=(a_ is not None or r_ is not None)
-    a_=a_ or 0; r_=r_ or 0; mxlv=max(a_,r_)
-    if haslv:
-        utitle="업그레이드 공"+str(a_)+"·방"+str(r_)
-        if mxlv==0:
-            T("warn","up",utitle,"공격·방어 업그레이드가 하나도 없어. 빠른무한은 풀업 화력 싸움이라 1업만 차이나도 교전이 크게 갈려. 가스 올리자마자 업글부터 돌리자.")
-        elif mxlv<=1:
-            T("tip","up",utitle,"업그레이드 단계가 낮아. 빠른무한은 같은 병력도 풀업이면 화력이 확 달라져 — 병력 뽑으면서 공/방을 3업까지 꾸준히 올리자.")
-        elif mxlv>=3:
-            T("good","up",utitle,"공/방을 3업까지 올렸네. 빠른무한 화력 싸움의 핵심을 잘 챙겼어.")
-        else:
-            T("good","up",utitle,"공/방 업그레이드를 꾸준히 돌렸네. 3업까지 마저 채우면 더 강해져.")
-    elif up_n==0:
-        T("warn","up","업그레이드 없음","공격·방어 업그레이드가 하나도 없어. 빠른무한은 풀업 화력 싸움이라 1업만 차이나도 교전이 크게 갈려. 가스 올리자마자 업글부터 돌리자.")
-    elif up_n<=2:
-        T("tip","up","업그레이드 "+str(up_n)+"개 (첫 "+str(up1)+")","업그레이드가 적은 편이야. 병력 뽑는 것과 동시에 업글을 계속 돌리면 같은 병력으로도 화력이 확 올라가.")
-    else:
-        T("good","up","업그레이드 "+str(up_n)+"개","업그레이드를 꾸준히 돌렸네. 풀업 지향 좋아.")
-    wt=COACH_WIN_TECH[race]; have_wt=[wt[n] for n in wt if n in units]
-    if top:
-        share=top[1]*COACH_SUPPLY.get(top[0],1)/army if army else 0
-        topkr=COACH_UKR.get(top[0],top[0])
-        if share>=.7 and not have_wt:
-            recs=", ".join(list(wt.values())[:2])
-            T("tip","comp",topkr+" 일변도","병력이 "+topkr+" 위주("+("%.0f"%(share*100))+"%)인데 상위 테크가 없어. 병력을 다 채우기 전에 "+recs+" 같은 게임체인저를 섞으면, 같은 인구수로도 광역기·한방 화력이 생겨서 한타가 뒤집혀.")
-        elif have_wt:
-            T("good","comp","테크 확보: "+", ".join(have_wt),"상위 테크 유닛을 확보했네. 빠른무한 후반은 이런 게임체인저 유무로 갈려. 좋은 판단이야.")
-    if not have_wt:
-        recs=", ".join(list(wt.values())[:3])
-        T("tip","tech","상위 테크 추천","이번 판엔 "+COACH_RACEKR[race]+"의 결정타 유닛("+recs+")이 안 보였어. 물량이 갖춰지면 그 인구를 "+recs+"로 바꿔주는 게 '물량 다음 할 일'이야.")
-    if army>=170:
-        T("good","army","대군 운영 ~"+str(round(army))+"서플","병력 규모가 컸어(누적 추정 "+str(round(army))+"). 빠른무한은 물량을 빨리 채우고 바로 진출하는 게 중요해 — 꽉 채운 채 가만히 있으면 손해니, 풀업+상위테크 갖춰지면 바로 들어가자.")
-    if len(series)>=3:
-        body=series[:-1] if len(series)>3 else series
-        med=sorted(body)[len(body)//2] if body else 0
-        dip=[(i,v) for i,v in enumerate(body) if med>0 and v<med*0.55]
-        if dip:
-            i,v=dip[0]
-            T("tip","apm",str(i)+"분에 손이 멈춤","이 구간 APM이 평소("+str(med)+")의 절반 아래로 떨어졌어. 교전에 집중하다 생산이 끊겼을 가능성이 커. 부대지정+생산 단축키로 싸우면서 뽑기를 연습하면 이 공백이 사라져.")
-    if apm and eapm and apm-eapm>=70:
-        T("tip","apm","APM "+str(apm)+" / 유효 "+str(eapm),"실제 명령(EAPM)에 비해 전체 APM이 꽤 높아 — 같은 곳 반복클릭이 많다는 뜻. 손은 빠르니, 그 손을 생산·멀티 분배에 쓰면 실질 효율이 올라가.")
-    return timings, pts
-def coach_report(a):
-    base=[]
-    for p in a.get("players",[]):
-        unames=[u["name"] for u in p.get("units",[])]
-        race=_coach_race(p.get("race"), unames); build=p.get("build",[])
-        base.append({"prod":sum(1 for b in build if b.get("name") in COACH_PROD[race])})
-    out=[]
-    for i,p in enumerate(a.get("players",[])):
-        peers=[b for j,b in enumerate(base) if j!=i]
-        tm,pts=coach_player(p,peers)
-        out.append({"id":p.get("id"),"name":p.get("name"),"race":p.get("race"),"timings":tm,"points":pts})
-    return out
 
 def _len_sec(l):
     try: m, s = l.split(":"); return int(m)*60+int(s)
@@ -834,6 +766,13 @@ def sb_set_analysis(mid, js):
     requests.patch(_sb_base() + "/rest/v1/matches?id=eq.%s" % mid,
                    headers={**_sb_h(write=True), "Prefer": "return=minimal"},
                    data=json.dumps({"analysis": val}, ensure_ascii=False).encode("utf-8"), timeout=30)
+def sb_patch_match(mid, fields):
+    import requests
+    r = requests.patch(_sb_base() + "/rest/v1/matches?id=eq.%s" % mid,
+                   headers={**_sb_h(write=True), "Prefer": "return=minimal"},
+                   data=json.dumps(fields, ensure_ascii=False, default=str).encode("utf-8"), timeout=30)
+    if r.status_code not in (200, 204):
+        raise RuntimeError("PATCH %s: %s" % (r.status_code, (r.text or "")[:150]))
 def sb_get_comments(mid):
     return _sb_get("comments?match_id=eq.%s&select=id,author,body,created&order=created.asc" % mid).json()
 def sb_add_comment(mid, author, body):
@@ -928,6 +867,61 @@ def _gid_time(gid):
         return datetime.datetime.strptime((gid or "")[:15], "%Y%m%d-%H%M%S").isoformat(timespec="seconds")
     except Exception:
         return datetime.datetime.now().isoformat(timespec="seconds")
+
+def reanalyze_all(log_fn=None):
+    """기존 경기를 새 분석으로 다시 분석해 Supabase 갱신(영상 재업로드 X). 로컬 .rep 우선, 없으면 클라우드에서 받음."""
+    lg = log_fn or log
+    if not SCREP:
+        lg("✗ screp가 없어 재분석할 수 없어요."); return 0
+    if not sb_writable():
+        lg("✗ 클라우드 쓰기 권한이 없어요 (service_key 확인)."); return 0
+    if not sb_cfg().get("service_key"):
+        lg("⚠ service_key가 없어요 — 기존 경기 갱신은 RLS 때문에 막힐 수 있어요. config.json 의 supabase.service_key 를 채우면 확실합니다.")
+    try:
+        matches = sb_get_matches(limit=100000)
+    except Exception as e:
+        lg(f"✗ 경기 목록을 못 불러왔어요: {e}"); return 0
+    lg(f"기존 경기 {len(matches)}개 재분석 시작…")
+    done = failed = skipped = 0
+    for m in matches:
+        mid = m.get("id")
+        if not mid: continue
+        rep = os.path.join(UPLOAD_DIR, mid, "replay.rep")
+        tmp = None
+        if not os.path.isfile(rep):
+            rurl = _media_url(m.get("replay")) if m.get("replay") else None
+            if not rurl:
+                skipped += 1; lg(f"  · 건너뜀(리플레이 없음): {m.get('map') or mid}"); continue
+            try:
+                import requests, tempfile
+                rr = requests.get(rurl, timeout=120); rr.raise_for_status()
+                tmp = tempfile.mktemp(suffix=".rep")
+                with open(tmp, "wb") as f: f.write(rr.content)
+                rep = tmp
+            except Exception as e:
+                failed += 1; lg(f"  · .rep 받기 실패({mid}): {e}"); continue
+        try:
+            meta = parse_rep(rep); a = extract_analysis(rep)
+            try: a["highlights"] = compute_highlights(a)
+            except Exception: pass
+            players = meta.get("players") or []; saver = meta.get("saver"); winner = meta.get("winner")
+            sp = next((p for p in players if p.get("name") == saver), None)
+            won = (sp.get("team") == winner) if (sp and winner is not None) else None
+            sb_patch_match(mid, {
+                "map": meta.get("map"), "matchup": meta.get("matchup"),
+                "length": meta.get("length"), "length_sec": _len_sec(meta.get("length") or ""),
+                "type": meta.get("type"), "winner": winner, "saver": saver,
+                "np": len(players), "players": players, "won": won, "analysis": a})
+            done += 1; lg(f"  · 재분석 ✓ {meta.get('map') or mid}")
+        except Exception as e:
+            failed += 1; lg(f"  · 재분석 실패({mid}): {e}")
+        finally:
+            if tmp:
+                try: os.remove(tmp)
+                except OSError: pass
+    lg(f"✓ 재분석 완료 — 갱신 {done} · 건너뜀 {skipped} · 실패 {failed}")
+    return done
+
 
 def rebuild_db_from_recordings(log_fn=None):
     """recordings/ 또는 uploads/ 폴더에 영상은 있는데 DB에 없는 경기를 스캔해 복구(+옛 위치는 uploads로 정규화)."""
@@ -1148,7 +1142,6 @@ def ingest(video_path, rep_path, uploader=None):
                       (f"{gid}/thumb.jpg" if has_thumb else None), size, uploader, meta)
 
 # ===================== 5. 갤러리 서버 (ENCORE UI) =====================
-app = Flask(__name__)
 import logging; logging.getLogger("werkzeug").setLevel(logging.ERROR)
 
 def make_thumb(video, out):
@@ -1172,20 +1165,6 @@ def _media_url(v):
     if not v: return ""
     return v if v.startswith("http") else "/media/" + v
 
-def _game_view(r):
-    players = r.get("players") or []
-    saver = r.get("saver"); winner = r.get("winner")
-    sp = next((p for p in players if p.get("name") == saver), None)
-    won = (sp.get("team") == winner) if (sp and winner) else None
-    return {"map": r.get("map") or "게임 영상", "matchup": r.get("matchup") or "",
-            "length": r.get("length") or "", "np": len(players) or 0,
-            "winner": winner, "players": players, "me": saver, "won": won,
-            "date": (r.get("uploaded") or "")[:10],
-            "video_url": _media_url(r.get("video")),
-            "thumb_url": _media_url(r.get("thumb")) if r.get("thumb") else None,
-            "rep_url": (_media_url(r["replay"]) + "?dl=1") if r.get("replay") else None,
-            "id": r.get("id"), "match_url": "/match/" + (r.get("id") or ""), "uploader": r.get("uploader"),
-            "likes": r.get("likes") or 0, "views": r.get("views") or 0, "uploaded": r.get("uploaded") or ""}
 
 def _roster(g, t, compact=False):
     rows = ""
@@ -1221,90 +1200,16 @@ def _poster(g, big=False):
             f'<div class="pmeta"><span class="mu">{esc(g["matchup"])}</span>'
             f'<span class="pln">◷ {esc(g["length"])}</span></div></div>')
 
-_IC_PLAY='<svg class="ic" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v13.72a1 1 0 0 0 1.52.86l11.43-6.86a1 1 0 0 0 0-1.72L9.52 4.28A1 1 0 0 0 8 5.14Z"/></svg>'
-_IC_CLOCK='<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3.2 1.9"/></svg>'
-_IC_HEART='<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20.5C6.5 16.5 3 13 3 9.2 3 6.6 5 4.5 7.6 4.5c1.7 0 3.2.9 4.4 2.6 1.2-1.7 2.7-2.6 4.4-2.6C19 4.5 21 6.6 21 9.2c0 3.8-3.5 7.3-9 11.3Z"/></svg>'
-_IC_EYE='<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="2.5"/></svg>'
-_IC_TROPHY='<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h10v5a5 5 0 0 1-10 0V4ZM7 6H4v1a3 3 0 0 0 3 3M17 6h3v1a3 3 0 0 1-3 3M9 17h6M12 14v3M9 21h6"/></svg>'
-_IC_BOOKMARK='<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h12a1 1 0 0 1 1 1v15l-7-4-7 4V5a1 1 0 0 1 1-1Z"/></svg>'
-_IC_FILTER='<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M7 12h10M10 18h4"/></svg>'
-_IC_CHEV='<svg class="cv" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>'
 
-def _ago(iso):
-    if not iso: return ""
-    try:
-        from datetime import datetime
-        d = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
-        now = datetime.now(d.tzinfo) if d.tzinfo else datetime.now()
-        sx = (now - d).total_seconds()
-    except Exception:
-        return str(iso)[:10]
-    if sx < 60: return "방금"
-    if sx < 3600: return f"{int(sx//60)}분 전"
-    if sx < 86400: return f"{int(sx//3600)}시간 전"
-    if sx < 604800: return f"{int(sx//86400)}일 전"
-    return str(iso)[:10]
 
-def _stat(v, k, acc=False):
-    return f'<div class="stat"><div class="v {"acc" if acc else ""}">{v}</div><div class="k">{k}</div></div>'
 
-def _dots(g, t):
-    cs = [p.get("color") or "#555" for p in g["players"] if p.get("team") == t][:4]
-    return '<span class="dots">' + "".join(f'<i style="background:{esc(c)}"></i>' for c in cs) + '</span>'
 
-def _restag(g):
-    w = g.get("won")
-    if w is True:  return f'<span class="res w">{_IC_TROPHY}승리</span>'
-    if w is False: return '<span class="res l">패배</span>'
-    return '<span class="res n">기록됨</span>'
 
-def _tags(g):
-    n = g.get("np") or 0
-    mu = f'<span class="tag">{esc(g["matchup"])}</span>' if g.get("matchup") else ""
-    return f'<span class="tag acc">{n//2}v{n//2}</span>{mu}'
 
-def _thumb_attr(g):
-    if g.get("thumb_url"):
-        return f' style="background:#000 center/cover no-repeat url(&quot;{esc(g["thumb_url"])}&quot;)"', ""
-    return "", f'<div class="wm">{esc(g["map"])}</div>'
 
-def _card(g, idx=0):
-    st, wm = _thumb_attr(g)
-    who = esc(g.get("me") or g.get("uploader") or "?")
-    return (f'<div class="card" data-map="{esc(g["map"])}" data-href="{esc(g["match_url"])}" data-up="{esc(g["uploaded"])}" data-likes="{g["likes"]}" data-views="{g["views"]}" data-np="{g["np"]}">'
-            f'<div class="thumb"{st}>{wm}{_restag(g)}'
-            f'<button class="bm">{_IC_BOOKMARK}</button>'
-            f'<span class="dur">{_IC_CLOCK}{esc(g["length"])}</span>'
-            f'<div class="play"><span>{_IC_PLAY}</span></div></div>'
-            f'<div class="cbody"><div class="cmap">{esc(g["map"])}</div><div class="ctags">{_tags(g)}</div>'
-            f'<div class="teams">{_dots(g,1)}<span class="vs">vs</span>{_dots(g,2)}</div>'
-            f'<div class="cfoot"><span class="up">{who}</span><span class="sp"></span>'
-            f'<span class="m">{_IC_HEART}{g.get("likes",0)}</span><span class="m">{_IC_EYE}{g.get("views",0)}</span>'
-            f'<span>{esc(_ago(g.get("uploaded")))}</span></div></div></div>')
 
-def _feat(g):
-    st, wm = _thumb_attr(g)
-    n = g.get("np") or 0
-    who = esc(g.get("me") or g.get("uploader") or "?")
-    return (f'<div class="feat" data-href="{esc(g["match_url"])}">'
-            f'<div class="ft"{st}>{wm}'
-            f'<button class="bm">{_IC_BOOKMARK}</button>'
-            f'<span class="dur">{_IC_CLOCK}{esc(g["length"])}</span><div class="play">{_IC_PLAY}</div></div>'
-            f'<div class="fb"><div class="eb"><span class="dd"></span>방금 올라온 경기</div><h2>{esc(g["map"])}</h2>'
-            f'<div class="ctags">{_tags(g)}<span class="tag">{n}인전</span></div>'
-            f'<div class="teams">{_dots(g,1)}<span class="vs">vs</span>{_dots(g,2)}</div>'
-            f'<div class="cfoot" style="margin-top:2px"><span class="up">{who}</span><span class="sp"></span>'
-            f'<span class="m">{_IC_HEART}{g.get("likes",0)}</span><span class="m">{_IC_EYE}{g.get("views",0)}</span></div></div></div>')
 
-def _archive_head():
-    return ('<div class="head"><div class="eb">Brood War Archive</div>'
-            '<h1>경기 아카이브</h1>'
-            '<p class="desc">PC방 불빛 아래 밤을 지새우던 스무 살. 크루와 함께 <b>그때 그 명경기를 영상으로</b> 다시 만납니다.<br>다시 보고 싶은 명경기를 골라보세요.</p></div>')
 
-def _toolbar(stats_html):
-    tools = (f'<div class="tools"><button class="ctrl" id="sortBtn"><span class="lbl">정렬</span><span id="sortLbl">최신순</span>{_IC_CHEV}</button>'
-             f'<button class="ctrl" id="filterBtn">{_IC_FILTER}<span id="filterLbl">필터</span></button></div>')
-    return f'<div class="toolbar"><div class="stats">{stats_html}</div>{tools}</div>'
 
 def _player_hero(name, av, games, wr, avg, rc):
     return (f'<section class="phero"><a class="pback" href="/">‹ 아카이브</a>'
@@ -1313,914 +1218,32 @@ def _player_hero(name, av, games, wr, avg, rc):
             f'<div class="pstats">{_stat(games,"경기")}{_stat(wr,"승률",True)}{_stat(avg,"평균 APM")}'
             f'<div class="stat"><div class="v" style="font-size:15px;font-weight:600">{esc(rc)}</div><div class="k">종족</div></div></div></section>')
 
-PAGE = r"""<!doctype html><html lang="ko"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ENCORE — Brood War Archive</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='3.5' y='13' width='3.4' height='8' rx='1.1' fill='%233D8BFF'/%3E%3Crect x='9' y='8' width='3.4' height='13' rx='1.1' fill='%233D8BFF'/%3E%3Crect x='14.5' y='4' width='3.4' height='17' rx='1.1' fill='%2362A1FF'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/sun-typeface/SUIT@2/fonts/variable/woff2/SUIT-Variable.css">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/sun-typeface/SUITE@2/fonts/variable/woff2/SUITE-Variable.css">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-<style>
-:root{
- --bg:#0C0D10;--surface:#131519;--surface2:#181B21;--hover:#1D2128;--well:#0E0F13;
- --ink:#ECEEF2;--ink2:#C5C9D0;--dim:#9AA0AA;--faint:#636872;
- --line:#1F232B;--line2:#2C313B;
- --acc:#3D8BFF;--acc-ink:#62A1FF;--acc-soft:rgba(61,139,255,.12);--acc-line:rgba(61,139,255,.34);
- --win:#3D8BFF;--loss:#E8694C;--gold:#E0B441;--blue:#5BA3E0;--violet:#C07BE0;
- --h-battle:#F0703C;--h-tech:#3D8BFF;--h-expand:#C07BE0;
- --r-ran:#5BA3E0;--r-zerg:#C07BE0;--r-toss:#E0B441;
- --fd:'SUIT Variable','Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif;
- --fh:'SUITE Variable','SUIT Variable',sans-serif;
- --fm:'IBM Plex Mono',ui-monospace,monospace;
- --r1:10px;--r2:14px;--r3:18px;--sh:0 16px 40px -20px rgba(0,0,0,.72);
-}
-*{box-sizing:border-box}html,body{margin:0}
-body{background:var(--bg);color:var(--ink);font-family:var(--fd);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased;letter-spacing:.005em}
-a{color:inherit;text-decoration:none}svg{display:block}
-.ic{width:1em;height:1em;flex-shrink:0}
-::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:var(--line2);border-radius:6px;border:3px solid var(--bg)}
-.wrap{max-width:1180px;margin:0 auto;padding:0 28px 120px}
-
-.bar{position:sticky;top:0;z-index:50;background:var(--bg);border-bottom:1px solid var(--line)}.bar.scrolled{box-shadow:0 6px 22px rgba(0,0,0,.4)}
-.bar.scrolled{border-color:var(--line)}
-.bar-in{max-width:1180px;margin:0 auto;padding:14px 28px;display:flex;align-items:center;gap:18px}
-.brand{display:flex;align-items:center;gap:10px}
-.brand .gem{width:19px;height:19px;border-radius:6px;background:linear-gradient(140deg,#62A1FF,#2563c9);box-shadow:0 0 0 1px rgba(255,255,255,.06) inset,0 4px 12px -3px rgba(61,139,255,.5);position:relative}
-.brand .gem::after{content:"";position:absolute;inset:4px;border-radius:3px;background:linear-gradient(140deg,rgba(255,255,255,.25),transparent)}
-.brand .lgmk{width:20px;height:20px;color:var(--ink)}
-.brand b{font-family:var(--fh);font-weight:800;font-size:17px;letter-spacing:.2em}
-.nav{display:flex;gap:2px;margin-left:16px}
-.nav a{font-family:var(--fd);font-weight:600;font-size:14px;color:var(--dim);padding:8px 14px;border-radius:var(--r1);transition:.15s}
-.nav a.on{color:var(--ink);background:var(--surface)}.nav a:hover{color:var(--ink)}
-.bar .sp{flex:1}
-.search{display:flex;align-items:center;gap:9px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r1);padding:9px 14px;width:248px;transition:.15s}
-.search:focus-within{border-color:var(--acc-line);box-shadow:0 0 0 3px var(--acc-soft)}
-.search .ic{width:15px;height:15px;color:var(--faint)}
-.search input{background:none;border:0;outline:0;color:var(--ink);font-family:var(--fd);font-size:14px;width:100%}
-.search input::placeholder{color:var(--faint)}
-.live{display:inline-flex;align-items:center;gap:8px;font-family:var(--fm);font-size:12px;color:var(--dim);background:var(--surface);border:1px solid var(--line);padding:9px 13px;border-radius:100px}
-.live .d{width:6px;height:6px;border-radius:50%;background:var(--acc);box-shadow:0 0 0 3px var(--acc-soft)}
-
-.head{padding:44px 0 30px}
-.head .eb{font-family:var(--fm);font-size:11px;letter-spacing:.26em;color:var(--acc);text-transform:uppercase;margin-bottom:16px}
-.head h1{font-family:var(--fh);font-weight:800;font-size:clamp(34px,5vw,52px);margin:0;letter-spacing:-.025em;color:#F7F4EE;line-height:1}
-.head .desc{font-family:var(--fd);font-size:16px;line-height:1.62;color:var(--ink2);margin:18px 0 0;max-width:600px}
-.head .desc b{color:var(--ink);font-weight:600}
-
-.toolbar{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:24px;padding-bottom:20px;border-bottom:1px solid var(--line)}
-.stats{display:flex;gap:0}
-.stat{padding:0 20px;border-left:1px solid var(--line)}
-.stat:first-child{padding-left:0;border-left:0}
-.stat .v{font-family:var(--fh);font-weight:800;font-size:21px;line-height:1;font-variant-numeric:tabular-nums}
-.stat .v.acc{color:var(--acc-ink)}.stat .v small{font-size:12px;color:var(--dim);font-weight:600;margin-left:1px}
-.stat .k{font-family:var(--fm);font-size:10px;letter-spacing:.09em;color:var(--faint);text-transform:uppercase;margin-top:7px}
-.tools{display:flex;align-items:center;gap:9px}
-.ctrl{display:inline-flex;align-items:center;gap:9px;font-family:var(--fd);font-weight:600;font-size:13.5px;color:var(--ink2);background:var(--surface);border:1px solid var(--line);padding:10px 14px;border-radius:var(--r1);cursor:pointer;transition:.15s}
-.ctrl:hover{border-color:var(--line2);color:var(--ink);background:var(--hover)}
-.ctrl .lbl{color:var(--faint);font-weight:500}
-.ctrl .ic{width:15px;height:15px;color:var(--dim)}
-.ctrl .cv{width:14px;height:14px;color:var(--faint)}
-
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(286px,1fr));gap:20px}
-
-.feat{grid-column:1/-1;display:grid;grid-template-columns:1.6fr 1fr;background:var(--surface);border:1px solid var(--line);border-radius:var(--r3);overflow:hidden;margin-bottom:4px;cursor:pointer;transition:.17s}
-.feat:hover{border-color:var(--line2)}
-.feat .ft{position:relative;aspect-ratio:16/9;background:radial-gradient(120% 100% at 50% 0,#1a201b,#0a0b08)}
-.feat .ft .wm{position:absolute;inset:0;display:grid;place-items:center;font-family:var(--fh);font-weight:800;font-size:34px;color:rgba(241,238,231,.07);text-align:center;padding:0 24px;letter-spacing:-.01em}
-.feat .ft .play{position:absolute;left:26px;bottom:26px;width:56px;height:56px;border-radius:50%;display:grid;place-items:center;background:rgba(70,190,136,.13);border:1px solid var(--acc-line);transition:.2s}
-.feat:hover .ft .play{background:rgba(70,190,136,.22);transform:scale(1.05)}
-.feat .ft .play .ic{width:22px;height:22px;color:var(--acc);margin-left:3px}
-.dur{position:absolute;right:14px;bottom:14px;display:inline-flex;align-items:center;gap:6px;font-family:var(--fm);font-size:11.5px;color:var(--ink);background:rgba(6,6,4,.76);padding:5px 9px;border-radius:7px;backdrop-filter:blur(4px);font-variant-numeric:tabular-nums}
-.dur .ic{width:12px;height:12px;color:var(--dim)}
-.bm{position:absolute;right:12px;top:12px;width:32px;height:32px;border-radius:50%;display:grid;place-items:center;background:rgba(6,6,4,.6);border:1px solid rgba(255,255,255,.08);backdrop-filter:blur(4px);transition:.15s;z-index:3}
-.bm .ic{width:15px;height:15px;color:var(--ink2)}
-.bm:hover{background:rgba(6,6,4,.85)}.bm:hover .ic{color:var(--acc)}
-.bm.on{background:var(--acc-soft);border-color:var(--acc-line)}.bm.on .ic{color:var(--acc);fill:var(--acc)}
-.feat .fb{padding:32px 34px;display:flex;flex-direction:column;justify-content:center;gap:16px}
-.feat .fb .eb{font-family:var(--fm);font-size:11px;letter-spacing:.2em;color:var(--acc);text-transform:uppercase;display:flex;align-items:center;gap:8px}
-.feat .fb .eb .dd{width:6px;height:6px;border-radius:50%;background:var(--acc);box-shadow:0 0 0 3px var(--acc-soft)}
-.feat .fb h2{font-family:var(--fh);font-weight:800;font-size:31px;margin:0;line-height:1.05;letter-spacing:-.02em}
-
-.card{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:var(--r2);overflow:hidden;cursor:pointer;transition:.16s;display:flex;flex-direction:column}
-.card:hover{border-color:var(--line2);transform:translateY(-4px);box-shadow:var(--sh)}
-.thumb{position:relative;aspect-ratio:16/9;background:radial-gradient(120% 100% at 50% 0,#191e1a,#0b0c09);overflow:hidden}
-.thumb .wm{position:absolute;inset:0;display:grid;place-items:center;font-family:var(--fh);font-weight:800;font-size:clamp(20px,2.4vw,27px);color:rgba(241,238,231,.07);text-align:center;padding:0 16px;letter-spacing:-.01em}
-.thumb .play{position:absolute;inset:0;display:grid;place-items:center;opacity:0;transition:.2s}
-.card:hover .thumb .play{opacity:1}
-.thumb .play span{width:50px;height:50px;border-radius:50%;background:rgba(70,190,136,.18);border:1px solid var(--acc-line);display:grid;place-items:center;backdrop-filter:blur(3px)}
-.thumb .play .ic{width:20px;height:20px;color:var(--acc);margin-left:2px}
-.res{position:absolute;left:12px;top:12px;display:inline-flex;align-items:center;gap:5px;font-family:var(--fm);font-size:10px;font-weight:600;letter-spacing:.04em;padding:5px 9px;border-radius:7px;backdrop-filter:blur(4px)}
-.res .ic{width:11px;height:11px}
-.res.w{color:var(--acc-ink);background:rgba(70,190,136,.16);border:1px solid var(--acc-line)}
-.res.n{color:var(--ink2);background:rgba(6,6,4,.66);border:1px solid rgba(255,255,255,.07)}
-.cbody{padding:15px 16px 16px;display:flex;flex-direction:column;gap:12px;flex:1}
-.cmap{font-family:var(--fh);font-weight:800;font-size:18px;line-height:1.18;letter-spacing:-.012em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ctags{display:flex;gap:6px;flex-wrap:wrap}
-.tag{font-family:var(--fm);font-size:11px;color:var(--dim);background:var(--well);border:1px solid var(--line);padding:4px 9px;border-radius:6px;font-variant-numeric:tabular-nums}
-.tag.acc{color:var(--acc-ink);background:var(--acc-soft);border-color:var(--acc-line)}
-.teams{display:flex;align-items:center;gap:8px}
-.dots{display:flex;gap:4px}
-.dots i{width:10px;height:10px;border-radius:50%;display:inline-block;box-shadow:0 0 0 1.5px var(--surface)}
-.vs{font-family:var(--fm);font-size:10.5px;color:var(--faint)}
-.cfoot{display:flex;align-items:center;gap:12px;margin-top:auto;padding-top:6px;font-family:var(--fm);font-size:11.5px;color:var(--faint);font-variant-numeric:tabular-nums}
-.cfoot .up{color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.cfoot .sp{flex:1}
-.cfoot .m{display:inline-flex;align-items:center;gap:4px}.cfoot .m .ic{width:12px;height:12px}
-
-@media(max-width:760px){.feat{grid-template-columns:1fr}.stats{display:none}.search,.nav{display:none}.toolbar{flex-direction:column;align-items:stretch}}
-.ftr{margin-top:72px;padding-top:30px;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:30px;flex-wrap:wrap}.ftr-brand{display:flex;align-items:center;gap:9px;margin-bottom:13px}.ftr-brand .lgmk{width:18px;height:18px;color:var(--ink)}.ftr-brand b{font-family:var(--fh);font-weight:800;font-size:15px;letter-spacing:.18em}.ftr-l p{margin:5px 0;font-size:13px;line-height:1.6;color:var(--dim)}.ftr-by{font-family:var(--fd);font-size:13px;color:var(--dim);margin-top:13px!important}.ftr-by b{color:var(--ink2);font-weight:700}.ftr-by .hdl{font-family:var(--fm);font-size:12px;color:var(--faint)}.ftr-links{display:flex;flex-direction:column;gap:10px;font-size:13.5px}.ftr-links a{color:var(--dim);transition:.15s}.ftr-links a:hover{color:var(--ink)}.res.l{color:var(--loss);background:rgba(232,105,76,.15);border:1px solid color-mix(in srgb,var(--loss) 40%,transparent)}.empty{grid-column:1/-1;display:grid;place-items:center;padding:72px 20px}.ebox{max-width:430px;text-align:center}.ebox h2{font-family:var(--fh);font-weight:800;font-size:22px;margin:0 0 10px;color:var(--ink2)}.ebox p{color:var(--dim);font-size:14.5px;line-height:1.7;margin:0}.ebox b{color:var(--ink)}.phero{background:var(--surface);border:1px solid var(--line);border-radius:var(--r3);padding:26px 30px;margin:30px 0 26px}.pback{display:inline-flex;font-family:var(--fm);font-size:12px;color:var(--dim);margin-bottom:18px}.pback:hover{color:var(--ink)}.prow{display:flex;align-items:center;gap:18px;margin-bottom:22px}.phav{width:60px;height:60px;border-radius:16px;background:var(--acc-soft);border:1px solid var(--acc-line);display:grid;place-items:center;font-family:var(--fh);font-weight:800;font-size:26px;color:var(--acc-ink)}.pey{font-family:var(--fm);font-size:11px;letter-spacing:.22em;color:var(--acc);text-transform:uppercase;margin-bottom:6px}.pname{font-family:var(--fh);font-weight:800;font-size:clamp(26px,4vw,34px);margin:0;letter-spacing:-.02em}.pstats{display:flex;gap:0;flex-wrap:wrap}.pstats .stat{padding:0 22px;border-left:1px solid var(--line)}.pstats .stat:first-child{padding-left:0;border-left:0}.pager{grid-column:1/-1;display:flex;justify-content:center;align-items:center;gap:14px;margin-top:12px}.pgl{font-family:var(--fm);font-size:12px;color:var(--acc-ink);border:1px solid var(--acc-line);padding:8px 15px;border-radius:8px}.pgl.off{color:var(--faint);border-color:var(--line)}.pgn{font-family:var(--fm);font-size:12px;color:var(--faint)}</style></head><body>
-<div class="bar" id="bar"><div class="bar-in">
- <div class="brand"><svg class="lgmk" viewBox="0 0 32 32" fill="currentColor"><rect x="3.5" y="20" width="6" height="8" rx="1.6"/><rect x="13" y="12.5" width="6" height="15.5" rx="1.6"/><rect x="22.5" y="5" width="6" height="23" rx="1.6"/></svg><b>ENCORE</b></div>
- <nav class="nav"><a class="on" href="/">아카이브</a><a href="/about">만든이</a><a href="/manual">매뉴얼</a><a href="/download">다운로드</a></nav>
- <span class="sp"></span>
- <div class="search"><span class="ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg></span><input id="q" placeholder="맵 · 아이디 검색"></div>
- <span class="live"><span class="d"></span>클라우드 연결됨</span>
-</div></div>
-<div class="wrap">
-<main id="view" data-page="archive">
-__TOP__
- <div class="grid">__CARDS__</div>
-</main>
- <footer class="ftr"><div class="ftr-l"><div class="ftr-brand"><svg class="lgmk" viewBox="0 0 32 32" fill="currentColor"><rect x="3.5" y="20" width="6" height="8" rx="1.6"/><rect x="13" y="12.5" width="6" height="15.5" rx="1.6"/><rect x="22.5" y="5" width="6" height="23" rx="1.6"/></svg><b>ENCORE</b></div><p>스무 살의 우리에게 — 다시, 브루드워.</p><p class="ftr-by">만든이 <b>최성호</b> · <span class="hdl">veatbox</span></p></div></footer>
-</div>
-<script>
-addEventListener('scroll',()=>document.getElementById('bar').classList.toggle('scrolled',scrollY>8));
-document.querySelectorAll('.card,.feat').forEach(el=>{el.addEventListener('click',e=>{const bm=e.target.closest('.bm');if(bm){bm.classList.toggle('on');return;}const h=el.dataset.href;if(h)location.href=h;});});
-const q=document.getElementById('q');
-(function(){
-  var grid=document.querySelector('.grid');if(!grid)return;
-  var SORTS=['최신순','오래된순','인기순','조회순'],FILTERS=[['전체',0],['2v2',4],['3v3',6],['4v4',8]],si=0,fi=0;
-  var cards=[].slice.call(grid.querySelectorAll('.card')),feat=grid.querySelector('.feat');
-  function apply(){
-    var fnp=FILTERS[fi][1],s=SORTS[si],qt=q?q.value.trim().toLowerCase():'';
-    cards.slice().sort(function(a,b){
-      if(s==='오래된순')return (a.dataset.up||'').localeCompare(b.dataset.up||'');
-      if(s==='인기순')return (+b.dataset.likes||0)-(+a.dataset.likes||0)||(b.dataset.up||'').localeCompare(a.dataset.up||'');
-      if(s==='조회순')return (+b.dataset.views||0)-(+a.dataset.views||0)||(b.dataset.up||'').localeCompare(a.dataset.up||'');
-      return (b.dataset.up||'').localeCompare(a.dataset.up||'');
-    }).forEach(function(c){
-      var ok=(!fnp||(+c.dataset.np)===fnp)&&(!qt||(c.dataset.map||'').toLowerCase().indexOf(qt)>=0);
-      c.style.display=ok?'':'none';grid.appendChild(c);
-    });
-    if(feat)feat.style.display=(si===0&&fi===0&&!qt)?'':'none';
-    var sl=document.getElementById('sortLbl');if(sl)sl.textContent=s;
-    var fl=document.getElementById('filterLbl');if(fl)fl.textContent=FILTERS[fi][0]==='전체'?'필터':FILTERS[fi][0];
-  }
-  var sb=document.getElementById('sortBtn');if(sb)sb.addEventListener('click',function(){si=(si+1)%SORTS.length;apply();});
-  var fb=document.getElementById('filterBtn');if(fb)fb.addEventListener('click',function(){fi=(fi+1)%FILTERS.length;apply();});
-  if(q)q.addEventListener('input',apply);
-})();
-</script></body></html>"""
 
 PAGE_SIZE = 24
 
-@app.get("/")
-def gallery():
-    pg = max(1, int(request.args.get("page", 1) or 1))
-    total = count_matches()
-    rows = get_matches(PAGE_SIZE, (pg - 1) * PAGE_SIZE)
-    games = [_game_view(r) for r in rows]
-    cc = comment_counts([g["id"] for g in games])
-    for g in games: g["comments"] = cc.get(g["id"], 0)
-    n, tsec, wr = stats_global()
-    stats = (_stat(n, "경기") + _stat(f"{tsec//3600}h {(tsec%3600)//60}m", "기록") + _stat(wr, "승률", True))
-    top = _archive_head() + _toolbar(stats)
-    if games:
-        feat = _feat(games[0]) if pg == 1 else ""
-        rest = games[1:] if pg == 1 else games
-        cards = feat + "".join(_card(g, i) for i, g in enumerate(rest))
-        pages = (total + PAGE_SIZE - 1) // PAGE_SIZE
-        if pages > 1:
-            prev = f'<a class="pgl" href="/?page={pg-1}">‹ 이전</a>' if pg > 1 else '<span class="pgl off">‹ 이전</span>'
-            nxt = f'<a class="pgl" href="/?page={pg+1}">다음 ›</a>' if pg < pages else '<span class="pgl off">다음 ›</span>'
-            cards += f'<div class="pager">{prev}<span class="pgn">{pg} / {pages}</span>{nxt}</div>'
-    else:
-        cards = ('<div class="empty"><div class="ebox"><h2>대기 중</h2>'
-                 '<p>이 창은 켜둔 채로 <b>스타크래프트를 실행</b>해 보세요.<br>'
-                 '게임이 끝날 때마다 여기에 자동으로 등록됩니다.</p></div></div>')
-    page = PAGE.replace("__TOP__", top).replace("__CARDS__", cards)
-    return Response(page, mimetype="text/html")
-
-MATCH_TEMPLATE = r"""<!doctype html><html lang="ko"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>__TITLE__ · ENCORE</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='3.5' y='13' width='3.4' height='8' rx='1.1' fill='%233D8BFF'/%3E%3Crect x='9' y='8' width='3.4' height='13' rx='1.1' fill='%233D8BFF'/%3E%3Crect x='14.5' y='4' width='3.4' height='17' rx='1.1' fill='%2362A1FF'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/sun-typeface/SUIT@2/fonts/variable/woff2/SUIT-Variable.css">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/sun-typeface/SUITE@2/fonts/variable/woff2/SUITE-Variable.css">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-<style>
-:root{
- --bg:#0C0D10;--surface:#131519;--surface2:#181B21;--hover:#1D2128;--well:#0E0F13;
- --ink:#ECEEF2;--ink2:#C5C9D0;--dim:#9AA0AA;--faint:#636872;
- --line:#1F232B;--line2:#2C313B;
- --acc:#3D8BFF;--acc-ink:#62A1FF;--acc-soft:rgba(61,139,255,.12);--acc-line:rgba(61,139,255,.34);
- --win:#3D8BFF;--loss:#E8694C;--gold:#E0B441;--blue:#5BA3E0;--violet:#C07BE0;
- --h-battle:#F0703C;--h-tech:#3D8BFF;--h-expand:#C07BE0;
- --r-ran:#5BA3E0;--r-zerg:#C07BE0;--r-toss:#E0B441;
- --fd:'SUIT Variable','Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif;
- --fh:'SUITE Variable','SUIT Variable',sans-serif;
- --fm:'IBM Plex Mono',ui-monospace,monospace;
- --r1:9px;--r2:13px;--r3:17px;
- --sh:0 12px 32px -18px rgba(0,0,0,.7);
-}
-*{box-sizing:border-box}
-html,body{margin:0}
-body{background:var(--bg);color:var(--ink);font-family:var(--fd);font-size:15px;line-height:1.55;
- -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;font-feature-settings:"ss01","cv01";letter-spacing:.005em}
-a{color:inherit;text-decoration:none}
-svg{display:block}
-.mono{font-family:var(--fm);font-variant-numeric:tabular-nums}
-::selection{background:var(--acc-soft)}
-::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:var(--line2);border-radius:6px;border:3px solid var(--bg)}::-webkit-scrollbar-track{background:transparent}
-.ic{width:1em;height:1em;flex-shrink:0}
-
-.wrap{max-width:1180px;margin:0 auto;padding:0 28px 110px}
-
-/* ── top bar ── */
-.bar{position:sticky;top:0;z-index:50;background:var(--bg);border-bottom:1px solid var(--line)}.bar.scrolled{box-shadow:0 6px 22px rgba(0,0,0,.4)}
-.bar.scrolled{border-color:var(--line)}
-.bar-in{max-width:1180px;margin:0 auto;padding:14px 28px;display:flex;align-items:center;gap:16px}
-.brand{display:flex;align-items:center;gap:10px}
-.brand .gem{width:18px;height:18px;border-radius:6px;background:linear-gradient(140deg,#62A1FF,#2563c9);
- box-shadow:0 0 0 1px rgba(255,255,255,.06) inset,0 4px 12px -3px rgba(61,139,255,.5);position:relative}
-.brand .gem::after{content:"";position:absolute;inset:4px;border-radius:3px;background:linear-gradient(140deg,rgba(255,255,255,.25),transparent)}
-.brand .lgmk{width:20px;height:20px;color:var(--ink)}
-.brand b{font-family:var(--fh);font-weight:800;font-size:16px;letter-spacing:.2em}
-.crumb{display:flex;align-items:center;gap:9px;font-family:var(--fm);font-size:12px;color:var(--faint)}
-.crumb a{color:var(--dim);transition:color .15s}.crumb a:hover{color:var(--ink)}
-.crumb .sep{opacity:.5}
-.bar .sp{flex:1}
-.live{display:inline-flex;align-items:center;gap:8px;font-family:var(--fm);font-size:12px;color:var(--dim);
- background:var(--surface);border:1px solid var(--line);padding:7px 12px;border-radius:100px}
-.live .d{width:6px;height:6px;border-radius:50%;background:var(--acc);box-shadow:0 0 0 3px var(--acc-soft)}
-.btn{display:inline-flex;align-items:center;gap:8px;font-family:var(--fd);font-weight:600;font-size:13.5px;
- padding:9px 15px;border-radius:var(--r1);cursor:pointer;transition:.15s;border:1px solid transparent;white-space:nowrap}
-.btn .ic{width:16px;height:16px}
-.btn.ghost{background:var(--surface);border-color:var(--line);color:var(--ink2)}
-.btn.ghost:hover{border-color:var(--line2);background:var(--hover);color:var(--ink)}
-.btn:focus-visible{outline:none;box-shadow:0 0 0 3px var(--acc-soft)}
-
-/* ── hero ── */
-.hero{padding:34px 0 24px}
-.eyebrow{font-family:var(--fm);font-weight:500;font-size:11px;letter-spacing:.26em;color:var(--acc);text-transform:uppercase;margin-bottom:15px}
-.title{font-family:var(--fh);font-weight:800;font-size:clamp(30px,4.6vw,44px);line-height:1.03;letter-spacing:-.022em;margin:0;color:#F3F0E9}
-.meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:18px}
-.chip{display:inline-flex;align-items:center;gap:7px;font-family:var(--fd);font-weight:500;font-size:13.5px;
- padding:7px 12px;border-radius:var(--r1);background:var(--surface);border:1px solid var(--line);color:var(--ink2)}
-.chip .ic{width:14px;height:14px;color:var(--faint)}
-.chip.acc{background:var(--acc-soft);border-color:var(--acc-line);color:var(--acc-ink)}
-.chip.win{background:var(--acc-soft);border-color:var(--acc-line);color:var(--acc-ink)}
-.chip.win .ic{color:var(--acc)}
-.chip b{font-family:var(--fm);font-weight:600;font-variant-numeric:tabular-nums;color:var(--ink)}
-
-/* ── video ── */
-.stage{position:relative;aspect-ratio:16/9;max-height:760px;border-radius:var(--r3);overflow:hidden;
- background:#0A0A08;border:1px solid var(--line2);box-shadow:0 40px 90px -52px #000}
-.stage video{width:100%;height:100%;object-fit:contain;background:#000;display:block}
-.vwrap{position:absolute;inset:0}
-.vplay{position:absolute;inset:0;border:0;background:rgba(8,9,11,.30);display:grid;place-items:center;cursor:pointer;transition:.2s;padding:0}
-.vplay:hover{background:rgba(8,9,11,.16)}
-.vplay svg{width:74px;height:74px;color:#fff;background:rgba(61,139,255,.94);border-radius:50%;padding:24px;box-sizing:border-box;box-shadow:0 14px 44px -10px rgba(0,0,0,.7);transition:.2s;margin-left:3px}
-.vplay:hover svg{transform:scale(1.05)}
-.poster{position:absolute;inset:0;display:grid;place-items:center;background:
- radial-gradient(120% 100% at 50% 0,#1a201b 0%,#0c0d0a 70%)}
-.poster .pcol{text-align:center}
-.poster .play{width:72px;height:72px;border-radius:50%;display:grid;place-items:center;margin:0 auto 18px;
- background:rgba(70,190,136,.1);border:1px solid var(--acc-line);transition:.2s}
-.poster .play .ic{width:26px;height:26px;color:var(--acc);margin-left:3px}
-.poster:hover .play{background:rgba(70,190,136,.16);transform:scale(1.04)}
-.poster .pm{font-family:var(--fm);font-size:12px;letter-spacing:.16em;color:var(--faint);text-transform:uppercase}
-.poster .pmap{font-family:var(--fh);font-weight:800;font-size:21px;color:rgba(235,232,224,.32);margin-top:8px}
-
-/* ── section frame ── */
-.sec{padding-top:52px}
-.sechead{display:flex;align-items:center;gap:13px;margin-bottom:20px}
-.sechead h2{font-family:var(--fh);font-weight:800;font-size:20px;letter-spacing:-.015em;margin:0}
-.sechead .meta-r{margin-left:auto;display:flex;align-items:center;gap:16px}
-.sechead .hint{font-family:var(--fm);font-size:11.5px;color:var(--faint)}
-.legend{display:flex;gap:15px;font-family:var(--fm);font-size:11.5px;color:var(--dim)}
-.legend i{display:inline-flex;align-items:center;gap:6px;font-style:normal}
-.legend .ic{width:13px;height:13px}
-
-/* ── highlight timeline ── */
-.tl{position:relative;height:70px;margin:6px 6px 0;user-select:none}
-.tl-rail{position:absolute;left:0;right:0;top:44px;height:4px;background:var(--line2);border-radius:3px;overflow:hidden}
-.tl-fill{position:absolute;left:0;top:0;bottom:0;width:0;background:var(--acc);opacity:.55;border-radius:3px}
-.tl-head{position:absolute;top:37px;width:2px;height:18px;background:var(--ink);border-radius:2px;transform:translateX(-1px);transition:left .08s linear;box-shadow:0 0 6px rgba(235,232,224,.5)}
-.mk{position:absolute;top:30px;transform:translateX(-50%);cursor:pointer;z-index:2;display:flex;flex-direction:column;align-items:center}
-.mk::before{content:"";position:absolute;left:-11px;right:-11px;top:-10px;bottom:-16px}
-.mk .pin{width:11px;height:11px;border-radius:50%;background:var(--bg);border:2px solid currentColor;transition:.15s}
-.mk .stem{width:1.5px;height:11px;background:currentColor;opacity:.4;margin-top:2px}
-.mk:hover{z-index:6}.mk:hover .pin{transform:scale(1.35);background:currentColor}
-.mk .tip{position:absolute;bottom:24px;left:50%;transform:translateX(-50%) translateY(4px);white-space:nowrap;
- background:var(--surface2);border:1px solid var(--line2);border-radius:var(--r1);padding:8px 11px;
- opacity:0;pointer-events:none;transition:.16s;box-shadow:var(--sh)}
-.mk:hover .tip{opacity:1;transform:translateX(-50%) translateY(0)}
-.mk .tip .tt{display:flex;align-items:center;gap:7px}
-.mk .tip .ic{width:13px;height:13px;color:currentColor}
-.mk .tip b{font-family:var(--fm);font-size:12px;color:var(--ink);font-weight:600}
-.mk .tip s{font-family:var(--fd);font-weight:500;font-size:12.5px;text-decoration:none;color:var(--dim);margin-left:18px;display:block;margin-top:2px}
-.tl-times{display:flex;justify-content:space-between;font-family:var(--fm);font-size:11px;color:var(--faint);margin:8px 6px 0}
-.kb{color:var(--h-battle)}.kt{color:var(--h-tech)}.ke{color:var(--h-expand)}
-
-.moments{display:flex;gap:8px;overflow-x:auto;padding:10px 4px 4px;scroll-snap-type:x proximity}
-.moment{flex:0 0 auto;min-width:106px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r2);
- padding:9px 11px 10px;cursor:pointer;transition:.16s;scroll-snap-align:start}
-.moment:hover{border-color:var(--line2);background:var(--hover);transform:translateY(-3px);box-shadow:var(--sh)}
-.moment .top{display:flex;align-items:center;justify-content:space-between}
-.moment .mt{font-family:var(--fm);font-weight:600;font-size:15px;color:var(--ink);letter-spacing:-.02em;font-variant-numeric:tabular-nums}
-.moment .ico{width:18px;height:18px;border-radius:6px;display:grid;place-items:center;background:color-mix(in srgb,currentColor 14%,transparent)}
-.moment .ico .ic{width:11px;height:11px;color:currentColor}
-.moment .mlab{font-family:var(--fd);font-weight:600;font-size:12px;color:var(--ink);margin-top:7px}
-.moment .mwho{font-family:var(--fm);font-size:11px;color:var(--dim);margin-top:4px;display:flex;align-items:center;gap:5px}
-.moment .mwho .ic{width:12px;height:12px;color:var(--faint)}
-.note{font-family:var(--fm);font-size:11.5px;color:var(--faint);margin:12px 6px 0;display:flex;align-items:center;gap:7px}
-.note .ic{width:13px;height:13px}
-
-/* ── analysis ── */
-.seg{display:inline-flex;gap:2px;padding:3px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r1);margin-bottom:22px}
-.seg button{font-family:var(--fd);font-weight:600;font-size:13.5px;color:var(--dim);padding:9px 18px;border:0;background:transparent;border-radius:7px;cursor:pointer;transition:.15s}
-.seg button:hover{color:var(--ink)}
-.seg button.on{background:var(--hover);color:var(--ink);box-shadow:0 0 0 1px var(--line2)}
-
-.split{display:block}.nav{display:flex;gap:2px;margin-left:16px}.nav a{font-family:var(--fd);font-weight:600;font-size:14px;color:var(--dim);padding:8px 14px;border-radius:9px;transition:.15s}.nav a.on{color:var(--ink);background:var(--surface)}.nav a:hover{color:var(--ink)}.ftr{margin-top:64px;padding-top:30px;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:30px;flex-wrap:wrap}.ftr-brand{display:flex;align-items:center;gap:9px;margin-bottom:13px}.ftr-brand .lgmk{width:18px;height:18px;color:var(--ink)}.ftr-brand b{font-family:var(--fh);font-weight:800;font-size:15px;letter-spacing:.18em}.ftr-l p{margin:5px 0;font-size:13px;line-height:1.6;color:var(--dim)}.ftr-by{font-family:var(--fd);font-size:13px;color:var(--dim);margin-top:13px}.ftr-by b{color:var(--ink2);font-weight:700}.ftr-by .hdl{font-family:var(--fm);font-size:12px;color:var(--faint)}.ftr-links{display:flex;flex-direction:column;gap:10px;font-size:13.5px}.ftr-links a{color:var(--dim);transition:.15s}.ftr-links a:hover{color:var(--ink)}
-.rail{display:flex;flex-wrap:wrap;gap:14px;margin-bottom:20px}
-.rteam{flex:1 1 260px;min-width:0;background:var(--well);border:1px solid var(--line);border-radius:var(--r2);padding:13px 15px}
-.rteam .rt{font-family:var(--fm);font-size:11.5px;letter-spacing:.16em;color:var(--faint);margin-bottom:12px;display:flex;align-items:center;gap:8px;text-transform:uppercase}
-.rteam .rt.win{color:var(--acc)} .rteam .rt .w{display:inline-flex;align-items:center;gap:4px;font-size:10px;background:var(--acc-soft);padding:2px 7px;border-radius:5px}
-.rteam .rt .w .ic{width:11px;height:11px}
-.pl{display:flex;flex-wrap:wrap;gap:8px}
-.pchip{display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:var(--r1);cursor:pointer;border:1px solid var(--line);background:var(--surface);transition:.13s;position:relative;flex:1 1 170px;min-width:0}
-.pchip:hover{border-color:var(--line2)}
-.pchip.sel{background:var(--acc-soft);border-color:var(--acc-line)}
-.pchip.sel::before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:2.5px;border-radius:2px;background:var(--acc)}
-.pchip .cc{width:9px;height:9px;border-radius:50%;flex-shrink:0}
-.pchip .rt{font-family:var(--fm);font-weight:700;font-size:10px;width:19px;height:19px;border-radius:6px;display:grid;place-items:center;flex-shrink:0}
-.rt.r-ran{background:color-mix(in srgb,var(--r-ran) 16%,transparent);color:var(--r-ran)}
-.rt.r-zerg{background:color-mix(in srgb,var(--r-zerg) 16%,transparent);color:var(--r-zerg)}
-.rt.r-toss{background:color-mix(in srgb,var(--r-toss) 16%,transparent);color:var(--r-toss)}
-.pchip .pn{font-family:var(--fd);font-weight:600;font-size:15px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink2)}
-.pchip.sel .pn,.pchip:hover .pn{color:var(--ink)}
-.pchip.me .pn{font-weight:700}
-.pchip .meb{font-family:var(--fm);font-size:9px;letter-spacing:.06em;color:var(--acc);background:var(--acc-soft);padding:2px 5px;border-radius:4px;flex-shrink:0}
-.pchip .ap{font-family:var(--fm);font-size:13.5px;color:var(--dim);flex-shrink:0;font-variant-numeric:tabular-nums}
-
-.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r3);overflow:hidden}
-.phead{display:flex;align-items:center;gap:13px;padding:22px 26px}
-.phead .cc{width:24px;height:24px;border-radius:7px;flex-shrink:0;box-shadow:0 0 0 1px rgba(0,0,0,.3) inset}
-.phead .nm{font-family:var(--fh);font-weight:800;font-size:27px;letter-spacing:-.01em}
-.phead .sub{font-family:var(--fm);font-size:12.5px;color:var(--dim);margin-top:2px}
-.phead .prof{margin-left:auto;display:inline-flex;align-items:center;gap:6px;font-family:var(--fd);font-weight:600;font-size:12.5px;color:var(--dim);border:1px solid var(--line);padding:8px 13px;border-radius:var(--r1);transition:.15s}
-.phead .prof:hover{border-color:var(--line2);color:var(--ink)}.phead .prof .ic{width:13px;height:13px}
-.statline{display:flex;flex-wrap:wrap;gap:30px;padding:0 26px 12px}.snote{display:flex;align-items:center;gap:7px;font-family:var(--fm);font-size:11.5px;color:var(--faint);padding:0 26px 20px}.snote .ic{width:14px;height:14px;flex-shrink:0;opacity:.8}
-.stat .v{font-family:var(--fh);font-weight:800;font-size:25px;line-height:1;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
-.stat .v.acc{color:var(--acc-ink)}
-.stat .k{font-family:var(--fm);font-size:11.5px;letter-spacing:.1em;color:var(--faint);text-transform:uppercase;margin-top:8px}
-.cols{display:grid;grid-template-columns:1.08fr 1fr;border-top:1px solid var(--line)}
-.col{padding:22px 26px}.col.l{border-right:1px solid var(--line)}
-.ch{font-family:var(--fm);font-size:12px;letter-spacing:.14em;color:var(--faint);text-transform:uppercase;margin-bottom:15px;display:flex;align-items:center;gap:9px}
-.ch .lg{margin-left:auto;display:flex;gap:11px;letter-spacing:0}
-.ch .lg i{font-style:normal;display:inline-flex;gap:5px;align-items:center;color:var(--dim)}
-.ch .lg .d{width:7px;height:7px;border-radius:50%}
-.bo{max-height:520px;overflow-y:auto;padding-right:6px;margin-right:-6px}
-.brow{display:flex;align-items:center;gap:12px;padding:8px 10px;border-radius:8px;transition:.1s}
-.brow:hover{background:var(--hover)}
-.brow .bt{font-family:var(--fm);font-size:13px;color:var(--faint);width:46px;flex-shrink:0;font-variant-numeric:tabular-nums}
-.brow .bd{width:7px;height:7px;border-radius:50%;flex-shrink:0}
-.brow .bn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15.5px;color:var(--ink)}
-.brow .bc{font-family:var(--fm);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);flex-shrink:0}
-.cd-building{color:var(--blue)}.cd-morph{color:var(--violet)}.cd-upgrade{color:var(--gold)}.cd-tech{color:var(--acc)}
-.units{display:flex;flex-direction:column;gap:12px;margin-bottom:30px}
-.urow{display:flex;align-items:center;gap:12px;font-size:15px}
-.urow .un{width:130px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink2)}
-.ubar{flex:1;height:6px;background:var(--line);border-radius:4px;overflow:hidden}
-.ubar span{display:block;height:100%;background:var(--acc);opacity:.85;border-radius:4px}
-.urow .uc{font-family:var(--fm);font-weight:600;font-size:14px;width:30px;text-align:right;flex-shrink:0;font-variant-numeric:tabular-nums}
-.urow .uf{font-family:var(--fm);font-size:12px;color:var(--faint);width:46px;text-align:right;flex-shrink:0}
-.spark{display:flex;align-items:flex-end;gap:3px;height:68px}
-.spark b{flex:1;background:var(--acc);opacity:.8;border-radius:2px 2px 0 0;min-height:2px;display:block;transition:.2s}
-.spark:hover b{opacity:.45}.spark b:hover{opacity:1}
-.sparkx{display:flex;justify-content:space-between;font-family:var(--fm);font-size:11px;color:var(--faint);margin-top:8px}
-.thl{display:flex;flex-wrap:wrap;gap:7px;margin-top:11px}
-.thl span{font-family:var(--fm);font-size:12px;color:var(--dim);background:var(--well);border:1px solid var(--line);padding:5px 10px;border-radius:7px}.coach{margin-top:30px;border-top:1px solid var(--line);padding-top:24px}.coachh{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.cnote{font-family:var(--fm);font-size:11px;color:var(--faint);font-weight:400;letter-spacing:0}.cfacts{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 18px}.cfacts span{font-family:var(--fm);font-size:13px;color:var(--dim);background:var(--well);border:1px solid var(--line);padding:8px 12px;border-radius:8px}.cfacts b{color:var(--ink);font-weight:600}.ccards{display:grid;gap:11px}.ccard{border:1px solid var(--line);border-radius:12px;padding:14px 16px;background:var(--surface)}.ccard .cct{display:flex;align-items:center;gap:9px;margin-bottom:7px}.ccard .cci{display:inline-flex;color:var(--dim)}.ccard .cci .ic{width:17px;height:17px}.ccard .cct b{font-weight:700;font-size:15.5px;color:var(--ink)}.ccard p{margin:0;font-size:14.5px;line-height:1.7;color:var(--ink2)}.ccard.cg{border-color:var(--acc-line);background:var(--acc-soft)}.ccard.cg .cci{color:var(--acc-ink)}.ccard.cg .cct b{color:var(--acc-ink)}.ccard.cw{border-color:rgba(232,105,76,.42);background:rgba(232,105,76,.09)}.ccard.cw .cci{color:var(--loss)}.ccard.cw .cct b{color:var(--loss)}.cnone{color:var(--faint);font-size:13px;padding:6px 2px}
-
-/* compare */
-.cmp{display:flex;gap:12px;overflow-x:auto;padding-bottom:14px}
-.cmpc{flex:0 0 244px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r2);overflow:hidden;display:flex;flex-direction:column}
-.cmpc.sel{border-color:var(--acc-line)}
-.cmph{display:flex;align-items:center;gap:9px;padding:13px 14px;border-bottom:1px solid var(--line);cursor:pointer;transition:.12s}
-.cmph:hover{background:var(--hover)}
-.cmph .cc{width:9px;height:9px;border-radius:50%;flex-shrink:0}
-.cmph .rt{font-family:var(--fm);font-weight:700;font-size:9px;width:17px;height:17px;border-radius:5px;display:grid;place-items:center;flex-shrink:0}
-.cmph .nm{font-family:var(--fd);font-weight:600;font-size:13.5px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.cmph .w{margin-left:auto;color:var(--acc)}.cmph .w .ic{width:14px;height:14px}
-.cmpb{padding:8px;overflow-y:auto;max-height:540px}
-.cmprow{display:flex;align-items:center;gap:9px;padding:6px 8px;border-radius:7px;font-size:13px}
-.cmprow .bt{font-family:var(--fm);font-size:11px;color:var(--faint);width:38px;flex-shrink:0;font-variant-numeric:tabular-nums}
-.cmprow .bd{width:6px;height:6px;border-radius:50%;flex-shrink:0}
-.cmprow .bn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink2)}
-
-/* community */
-.comm{margin-top:56px;border-top:1px solid var(--line);padding-top:34px}
-.comm-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}
-.comm-h h2{font-family:var(--fh);font-weight:800;font-size:20px;margin:0;letter-spacing:-.015em}
-.like{display:inline-flex;align-items:center;gap:8px;font-family:var(--fm);font-size:13.5px;color:var(--dim);
- background:var(--surface);border:1px solid var(--line);padding:9px 15px;border-radius:100px;cursor:pointer;transition:.15s;font-variant-numeric:tabular-nums}
-.like .ic{width:15px;height:15px;transition:.18s}
-.like:hover{border-color:color-mix(in srgb,var(--loss) 45%,transparent);color:#ee9482}
-.like.on{color:var(--loss);border-color:color-mix(in srgb,var(--loss) 50%,transparent);background:color-mix(in srgb,var(--loss) 9%,transparent)}
-.like.on .ic{transform:scale(1.15);fill:var(--loss)}
-.cform{display:grid;grid-template-columns:170px 1fr auto;gap:10px;margin-bottom:8px}
-.ci,.ct{font-family:var(--fd);font-size:14.5px;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:var(--r1);padding:12px 14px;transition:.15s}
-.ct{font-family:var(--fd)}
-.ci::placeholder,.ct::placeholder{color:var(--faint)}
-.ci:focus,.ct:focus{outline:none;border-color:var(--acc-line);box-shadow:0 0 0 3px var(--acc-soft)}
-.ct{resize:vertical;min-height:46px;line-height:1.5}
-.cs{font-family:var(--fd);font-weight:700;font-size:14px;color:#0c130e;background:var(--acc);border:0;border-radius:var(--r1);padding:0 22px;cursor:pointer;transition:.15s}
-.cs:hover{background:#54cf97}.cs:focus-visible{outline:none;box-shadow:0 0 0 3px var(--acc-soft)}
-.clist{margin-top:14px}
-.crow{display:flex;gap:13px;padding:16px 0;border-top:1px solid var(--line)}
-.cav{width:36px;height:36px;border-radius:10px;flex-shrink:0;display:grid;place-items:center;font-family:var(--fh);font-weight:800;font-size:15px;color:#0c130e}
-.cmeta{display:flex;align-items:center;gap:9px;margin-bottom:5px}
-.cau{font-family:var(--fd);font-weight:700;font-size:14.5px}
-.cpart{font-family:var(--fm);font-size:10.5px;padding:2px 8px;border-radius:5px;display:inline-flex;gap:5px;align-items:center}.cpart .d{width:6px;height:6px;border-radius:50%}
-.ctime{font-family:var(--fm);font-size:11.5px;color:var(--faint)}
-.cbody{font-size:14.5px;color:var(--ink2);line-height:1.65}
-
-@media(max-width:920px){.cols{grid-template-columns:1fr}.col.l{border-right:0;border-bottom:1px solid var(--line)}}
-@media(max-width:560px){.wrap{padding:0 18px 80px}.bar-in{padding:12px 18px}.statline{gap:24px}.cform{grid-template-columns:1fr}}
-</style></head><body>
-
-<div class="bar" id="bar"><div class="bar-in">
- <div class="brand"><svg class="lgmk" viewBox="0 0 32 32" fill="currentColor"><rect x="3.5" y="20" width="6" height="8" rx="1.6"/><rect x="13" y="12.5" width="6" height="15.5" rx="1.6"/><rect x="22.5" y="5" width="6" height="23" rx="1.6"/></svg><b>ENCORE</b></div>
- <nav class="nav"><a class="on" href="/">아카이브</a><a href="/about">만든이</a><a href="/manual">매뉴얼</a><a href="/download">다운로드</a></nav>
- <span class="sp"></span>
- <span id="dlslot"></span>
- <span class="live"><span class="d"></span>클라우드 연결됨</span>
-</div></div>
-
-<div class="wrap">
- <div class="hero">
-  <div class="eyebrow">Match Analysis</div>
-  <h1 class="title" id="map"></h1>
-  <div class="meta" id="meta"></div>
- </div>
-
- <div class="stage" id="stage"></div>
-
- <section class="sec" id="hlsec">
-  <div class="sechead"><h2>하이라이트</h2>
-   <div class="meta-r"><span class="hint">점 또는 카드를 누르면 그 장면으로 이동</span>
-    <span class="legend" id="legend"></span></div></div>
-  <div class="tl" id="tl"></div>
-  <div class="tl-times"><span>0:00</span><span id="tlend"></span></div>
-  <div class="moments" id="moments"></div>
-  <div class="note" id="hlnote"></div>
- </section>
-
- <section class="sec">
-  <div class="seg"><button class="on" data-v="one">선수별 상세</button><button data-v="cmp">전체 빌드 비교</button></div>
-  <div id="oneview"><div class="split"><div class="rail" id="rail"></div><div class="panel" id="panel"></div></div></div>
-  <div id="cmpview" hidden><div class="cmp" id="cmp"></div></div>
- </section>
-
- <section class="comm">
-  <div class="comm-h"><h2>코멘트</h2>
-   <button class="like" id="like"><span class="ic" id="lhic"></span><span id="lc">4</span></button></div>
-  <div class="cform">
-   <input class="ci" id="cau" maxlength="24" placeholder="스타 아이디">
-   <textarea class="ct" id="cb" maxlength="600" rows="2" placeholder="이 경기에 한마디 남겨보세요"></textarea>
-   <button class="cs" id="csend">등록</button></div>
-  <div class="clist" id="clist"></div>
- </section>
-<footer class="ftr"><div class="ftr-l"><div class="ftr-brand"><svg class="lgmk" viewBox="0 0 32 32" fill="currentColor"><rect x="3.5" y="20" width="6" height="8" rx="1.6"/><rect x="13" y="12.5" width="6" height="15.5" rx="1.6"/><rect x="22.5" y="5" width="6" height="23" rx="1.6"/></svg><b>ENCORE</b></div><p>스무 살의 우리에게 — 다시, 브루드워.</p><p class="ftr-by">만든이 <b>최성호</b> · <span class="hdl">veatbox</span></p></div></footer>
-</div>
-
-<script>
-const DATA=__DATA__;const VIDEO=__VIDEO__;const COMMENTS=__COMMENTS__;const MID=__MID__;const LIKES0=__LIKES__;const COACH=__COACH__;
-const I={
- play:'<svg class="ic" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v13.72a1 1 0 0 0 1.52.86l11.43-6.86a1 1 0 0 0 0-1.72L9.52 4.28A1 1 0 0 0 8 5.14Z"/></svg>',
- download:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4.5-4.5M12 15l-4.5-4.5M4 21h16"/></svg>',
- clock:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3.2 1.9"/></svg>',
- swords:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 17.5 21 11V4h-7l-6.5 6.5M14.5 17.5 11 21l-2-2 3.5-3.5M14.5 17.5l-5-5M3 4l6.5 6.5M9.5 10.5 6 14l2 2 3.5-3.5M6 14l-3 3.5L4 21h3l.5-1"/></svg>',
- beaker:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6M10 3v6l-5.2 8.5A2 2 0 0 0 6.5 21h11a2 2 0 0 0 1.7-3.5L14 9V3M7.5 14h9"/></svg>',
- expand:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3m8 0h3a2 2 0 0 0 2-2v-3"/></svg>',
- trophy:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h10v5a5 5 0 0 1-10 0V4ZM7 6H4v1a3 3 0 0 0 3 3M17 6h3v1a3 3 0 0 1-3 3M9 17h6M12 14v3M9 21h6"/></svg>',
- heart:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20.5C6.5 16.5 3 13 3 9.2 3 6.6 5 4.5 7.6 4.5c1.7 0 3.2.9 4.4 2.6 1.2-1.7 2.7-2.6 4.4-2.6C19 4.5 21 6.6 21 9.2c0 3.8-3.5 7.3-9 11.3Z"/></svg>',
- user:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.3 3.1-5.5 7-5.5s7 2.2 7 5.5"/></svg>',
- arrowUR:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M8 7h9v9"/></svg>',
- info:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>'
-};
-const KICON={battle:I.swords,tech:I.beaker,expand:I.expand};
-const KCLASS={battle:'kb',tech:'kt',expand:'ke'};
-const RACE={ran:'테란',zerg:'저그',toss:'프로토스'};
-const RID=r=>({ran:'T',zerg:'Z',toss:'P'}[r]||(r||'?').slice(0,1).toUpperCase());
-const CAT={building:'건물',morph:'변환',upgrade:'업글',tech:'테크'};
-const meta=DATA.meta,players=DATA.players;
-const fmt=s=>Math.floor(s/60)+':'+String(s%60).padStart(2,'0');
-const totalSec=(()=>{const p=(meta.length||'0:0').split(':');return (+p[0])*60+(+p[1]||0)||1;})();
-
-addEventListener('scroll',()=>document.getElementById('bar').classList.toggle('scrolled',scrollY>8));
-document.getElementById('map').textContent=meta.map||'리플레이';
-const np=players.length;
-document.getElementById('meta').innerHTML=
- `<span class="chip acc"><b>${np/2|0}</b> vs <b>${np/2|0}</b></span>`+
- (meta.matchup?`<span class="chip mono">${meta.matchup}</span>`:'')+
- `<span class="chip">${I.clock}<b>${meta.length||''}</b></span>`+
- (meta.winner?`<span class="chip win">${I.trophy}Team ${meta.winner} 승`:'');
-
-if(VIDEO){const isHttp=/^https?:/.test(VIDEO);const sep=VIDEO.indexOf('?')<0?'?':'&';const dlhref=VIDEO+sep+(isHttp?'download':'dl=1');document.getElementById('dlslot').innerHTML=`<a class="btn ghost" href="${dlhref}"${isHttp?'':' download'}>${I.download}영상 다운로드</a>`;}
-
-const stage=document.getElementById('stage');
-let OFF=0;  // 메뉴 오프셋(영상 길이 - 게임 길이) = 영상에서 게임이 시작되는 지점
-stage.innerHTML=VIDEO?`<div class="vwrap"><video id="vid" controls playsinline preload="metadata" src="${VIDEO}"></video><button class="vplay" id="vplay" aria-label="재생"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v13.72a1 1 0 0 0 1.52.86l11.43-6.86a1 1 0 0 0 0-1.72L9.52 4.28A1 1 0 0 0 8 5.14Z"/></svg></button></div>`
- :`<div class="poster"><div class="pcol"><div class="play">${I.play}</div><div class="pm">Recorded Replay</div><div class="pmap">${meta.map||''}</div></div></div>`;
-const vid=document.getElementById('vid');const vplay=document.getElementById('vplay');
-function hideOverlay(){if(vplay)vplay.style.display='none';}
-if(vid){
- vid.addEventListener('loadedmetadata',()=>{if(vid.duration&&isFinite(vid.duration)){OFF=Math.max(0,vid.duration-totalSec);if(OFF>1){try{vid.currentTime=Math.max(0,OFF-6);}catch(e){}}}});
- if(vplay)vplay.addEventListener('click',()=>{vid.play().catch(()=>{});});
- vid.addEventListener('play',hideOverlay);
-}
-const seek=s=>{if(!vid)return;const go=()=>{hideOverlay();try{vid.currentTime=Math.max(0,Math.min((vid.duration||1e9),s+OFF));}catch(e){}vid.play().catch(()=>{});vid.scrollIntoView({behavior:'smooth',block:'center'});};if(vid.readyState>=1){go();}else{vid.addEventListener('loadedmetadata',go,{once:true});}};
-
-// legend
-document.getElementById('legend').innerHTML=
- `<i class="kb">${I.swords}교전</i><i class="kt">${I.beaker}테크</i><i class="ke">${I.expand}확장</i>`;
-document.getElementById('hlnote').innerHTML=I.info+'교전은 전원 분당 활동량(APM) 피크로 추정한 값이라 실제 전투와 다를 수 있어요.';
-
-// timeline + moments
-const HL=DATA.highlights||[];
-document.getElementById('tlend').textContent=meta.length||fmt(totalSec);
-if(HL.length){
- const tl=document.getElementById('tl');
- tl.innerHTML='<div class="tl-rail"><div class="tl-fill" id="tlfill"></div></div><div class="tl-head" id="tlhead" style="left:0"></div>';
- HL.forEach(h=>{const x=Math.max(.5,Math.min(99.5,h.sec/totalSec*100));
-  const m=document.createElement('div');m.className='mk '+KCLASS[h.kind];m.style.left=x+'%';
-  m.innerHTML=`<div class="tip"><div class="tt">${KICON[h.kind]}<b>${h.t||fmt(h.sec)}</b></div><s>${h.label}${h.who?' · '+h.who:''}</s></div><div class="pin"></div><div class="stem"></div>`;
-  m.onclick=()=>seek(h.sec);tl.appendChild(m);});
- document.getElementById('moments').innerHTML=HL.map(h=>
-  `<div class="moment ${KCLASS[h.kind]}" data-s="${h.sec}">
-    <div class="top"><span class="mt">${h.t||fmt(h.sec)}</span><span class="ico">${KICON[h.kind]}</span></div>
-    <div class="mlab">${h.label}</div>
-    <div class="mwho">${h.who?I.user+'<span>'+h.who+'</span>':'<span style="color:var(--faint)">전장 전체</span>'}</div>
-   </div>`).join('');
- document.querySelectorAll('.moment').forEach(el=>el.onclick=()=>seek(+el.dataset.s));
- const upd=()=>{const v=document.getElementById('vid');if(!v||!v.duration)return;const gt=Math.max(0,Math.min(totalSec,v.currentTime-OFF));const p=gt/totalSec*100;
-  document.getElementById('tlfill').style.width=p+'%';document.getElementById('tlhead').style.left=p+'%';};
- const v0=document.getElementById('vid');if(v0)v0.addEventListener('timeupdate',upd);
-}else{document.getElementById('hlsec').style.display='none';}
-
-// rail
-function pchip(p){const me=p.name===meta.saver;
- return `<div class="pchip ${me?'me':''}" data-id="${p.id}"><span class="cc" style="background:${p.color}"></span>
-  <span class="rt r-${p.race}">${RID(p.race)}</span><span class="pn">${p.name||'—'}</span>${me?'<span class="meb">나</span>':''}
-  <span class="ap">${p.apm||0}</span></div>`;}
-const rail=document.getElementById('rail');
-[1,2].forEach(t=>{const tp=players.filter(p=>p.team===t);if(!tp.length)return;const win=meta.winner===t;
- rail.insertAdjacentHTML('beforeend',`<div class="rteam"><div class="rt ${win?'win':''}">TEAM ${t}${win?'<span class="w">'+I.trophy+'WIN</span>':''}</div><div class="pl">${tp.map(pchip).join('')}</div></div>`);});
-
-// detail
-const CIC={gas:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3s5 5.5 5 9a5 5 0 0 1-10 0c0-3.5 5-9 5-9Z"/></svg>',prod:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21V10l6 4v-4l6 4V5h6v16H3Z"/></svg>',up:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V6m0 0-6 6m6-6 6 6"/></svg>',comp:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5"/></svg>',tech:I.beaker,army:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3Z"/></svg>',apm:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2 6 4-14 2 8h6"/></svg>'};
-const TONEC={good:'cg',tip:'ct',warn:'cw'};
-function coachBlock(p){
- const cr=(typeof COACH!=='undefined'?COACH:[]).find(c=>c.id===p.id);if(!cr)return'';
- const t=cr.timings;
- const _up=(t.atk_lv!=null||t.arm_lv!=null)?`공${t.atk_lv||0}·방${t.arm_lv||0}`:`${t.up_n}개`;const _pn=(t.main_prod_n!=null?t.main_prod_n:t.prod);const _pl=t.main_prod_ko||'생산건물';const _sp=(t.supply_bld!=null)?`<span>${t.supply_ko||'서플'} <b>${t.supply_bld}</b></span>`:'';
- const facts=`<div class="cfacts"><span>일꾼 <b>${t.workers}</b></span><span>멀티 <b>${t.tcount}</b></span><span>${_pl} <b>${_pn}</b></span><span>업글 <b>${_up}</b></span>${_sp}<span>총생산 <b>~${t.total_supply||t.army}</b></span></div>`;
- const cards=(cr.points||[]).map(pt=>`<div class="ccard ${TONEC[pt.tone]||'ct'}"><div class="cct"><span class="cci">${CIC[pt.k]||I.info}</span><b>${pt.t}</b></div><p>${pt.x}</p></div>`).join('')||'<div class="cnone">코치 포인트가 없어요 — 깔끔한 한 판!</div>';
- return `<div class="coach"><div class="ch coachh">코치 리포트 <span class="cnote">실제 리플레이 기반 · 빠른무한 기준</span></div>${facts}<div class="ccards">${cards}</div></div>`;
-}
-function detail(p){const s=p.summary;
- const stat=(v,k,acc)=>`<div class="stat"><div class="v ${acc?'acc':''}">${v??'—'}</div><div class="k">${k}</div></div>`;
- const bo=p.build.map(b=>`<div class="brow cd-${b.cat}"><span class="bt">${b.t}</span><span class="bd" style="background:currentColor"></span><span class="bn">${b.name||''}</span><span class="bc">${CAT[b.cat]||''}</span></div>`).join('')||'<div style="color:var(--faint);padding:8px;font-size:14px">기록 없음</div>';
- const mu=Math.max(1,...p.units.map(u=>u.n));
- const un=p.units.slice(0,10).map(u=>`<div class="urow"><span class="un">${u.name}</span><span class="ubar"><span style="width:${u.n/mu*100}%"></span></span><span class="uc">${u.n}</span><span class="uf">${u.first||''}</span></div>`).join('')||'<div style="color:var(--faint);font-size:14px">기록 없음</div>';
- const ma=Math.max(1,...p.apm_series);
- const sp=p.apm_series.map(v=>`<b style="height:${v/ma*100}%" title="${v} apm"></b>`).join('');
- const th=p.townhalls.length?`<div class="thl">${p.townhalls.map(t=>`<span>${t.t} ${t.name.replace('Command Center','CC').replace('Hatchery','해처리').replace('Nexus','넥서스')}</span>`).join('')}</div>`:'';
- const lg=`<span class="lg"><i><span class="d" style="background:var(--blue)"></span>건물</i><i><span class="d" style="background:var(--violet)"></span>변환</i><i><span class="d" style="background:var(--gold)"></span>업글</i><i><span class="d" style="background:var(--acc)"></span>테크</i></span>`;
- return `<div class="phead"><span class="cc" style="background:${p.color}"></span><div><div class="nm">${p.name||'—'}</div><div class="sub">${RACE[p.race]||''} · Team ${p.team}</div></div><a class="prof" href="/player/${encodeURIComponent(p.name||'')}">프로필${I.arrowUR}</a></div>
-  <div class="statline">${stat(RACE[p.race]||'?','종족')}${stat(p.apm||0,'APM',1)}${stat(p.eapm||0,'EAPM')}${stat(s.buildings,'건물')}${stat(s.prod,'생산건물',1)}${stat(s.units,'유닛')}${stat(p.total_supply||'—','총 생산')}${stat(s.supply200||'—','200 도달')}</div><div class="snote">${I.info}<span>총 생산은 누적 생산 보급, 200 도달은 추정 (둘 다 전사 미반영)</span></div>
-  <div class="cols"><div class="col l"><div class="ch">빌드오더${lg}</div><div class="bo">${bo}</div></div>
-   <div class="col"><div class="ch">유닛 구성</div><div class="units">${un}</div>
-    <div class="ch">분당 APM</div><div class="spark">${sp}</div><div class="sparkx"><span>0:00</span><span>${meta.length||''}</span></div>
-    ${th?'<div class="ch" style="margin-top:26px">타운홀 타이밍</div>'+th:''}</div></div>${coachBlock(p)}`;}
-let cur=null;
-function sel(id){cur=id;document.querySelectorAll('.pchip').forEach(c=>c.classList.toggle('sel',+c.dataset.id===id));
- document.querySelectorAll('.cmpc').forEach(c=>c.classList.toggle('sel',+c.dataset.id===id));
- document.getElementById('panel').innerHTML=detail(players.find(x=>x.id===id));}
-document.querySelectorAll('.pchip').forEach(c=>c.onclick=()=>{sel(+c.dataset.id);view('one');});
-
-document.getElementById('cmp').innerHTML=[1,2].map(t=>players.filter(p=>p.team===t).map(p=>{const win=meta.winner===p.team;
- const rows=p.build.map(b=>`<div class="cmprow cd-${b.cat}"><span class="bt">${b.t}</span><span class="bd" style="background:currentColor"></span><span class="bn">${b.name||''}</span></div>`).join('')||'<div style="color:var(--faint);padding:9px">기록 없음</div>';
- return `<div class="cmpc" data-id="${p.id}"><div class="cmph" data-id="${p.id}"><span class="cc" style="background:${p.color}"></span><span class="rt r-${p.race}">${RID(p.race)}</span><span class="nm">${p.name||'—'}</span>${win?'<span class="w">'+I.trophy+'</span>':''}</div><div class="cmpb">${rows}</div></div>`;}).join('')).join('');
-document.querySelectorAll('.cmph').forEach(h=>h.onclick=()=>{sel(+h.dataset.id);view('one');});
-
-function view(v){document.querySelectorAll('.seg button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
- document.getElementById('oneview').hidden=v!=='one';document.getElementById('cmpview').hidden=v!=='cmp';}
-document.querySelectorAll('.seg button').forEach(b=>b.onclick=()=>view(b.dataset.v));
-const meP=players.find(p=>p.name===meta.saver)||players[0];if(meP)sel(meP.id);
-
-// community
-document.getElementById('lhic').innerHTML=I.heart;
-function pcol(n){const p=players.find(x=>x.name===n);return p?p.color:'#322D24';}
-function cesc(t){return(t==null?'':String(t)).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));}
-function rel(iso){const d=new Date(iso),sx=(Date.now()-d)/1000;if(isNaN(sx))return'';
- if(sx<60)return'방금';if(sx<3600)return Math.floor(sx/60)+'분 전';if(sx<86400)return Math.floor(sx/3600)+'시간 전';
- if(sx<604800)return Math.floor(sx/86400)+'일 전';return d.toISOString().slice(0,10);}
-function crow(c){const col=pcol(c.author);const part=players.find(x=>x.name===c.author)?`<span class="cpart" style="color:${col};background:${col}1f"><span class="d" style="background:${col}"></span>참가자</span>`:'';
- return `<div class="crow"><div class="cav" style="background:${col}">${cesc((c.author||'?')[0].toUpperCase())}</div><div><div class="cmeta"><span class="cau">${cesc(c.author)}</span>${part}<span class="ctime">${rel(c.created)}</span></div><div class="cbody">${cesc(c.body)}</div></div></div>`;}
-let comments=COMMENTS||[];const clist=document.getElementById('clist');
-function paintC(){clist.innerHTML=comments.length?comments.map(crow).join(''):'<div style="color:var(--faint);font-size:14px;padding:6px 0">첫 코멘트를 남겨보세요.</div>';}
-paintC();
-let likes=LIKES0||0,liked=false;try{liked=localStorage.getItem('liked_'+MID)==='1';}catch(e){}
-const like=document.getElementById('like'),lc=document.getElementById('lc');
-function paintL(){lc.textContent=likes;like.classList.toggle('on',liked);}
-paintL();
-like.onclick=()=>{liked=!liked;likes+=liked?1:-1;if(likes<0)likes=0;paintL();
- try{localStorage.setItem('liked_'+MID,liked?'1':'0');}catch(e){}
- fetch('/api/match/'+MID+'/like',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({delta:liked?1:-1})}).then(r=>r.json()).then(j=>{if(typeof j.likes==='number'){likes=j.likes;paintL();}}).catch(()=>{});};
-const cau=document.getElementById('cau');try{cau.value=localStorage.getItem('sc_id')||'';}catch(e){}
-document.getElementById('csend').onclick=()=>{const author=cau.value.trim(),body=document.getElementById('cb').value.trim();if(!author||!body)return;
- try{localStorage.setItem('sc_id',author);}catch(e){}
- comments=comments.concat({author,body,created:new Date().toISOString()});paintC();document.getElementById('cb').value='';
- fetch('/api/match/'+MID+'/comments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({author,body})}).then(r=>r.json()).then(j=>{if(j.comment){comments[comments.length-1]=j.comment;paintC();}}).catch(()=>{});};
-</script></body></html>"""
-
-@app.get("/match/<mid>")
-def match_page(mid):
-    r = get_match(mid)
-    if not r: abort(404)
-    a = None
-    if r.get("analysis"):
-        try: a = json.loads(r["analysis"])
-        except Exception: a = None
-    if a is None:
-        repf = os.path.join(UPLOAD_DIR, r["replay"]) if r.get("replay") else None
-        if repf and os.path.isfile(repf) and SCREP:
-            try:
-                a = extract_analysis(repf); set_analysis(mid, json.dumps(a, ensure_ascii=False))
-            except Exception as e:
-                log(f"분석 실패: {e}"); a = None
-    vurl = _media_url(r.get("video")) if r.get("video") else None
-    if a is None:
-        return Response("<body style='font-family:monospace;color:#cfe0f0;background:#0b0e13;padding:48px'>"
-                        "분석 데이터를 만들 수 없어요 (리플레이 또는 screp 없음). "
-                        "<a href='/' style='color:#ff9d3c'>← 돌아가기</a></body>", mimetype="text/html")
-    bump_view(mid)
-    try: a["highlights"] = compute_highlights(a)
-    except Exception: a["highlights"] = []
-    try: coach = coach_report(a)
-    except Exception as e:
-        log("코치 분석 실패: %s" % e); coach = []
-    coach_json = json.dumps(coach, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
-    data = json.dumps(a, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
-    pn = {p.get("name") for p in (r.get("players") or [])}
-    cs = get_comments(mid)
-    for cm in cs: cm["participant"] = cm["author"] in pn
-    page = (MATCH_TEMPLATE.replace("__TITLE__", esc(a["meta"].get("map") or "Match"))
-                          .replace("__BACK__", "/")
-                          .replace("__DATA__", data)
-                          .replace("__VIDEO__", (f'"{vurl}"' if vurl else "null"))
-                          .replace("__MID__", json.dumps(mid))
-                          .replace("__LIKES__", str(r.get("likes") or 0))
-                          .replace("__COMMENTS__", json.dumps(cs, ensure_ascii=False).replace("</", "<\\/"))
-                          .replace("__COACH__", coach_json))
-    return Response(page, mimetype="text/html")
-
-@app.post("/api/match/<mid>/like")
-def api_like(mid):
-    if not get_match(mid): abort(404)
-    try: delta = int((request.get_json(silent=True) or {}).get("delta", 1))
-    except Exception: delta = 1
-    return jsonify(likes=bump_like(mid, 1 if delta >= 0 else -1))
-
-@app.get("/api/match/<mid>/comments")
-def api_comments_get(mid):
-    m = get_match(mid)
-    if not m: abort(404)
-    pn = {p.get("name") for p in (m.get("players") or [])}
-    cs = get_comments(mid)
-    for cm in cs: cm["participant"] = cm["author"] in pn
-    return jsonify(comments=cs)
-
-@app.post("/api/match/<mid>/comments")
-def api_comments_post(mid):
-    m = get_match(mid)
-    if not m: abort(404)
-    j = request.get_json(silent=True) or {}
-    author = (j.get("author") or "").strip()[:24]
-    body = (j.get("body") or "").strip()[:600]
-    if not author or not body: return jsonify(error="이름과 내용을 입력하세요"), 400
-    cm = add_comment(mid, author, body)
-    cm["participant"] = author in {p.get("name") for p in (m.get("players") or [])}
-    return jsonify(comment=cm)
-
-@app.get("/player/<name>")
-def player_page(name):
-    rows = player_games(name)
-    games = [_game_view(r) for r in rows]
-    cc = comment_counts([g["id"] for g in games])
-    wins = rated = tsec = 0; apms = []; races = Counter()
-    for g, r in zip(games, rows):
-        me = next((p for p in r["players"] if p.get("name") == name), None)
-        g["me"] = name; g["comments"] = cc.get(g["id"], 0)
-        if me:
-            if me.get("race"): races[me["race"]] += 1
-            if me.get("apm"): apms.append(me["apm"])
-            if r.get("winner"):
-                rated += 1; won = (me.get("team") == r["winner"]); g["won"] = won; wins += 1 if won else 0
-            else: g["won"] = None
-        tsec += _len_sec(g["length"])
-    wr = f"{round(100*wins/rated)}%" if rated else "—"
-    avg = round(sum(apms)/len(apms)) if apms else 0
-    rc = " · ".join(f"{RACE_KO.get(k,k)} {v}" for k, v in races.most_common()) or "—"
-    av = (name[:1] or "?").upper()
-    cards = "".join(_card(g, i) for i, g in enumerate(games)) or \
-        '<div class="empty"><div class="ebox"><h2>경기 없음</h2><p>이 아이디로 등록된 경기가 아직 없어요.</p></div></div>'
-    top = _player_hero(name, av, len(games), wr, avg, rc)
-    page = PAGE.replace("__TOP__", top).replace("__CARDS__", cards)
-    return Response(page, mimetype="text/html")
-
-@app.post("/api/presign")
-def api_presign():
-    j = request.get_json(silent=True) or request.form or {}
-    if j.get("key") != CFG.get("upload_key", ""): return jsonify(error="bad key"), 401
-    if not r2_enabled(): return jsonify(error="r2 not enabled"), 409
-    gid = datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2)
-    vkey, tkey = f"videos/{gid}.mp4", f"thumbs/{gid}.jpg"
-    return jsonify(gid=gid,
-        video_put=r2_presign_put(vkey, "video/mp4"), video_url=r2_public(vkey),
-        thumb_put=r2_presign_put(tkey, "image/jpeg"), thumb_url=r2_public(tkey))
-
-@app.post("/api/register")
-def api_register():
-    if request.form.get("key") != CFG.get("upload_key", ""): return jsonify(error="bad key"), 401
-    gid = request.form.get("gid") or (datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2))
-    uploader = (request.form.get("uploader") or "").strip() or None
-    video_url = request.form.get("video_url") or ""
-    thumb_url = request.form.get("thumb_url") or None
-    try: size = int(request.form.get("size") or 0)
-    except Exception: size = 0
-    meta = {}; replay_ref = None
-    rf = request.files.get("replay")
-    if rf and rf.filename:
-        base = os.path.join(UPLOAD_DIR, gid); os.makedirs(base, exist_ok=True)
-        rdst = os.path.join(base, "replay.rep"); rf.save(rdst); meta = parse_rep(rdst)
-        replay_ref = f"{gid}/replay.rep"
-    _insert_match(gid, video_url, replay_ref, thumb_url, size, uploader, meta)
-    return jsonify(ok=True)
-
-@app.post("/upload")
-def upload():
-    if request.form.get("key") != CFG.get("upload_key", ""):
-        return jsonify(error="bad key"), 401
-    if "video" not in request.files:
-        return jsonify(error="no video"), 400
-    uploader = (request.form.get("uploader") or "").strip() or None
-    vf = request.files["video"]; rf = request.files.get("replay")
-    tmp = os.path.join(REC_DIR, "incoming"); os.makedirs(tmp, exist_ok=True)
-    vpath = os.path.join(tmp, f"u_{datetime.datetime.now():%Y%m%d%H%M%S%f}.mp4"); vf.save(vpath)
-    rpath = None
-    if rf and rf.filename:
-        rpath = vpath + ".rep"; rf.save(rpath)
-    ingest(vpath, rpath, uploader=uploader)
-    if rpath and os.path.isfile(rpath):
-        try: os.remove(rpath)
-        except OSError: pass
-    return jsonify(ok=True)
-
-@app.get("/media/<path:rel>")
-def media(rel):
-    full = os.path.normpath(os.path.join(UPLOAD_DIR, rel))
-    if not full.startswith(UPLOAD_DIR) or not os.path.isfile(full): abort(404)
-    return send_file(full, as_attachment=(request.args.get("dl") == "1"),
-                     download_name=os.path.basename(full) if request.args.get("dl") == "1" else None)
-
-@app.get("/health")
-def health(): return jsonify(ok=True, screp=bool(SCREP), games=count_matches())
-
-@app.get("/status")
-def api_status():
-    return jsonify(rec=REC_STATE.get("rec", False), text=REC_STATE.get("text", "대기 중"),
-                   game=REC_STATE.get("game"), games=count_matches())
-
-@app.get("/get")
-def page_get():
-    f = os.path.join(WEB_DIR, "download.html")
-    if not os.path.isfile(f):
-        return Response("설치 페이지를 찾을 수 없어요 (web/download.html). <a href='/'>홈으로</a>", mimetype="text/html")
-    return send_file(f)
-
-ABOUT_PAGE = r"""<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>만든이 · ENCORE</title><link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/sun-typeface/SUIT@2/fonts/variable/woff2/SUIT-Variable.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/sun-typeface/SUITE@2/fonts/variable/woff2/SUITE-Variable.css"><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet"><style>:root{--bg:#0C0D10;--surface:#131519;--surface2:#181B21;--well:#0E0F13;--ink:#ECEEF2;--ink2:#C5C9D0;--dim:#9AA0AA;--faint:#636872;--line:#1F232B;--line2:#2C313B;--acc:#3D8BFF;--acc-ink:#62A1FF;--acc-soft:rgba(61,139,255,.12);--acc-line:rgba(61,139,255,.34);--r1:9px;--r2:13px;--r3:17px;--fd:'SUIT Variable','Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif;--fh:'SUITE Variable','SUIT Variable',sans-serif;--fm:'IBM Plex Mono',ui-monospace,monospace}*{box-sizing:border-box}html,body{margin:0}body{background:var(--bg);color:var(--ink);font-family:var(--fd);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased;letter-spacing:.005em}a{color:inherit;text-decoration:none}svg{display:block}::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:var(--line2);border-radius:6px;border:3px solid var(--bg)}.wrap{max-width:1180px;margin:0 auto;padding:0 28px 120px}.bar{position:sticky;top:0;z-index:50;background:var(--bg);border-bottom:1px solid var(--line)}.bar.scrolled{box-shadow:0 6px 22px rgba(0,0,0,.4)}.bar-in{max-width:1180px;margin:0 auto;padding:14px 28px;display:flex;align-items:center;gap:18px}.brand{display:flex;align-items:center;gap:10px}.brand .lgmk{width:20px;height:20px;color:var(--ink)}.brand b{font-family:var(--fh);font-weight:800;font-size:17px;letter-spacing:.2em}.nav{display:flex;gap:2px;margin-left:16px}.nav a{font-family:var(--fd);font-weight:600;font-size:14px;color:var(--dim);padding:8px 14px;border-radius:9px;transition:.15s}.nav a.on{color:var(--ink);background:var(--surface)}.nav a:hover{color:var(--ink)}.bar .sp{flex:1}.live{display:inline-flex;align-items:center;gap:8px;font-family:var(--fm);font-size:12px;color:var(--dim);background:var(--surface);border:1px solid var(--line);padding:9px 13px;border-radius:100px}.live .d{width:6px;height:6px;border-radius:50%;background:var(--acc);box-shadow:0 0 0 3px var(--acc-soft)}.ftr{margin-top:74px;padding-top:30px;border-top:1px solid var(--line)}.ftr-brand{display:flex;align-items:center;gap:9px;margin-bottom:13px}.ftr-brand .lgmk{width:18px;height:18px;color:var(--ink)}.ftr-brand b{font-family:var(--fh);font-weight:800;font-size:15px;letter-spacing:.18em}.ftr p{margin:5px 0;font-size:13px;line-height:1.6;color:var(--dim)}.ftr-by{font-family:var(--fd);font-size:13px;color:var(--dim);margin-top:13px}.ftr-by b{color:var(--ink2);font-weight:700}.ftr-by .hdl{font-family:var(--fm);font-size:12px;color:var(--faint)}@media(max-width:760px){.nav{display:none}.live{display:none}}.ahero{padding:58px 0 6px}.aey{font-family:var(--fm);font-size:11px;letter-spacing:.3em;color:var(--acc);margin-bottom:16px}.atitle{font-family:var(--fh);font-weight:800;font-size:clamp(38px,6vw,62px);letter-spacing:-.03em;margin:0;line-height:1.04;color:#F7F4EE}.alead{font-family:var(--fh);font-weight:700;font-size:clamp(18px,2.4vw,23px);line-height:1.7;color:var(--ink2);margin:24px 0 0;max-width:840px;letter-spacing:-.01em}.scene{margin:50px 0 0;max-width:920px}.snaps{display:flex;gap:22px;justify-content:center;align-items:flex-start;flex-wrap:wrap;max-width:920px;margin:50px auto 0}.snap{flex:0 1 290px;max-width:330px}.snap .scap{justify-content:center;text-align:center}.snap .scap::before{display:none}.scene .pic{position:relative;width:100%;border-radius:4px;border:8px solid #E9E2D0;background:#E9E2D0;box-shadow:0 14px 38px rgba(0,0,0,.55),0 2px 5px rgba(0,0,0,.4);overflow:hidden}.scene .pic img{display:block;width:100%;height:auto;filter:saturate(.86) sepia(.12) contrast(1.06) brightness(.95)}
-.scene .pic>svg{display:block;width:100%;height:auto;filter:saturate(.68) sepia(.27) contrast(1.07) brightness(.93)}
-.scene .pic::before{content:"";position:absolute;inset:0;pointer-events:none;opacity:.42;mix-blend-mode:overlay;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>")}
-.scene .pic::after{content:"";position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse 125% 105% at 50% 42%,rgba(40,26,8,0) 48%,rgba(34,20,6,.55) 100%)}.scap{font-family:var(--fm);font-size:12px;color:var(--faint);margin:13px 0 0;letter-spacing:.02em;display:flex;align-items:center;gap:9px}.scap::before{content:'';width:16px;height:1px;background:var(--line2);flex-shrink:0}.story{max-width:840px;margin:42px 0 0}.story p{font-size:17px;line-height:1.92;color:var(--ink2);margin:0 0 22px}.story .em{font-family:var(--fh);font-weight:700;font-size:clamp(19px,2.6vw,24px);line-height:1.65;color:var(--ink);letter-spacing:-.01em;margin-bottom:26px}.story b{color:var(--acc-ink);font-weight:700}.thanks{max-width:840px;margin:58px 0 0;background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:32px 30px}.tlabel{font-family:var(--fm);font-size:11px;letter-spacing:.28em;color:var(--acc);margin-bottom:16px}.thanks p{font-size:16px;line-height:2;color:var(--ink2);margin:0}.thanks .dim{color:var(--faint);font-size:14.5px}.sign{max-width:840px;margin:36px 0 0;display:flex;align-items:center;gap:15px}.sign .sbar{width:32px;height:32px;color:var(--ink);opacity:.9;flex-shrink:0}.sby{font-family:var(--fd);font-weight:700;font-size:15px;color:var(--ink2)}.sby .hdl{font-family:var(--fm);font-weight:500;font-size:13px;color:var(--faint);margin-left:4px}.syr{font-family:var(--fm);font-size:11.5px;color:var(--faint);margin-top:4px}</style></head><body><div class="bar"><div class="bar-in"><a class="brand" href="/"><svg class="lgmk" viewBox="0 0 32 32" fill="currentColor"><rect x="3.5" y="20" width="6" height="8" rx="1.6"/><rect x="13" y="12.5" width="6" height="15.5" rx="1.6"/><rect x="22.5" y="5" width="6" height="23" rx="1.6"/></svg><b>ENCORE</b></a><nav class="nav"><a href="/">아카이브</a><a class="on" href="/about">만든이</a><a href="/manual">매뉴얼</a><a href="/download">다운로드</a></nav><span class="sp"></span><span class="live"><span class="d"></span>클라우드 연결됨</span></div></div><div class="wrap"><main id="view" data-page="about"><section class="ahero"><div class="aey">THE STORY</div><h1 class="atitle">한 판만 더.</h1><p class="alead">PC방 불빛 아래, 라면 한 젓가락에 어택땅 한 번.<br>그 시절의 밤은, 아직 끝나지 않았습니다.</p></section><div class="story"><p class="em">스무 살, 우리는 매일 밤 PC방에 모였습니다.</p><p>한 시간에 천 원. 자리부터 맡아두고, 컵라면에 콜라 한 캔. 옆자리 친구와 팀 짜서 빠른무한 한 판. <b>어택땅 한 번에 환호하고, GG 한 번에 무너지던</b> 그 밤들이었죠.</p><p>스타리그를 보며 따라 하던 빌드, 친구 몰래 연습한 컨트롤. 새벽 세 시, 사장님 눈치를 보면서도 우리는 또 ‘<b>한 판만 더</b>’를 외쳤습니다.</p></div><div class="story"><p>그해 여름엔 온 나라가 붉은 티셔츠를 입었습니다. 광장에 모여 ‘대~한민국’을 외치고, 골이 터질 때마다 모르는 사람과 얼싸안던 — <b>그런 시절이, 우리에게 있었습니다.</b></p><p>그리고 우리는 어느새 마흔을 넘겼습니다. 각자의 자리에서 바쁘게 살아가지만, 가끔은 그 밤들이 사무치게 그립습니다.</p></div><div class="story"><p class="em">ENCORE는 그 시절을 위해 만들었습니다.</p><p>다시 모인 크루의 명경기를, 흐릿한 기억이 아니라 <b>선명한 영상</b>으로 남기려고. 켜두기만 하면 알아서 녹화되고 분석돼, 갤러리에 차곡차곡 쌓입니다.</p><p>오늘 밤도 ‘한 판만 더’를 외치는 모든 아재들에게. 다시, 스무 살.</p></div><section class="thanks"><div class="tlabel">SPECIAL THANKS</div><p>스타크래프트를 사랑하는 모든 아재들에게.<br>그리고 함께 빠른무한을 돌려준 우리 크루에게.<br><span class="dim">당신들이 있어, 그 시절이 빛났습니다.</span></p></section><div class="sign"><svg class="sbar" viewBox="0 0 32 32" fill="currentColor"><rect x="3.5" y="20" width="6" height="8" rx="1.6"/><rect x="13" y="12.5" width="6" height="15.5" rx="1.6"/><rect x="22.5" y="5" width="6" height="23" rx="1.6"/></svg><div><div class="sby">만든이 · 최성호 <span class="hdl">veatbox</span></div><div class="syr">2026 — 브루드워를 사랑하는 마음으로</div></div></div></main><footer class="ftr"><div class="ftr-brand"><svg class="lgmk" viewBox="0 0 32 32" fill="currentColor"><rect x="3.5" y="20" width="6" height="8" rx="1.6"/><rect x="13" y="12.5" width="6" height="15.5" rx="1.6"/><rect x="22.5" y="5" width="6" height="23" rx="1.6"/></svg><b>ENCORE</b></div><p>스무 살의 우리에게 — 다시, 브루드워.</p><p class="ftr-by">만든이 <b>최성호</b> · <span class="hdl">veatbox</span></p></footer></div></body></html>"""
-
-MANUAL_PAGE = r"""<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>매뉴얼 · ENCORE</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/sun-typeface/SUIT@2/fonts/variable/woff2/SUIT-Variable.css">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/sun-typeface/SUITE@2/fonts/variable/woff2/SUITE-Variable.css">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-<style>:root{--bg:#0C0D10;--surface:#131519;--well:#0E0F13;--ink:#ECEEF2;--ink2:#C5C9D0;--dim:#9AA0AA;--faint:#636872;--line:#1F232B;--line2:#2C313B;--acc:#3D8BFF;--acc-ink:#62A1FF;--acc-soft:rgba(61,139,255,.12);--acc-line:rgba(61,139,255,.34);--fd:'SUIT Variable','Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif;--fh:'SUITE Variable','SUIT Variable',sans-serif;--fm:'IBM Plex Mono',ui-monospace,monospace}
-*{box-sizing:border-box}html,body{margin:0}body{background:var(--bg);color:var(--ink);font-family:var(--fd);font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased}a{color:inherit;text-decoration:none}svg{display:block}
-.bar{position:sticky;top:0;z-index:50;background:var(--bg);border-bottom:1px solid var(--line)}.bar-in{max-width:1080px;margin:0 auto;padding:14px 28px;display:flex;align-items:center;gap:18px}.brand{display:flex;align-items:center;gap:10px}.brand .lgmk{width:20px;height:20px;color:var(--ink)}.brand b{font-family:var(--fh);font-weight:800;font-size:17px;letter-spacing:.2em}
-.nav{display:flex;gap:2px;margin-left:16px}.nav a{font-family:var(--fd);font-weight:600;font-size:14px;color:var(--dim);padding:8px 14px;border-radius:9px;transition:.15s}.nav a.on{color:var(--ink);background:var(--surface)}.nav a:hover{color:var(--ink)}.bar .sp{flex:1}.live{display:inline-flex;align-items:center;gap:8px;font-family:var(--fm);font-size:12px;color:var(--dim);background:var(--surface);border:1px solid var(--line);padding:9px 13px;border-radius:100px}.live .d{width:6px;height:6px;border-radius:50%;background:var(--acc);box-shadow:0 0 0 3px var(--acc-soft)}
-.wrap{max-width:1080px;margin:0 auto;padding:0 28px 120px}
-.ftr{margin-top:74px;padding-top:30px;border-top:1px solid var(--line)}.ftr-brand{display:flex;align-items:center;gap:9px;margin-bottom:13px}.ftr-brand .lgmk{width:18px;height:18px;color:var(--ink)}.ftr-brand b{font-family:var(--fh);font-weight:800;font-size:15px;letter-spacing:.18em}.ftr p{margin:5px 0;font-size:13px;color:var(--dim)}.ftr-by{font-family:var(--fd);font-size:13px;color:var(--dim);margin-top:13px}.ftr-by b{color:var(--ink2);font-weight:700}.ftr-by .hdl{font-family:var(--fm);font-size:12px;color:var(--faint)}
-.hero{padding:58px 0 10px}.ey{font-family:var(--fm);font-size:11px;letter-spacing:.3em;color:var(--acc);margin-bottom:16px;text-transform:uppercase}.h1{font-family:var(--fh);font-weight:800;font-size:clamp(34px,5.5vw,54px);letter-spacing:-.03em;margin:0;line-height:1.05;color:#F7F4EE}.lead{font-family:var(--fh);font-weight:700;font-size:clamp(17px,2.2vw,21px);line-height:1.7;color:var(--ink2);margin:22px 0 0;max-width:780px;letter-spacing:-.01em}
-.sec{margin:48px 0 0}.sec h2{font-family:var(--fh);font-weight:800;font-size:22px;margin:0 0 18px}
-.cards{display:grid;grid-template-columns:1fr 1fr;gap:18px}@media(max-width:720px){.cards{grid-template-columns:1fr}.nav{display:none}.live{display:none}}
-.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:26px}.card .tag{font-family:var(--fm);font-size:11px;letter-spacing:.16em;color:var(--acc-ink);text-transform:uppercase}.card h3{font-family:var(--fh);font-weight:800;font-size:20px;margin:10px 0 16px}
-.steps{list-style:none;padding:0;margin:0;counter-reset:s}.steps li{position:relative;padding:0 0 16px 42px;counter-increment:s;color:var(--ink2);font-size:14.5px;line-height:1.65}.steps li:last-child{padding-bottom:0}.steps li::before{content:counter(s);position:absolute;left:0;top:-1px;width:28px;height:28px;border-radius:9px;background:var(--acc-soft);border:1px solid var(--acc-line);color:var(--acc-ink);font-family:var(--fm);font-size:13px;display:grid;place-items:center;font-weight:600}.steps li b{color:var(--ink)}
-.btn{display:inline-flex;align-items:center;gap:9px;font-family:var(--fd);font-weight:700;font-size:15px;background:var(--acc);color:#fff;padding:14px 24px;border-radius:11px;margin-top:6px}.btn:hover{filter:brightness(1.08)}.btn .lgmk{width:18px;height:18px;color:#fff}
-.note{background:var(--well);border:1px solid var(--line);border-radius:12px;padding:16px 18px;color:var(--dim);font-size:13.5px;line-height:1.75;margin-top:20px}.note b{color:var(--ink2)}.note .k{font-family:var(--fm);font-size:12px;color:var(--acc-ink)}
-.prose p{color:var(--ink2);font-size:15.5px;line-height:1.85;max-width:720px;margin:0 0 16px}</style></head><body>
-<div class="bar" id="bar"><div class="bar-in"><div class="brand"><svg class="lgmk" viewBox="0 0 32 32" fill="currentColor"><rect x="3.5" y="20" width="6" height="8" rx="1.6"/><rect x="13" y="12.5" width="6" height="15.5" rx="1.6"/><rect x="22.5" y="5" width="6" height="23" rx="1.6"/></svg><b>ENCORE</b></div><nav class="nav"><a class="" href="/">아카이브</a><a class="" href="/about">만든이</a><a class="on" href="/manual">매뉴얼</a><a class="" href="/download">다운로드</a></nav><span class="sp"></span><span class="live"><span class="d"></span>클라우드 연결됨</span></div></div>
-<div class="wrap">
-<section class="hero"><div class="ey">Guide</div><h1 class="h1">사용법</h1><p class="lead">그때 그 빨무를, 다시. 그냥 보는 것도 내 경기를 올리는 것도 어렵지 않습니다.</p></section>
-<section class="sec"><h2>두 가지 방법</h2><div class="cards">
-<div class="card"><div class="tag">Just Watch</div><h3>그냥 보고 싶다면</h3><ol class="steps">
-<li>설치도 가입도 필요 없습니다. <b>아카이브</b>를 열어 경기를 둘러보세요.</li>
-<li>경기 카드를 누르면 <b>영상</b>이 열립니다. 정렬·필터로 원하는 경기를 골라요.</li>
-<li><b>하이라이트</b>의 점이나 카드를 누르면 그 장면으로 바로 이동합니다.</li>
-<li><b>선수별 상세</b>에서 빌드오더·유닛 구성·APM·코치 리포트(공/방 업글, 멀티, 생산력)를 확인하세요.</li>
-<li>마음에 들면 <b>좋아요</b>와 <b>코멘트</b>를 남겨요.</li></ol></div>
-<div class="card"><div class="tag">Upload</div><h3>내 경기를 올리고 싶다면</h3><ol class="steps">
-<li><b>다운로드</b> 페이지에서 ENCORE 레코더(.exe)를 받습니다.</li>
-<li>받은 파일을 <b>실행</b>하면 갤러리 창이 열립니다. 창은 켜둔 채로.</li>
-<li>스타크래프트로 <b>빠른무한(빨무)</b>을 플레이하세요.</li>
-<li>게임이 끝나면 자동으로 <b>녹화 → 리플레이 분석 → 클라우드 업로드</b>가 됩니다.</li>
-<li>잠시 후 이 아카이브에 경기가 올라옵니다. 끝!</li></ol></div></div>
-<div class="note">영상은 <b>클라우드(공개 저장소)</b>에 올라가고, 이 사이트 주소만 있으면 누구나 볼 수 있어요. 녹화 도구는 Windows에서 동작합니다.</div></section>
-<footer class="ftr"><div class="ftr-brand"><svg class="lgmk" viewBox="0 0 32 32" fill="currentColor"><rect x="3.5" y="20" width="6" height="8" rx="1.6"/><rect x="13" y="12.5" width="6" height="15.5" rx="1.6"/><rect x="22.5" y="5" width="6" height="23" rx="1.6"/></svg><b>ENCORE</b></div><p>스무 살의 우리에게 — 다시, 브루드워.</p><p class="ftr-by">만든이 <b>최성호</b> · <span class="hdl">veatbox</span></p></footer>
-</div></body></html>"""
-
-DOWNLOAD_PAGE = r"""<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>다운로드 · ENCORE</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/sun-typeface/SUIT@2/fonts/variable/woff2/SUIT-Variable.css">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/sun-typeface/SUITE@2/fonts/variable/woff2/SUITE-Variable.css">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-<style>:root{--bg:#0C0D10;--surface:#131519;--well:#0E0F13;--ink:#ECEEF2;--ink2:#C5C9D0;--dim:#9AA0AA;--faint:#636872;--line:#1F232B;--line2:#2C313B;--acc:#3D8BFF;--acc-ink:#62A1FF;--acc-soft:rgba(61,139,255,.12);--acc-line:rgba(61,139,255,.34);--fd:'SUIT Variable','Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif;--fh:'SUITE Variable','SUIT Variable',sans-serif;--fm:'IBM Plex Mono',ui-monospace,monospace}
-*{box-sizing:border-box}html,body{margin:0}body{background:var(--bg);color:var(--ink);font-family:var(--fd);font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased}a{color:inherit;text-decoration:none}svg{display:block}
-.bar{position:sticky;top:0;z-index:50;background:var(--bg);border-bottom:1px solid var(--line)}.bar-in{max-width:1080px;margin:0 auto;padding:14px 28px;display:flex;align-items:center;gap:18px}.brand{display:flex;align-items:center;gap:10px}.brand .lgmk{width:20px;height:20px;color:var(--ink)}.brand b{font-family:var(--fh);font-weight:800;font-size:17px;letter-spacing:.2em}
-.nav{display:flex;gap:2px;margin-left:16px}.nav a{font-family:var(--fd);font-weight:600;font-size:14px;color:var(--dim);padding:8px 14px;border-radius:9px;transition:.15s}.nav a.on{color:var(--ink);background:var(--surface)}.nav a:hover{color:var(--ink)}.bar .sp{flex:1}.live{display:inline-flex;align-items:center;gap:8px;font-family:var(--fm);font-size:12px;color:var(--dim);background:var(--surface);border:1px solid var(--line);padding:9px 13px;border-radius:100px}.live .d{width:6px;height:6px;border-radius:50%;background:var(--acc);box-shadow:0 0 0 3px var(--acc-soft)}
-.wrap{max-width:1080px;margin:0 auto;padding:0 28px 120px}
-.ftr{margin-top:74px;padding-top:30px;border-top:1px solid var(--line)}.ftr-brand{display:flex;align-items:center;gap:9px;margin-bottom:13px}.ftr-brand .lgmk{width:18px;height:18px;color:var(--ink)}.ftr-brand b{font-family:var(--fh);font-weight:800;font-size:15px;letter-spacing:.18em}.ftr p{margin:5px 0;font-size:13px;color:var(--dim)}.ftr-by{font-family:var(--fd);font-size:13px;color:var(--dim);margin-top:13px}.ftr-by b{color:var(--ink2);font-weight:700}.ftr-by .hdl{font-family:var(--fm);font-size:12px;color:var(--faint)}
-.hero{padding:58px 0 10px}.ey{font-family:var(--fm);font-size:11px;letter-spacing:.3em;color:var(--acc);margin-bottom:16px;text-transform:uppercase}.h1{font-family:var(--fh);font-weight:800;font-size:clamp(34px,5.5vw,54px);letter-spacing:-.03em;margin:0;line-height:1.05;color:#F7F4EE}.lead{font-family:var(--fh);font-weight:700;font-size:clamp(17px,2.2vw,21px);line-height:1.7;color:var(--ink2);margin:22px 0 0;max-width:780px;letter-spacing:-.01em}
-.sec{margin:48px 0 0}.sec h2{font-family:var(--fh);font-weight:800;font-size:22px;margin:0 0 18px}
-.cards{display:grid;grid-template-columns:1fr 1fr;gap:18px}@media(max-width:720px){.cards{grid-template-columns:1fr}.nav{display:none}.live{display:none}}
-.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:26px}.card .tag{font-family:var(--fm);font-size:11px;letter-spacing:.16em;color:var(--acc-ink);text-transform:uppercase}.card h3{font-family:var(--fh);font-weight:800;font-size:20px;margin:10px 0 16px}
-.steps{list-style:none;padding:0;margin:0;counter-reset:s}.steps li{position:relative;padding:0 0 16px 42px;counter-increment:s;color:var(--ink2);font-size:14.5px;line-height:1.65}.steps li:last-child{padding-bottom:0}.steps li::before{content:counter(s);position:absolute;left:0;top:-1px;width:28px;height:28px;border-radius:9px;background:var(--acc-soft);border:1px solid var(--acc-line);color:var(--acc-ink);font-family:var(--fm);font-size:13px;display:grid;place-items:center;font-weight:600}.steps li b{color:var(--ink)}
-.btn{display:inline-flex;align-items:center;gap:9px;font-family:var(--fd);font-weight:700;font-size:15px;background:var(--acc);color:#fff;padding:14px 24px;border-radius:11px;margin-top:6px}.btn:hover{filter:brightness(1.08)}.btn .lgmk{width:18px;height:18px;color:#fff}
-.note{background:var(--well);border:1px solid var(--line);border-radius:12px;padding:16px 18px;color:var(--dim);font-size:13.5px;line-height:1.75;margin-top:20px}.note b{color:var(--ink2)}.note .k{font-family:var(--fm);font-size:12px;color:var(--acc-ink)}
-.prose p{color:var(--ink2);font-size:15.5px;line-height:1.85;max-width:720px;margin:0 0 16px}</style></head><body>
-<div class="bar" id="bar"><div class="bar-in"><div class="brand"><svg class="lgmk" viewBox="0 0 32 32" fill="currentColor"><rect x="3.5" y="20" width="6" height="8" rx="1.6"/><rect x="13" y="12.5" width="6" height="15.5" rx="1.6"/><rect x="22.5" y="5" width="6" height="23" rx="1.6"/></svg><b>ENCORE</b></div><nav class="nav"><a class="" href="/">아카이브</a><a class="" href="/about">만든이</a><a class="" href="/manual">매뉴얼</a><a class="on" href="/download">다운로드</a></nav><span class="sp"></span><span class="live"><span class="d"></span>클라우드 연결됨</span></div></div>
-<div class="wrap">
-<section class="hero"><div class="ey">Download</div><h1 class="h1">레코더 받기</h1><p class="lead">내 빨무를 자동으로 녹화하고 분석해서 아카이브에 올려주는 Windows 프로그램입니다.</p></section>
-<section class="sec"><h2>받고 실행하기</h2><ol class="steps" style="max-width:760px">
-<li>아래 버튼으로 GitHub에서 <b>최신 .exe</b>를 받습니다 (Releases에 최신 빌드가 올라옵니다).</li>
-<li>받은 <b>.exe를 실행</b>합니다. 처음엔 Windows가 보안 경고를 띄울 수 있어요.</li>
-<li>실행되면 <b>갤러리 창이 자동으로 열립니다</b>. 이 창은 켜둔 채로 두세요.</li>
-<li>스타크래프트로 <b>빨무</b>를 플레이하면, 게임이 끝날 때마다 <b>자동 녹화·분석·업로드</b>됩니다.</li></ol>
-<a class="btn" href="https://github.com/choisungho-collab/encore/releases" target="_blank" rel="noopener"><svg class="lgmk" viewBox="0 0 32 32" fill="currentColor"><rect x="3.5" y="20" width="6" height="8" rx="1.6"/><rect x="13" y="12.5" width="6" height="15.5" rx="1.6"/><rect x="22.5" y="5" width="6" height="23" rx="1.6"/></svg>GitHub에서 .exe 받기</a>
-<div class="note"><b>준비물:</b> Windows 10/11 · NVIDIA 그래픽카드 권장(NVENC 하드웨어 녹화). 첫 실행 때 보안 경고가 뜨면 <span class="k">추가 정보 → 실행</span>을 누르면 됩니다. 최신 빌드가 안 보이면 저장소의 <span class="k">Actions</span> 탭에서도 받을 수 있어요.</div></section>
-<footer class="ftr"><div class="ftr-brand"><svg class="lgmk" viewBox="0 0 32 32" fill="currentColor"><rect x="3.5" y="20" width="6" height="8" rx="1.6"/><rect x="13" y="12.5" width="6" height="15.5" rx="1.6"/><rect x="22.5" y="5" width="6" height="23" rx="1.6"/></svg><b>ENCORE</b></div><p>스무 살의 우리에게 — 다시, 브루드워.</p><p class="ftr-by">만든이 <b>최성호</b> · <span class="hdl">veatbox</span></p></footer>
-</div></body></html>"""
 
 
-@app.get("/about")
-def page_about():
-    return Response(ABOUT_PAGE, mimetype="text/html")
 
-@app.get("/asset/<path:name>")
-def page_asset(name):
-    f = os.path.join(WEB_DIR, "img", name)
-    if not os.path.isfile(f): abort(404)
-    return send_file(f)
 
-@app.get("/manual")
-def page_manual():
-    return Response(MANUAL_PAGE, mimetype="text/html")
 
-@app.get("/download")
-def page_download():
-    return Response(DOWNLOAD_PAGE, mimetype="text/html")
 
-@app.get("/app.zip")
-def app_zip():
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        for root, dirs, files in os.walk(HERE):
-            dirs[:] = [d for d in dirs if d not in ("data", "__pycache__", ".git", "incoming")]
-            for fn in files:
-                if fn == "config.json" or fn.endswith(".pyc"): continue
-                full = os.path.join(root, fn); rel = os.path.relpath(full, HERE)
-                z.write(full, os.path.join("sc_auto_recorder", rel))
-    buf.seek(0)
-    return send_file(buf, mimetype="application/zip", as_attachment=True, download_name="sc_auto_recorder.zip")
 
-def run_server(port):
-    app.run(host="0.0.0.0", port=port, threaded=True, use_reloader=False)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 # ===================== 6. 녹화기 (ffmpeg) =====================
 _ENC_CACHE = None
@@ -2847,14 +1870,6 @@ def recorder_loop(cfg):
             log("오류:\n" + traceback.format_exc()); time.sleep(poll)
 
 # ===================== main =====================
-def start_server(port, block=False):
-    try:
-        from waitress import serve
-        target = lambda: serve(app, host="0.0.0.0", port=port, threads=8)
-    except Exception:
-        target = lambda: app.run(host="0.0.0.0", port=port, threaded=True, use_reloader=False)
-    if block: target()
-    else: threading.Thread(target=target, daemon=True).start()
 
 _MUTEX = None
 def _single_instance():
@@ -2993,6 +2008,10 @@ def run_gui(cfg, url):
             set_log(True); threading.Thread(target=lambda: sync_existing_to_cloud(), daemon=True).start()
         tk.Label(foot, text="·", bg=BG, fg=LINE, font=(KOR,8)).pack(side="left", padx=5)
         link(foot, "업로드", do_sync, JADE).pack(side="left")
+        def do_reanalyze():
+            set_log(True); threading.Thread(target=lambda: reanalyze_all(), daemon=True).start()
+        tk.Label(foot, text="·", bg=BG, fg=LINE, font=(KOR,8)).pack(side="left", padx=5)
+        link(foot, "재분석", do_reanalyze, JADE).pack(side="left")
     root.protocol("WM_DELETE_WINDOW", do_quit)
 
     def _prep_and_run():
@@ -3145,7 +2164,7 @@ def main():
     if (mode in ("all", "server") or cloud_on) and not use_gui:
         SCREP = ensure_screp()        # 클라우드 모드: 클라이언트가 리플레이를 직접 분석
         if not FFMPEG: FFMPEG = ensure_ffmpeg()
-    port = cfg["port"]; url = f"http://localhost:{port}"
+    port = cfg["port"]; url = (cfg.get("gallery_url") or "https://encorestar.netlify.app/").rstrip("/")
     if cloud_on:
         log("클라우드 모드: 영상은 R2로, 메타+분석은 Supabase 로 직접 업로드합니다.")
         g = cfg.get("gallery_url") or ""
@@ -3154,12 +2173,7 @@ def main():
             try: open_app(g)
             except Exception: pass
         print("-" * 56); recorder_loop(cfg); return
-    if mode == "server":
-        log(f"중앙 서버 가동 → {url}  (같은 네트워크의 다른 PC는 이 컴퓨터 IP:{port} 로 접속)")
-        log(f"업로드 키(클라이언트 config 의 server.api_key 에 넣기): {cfg.get('upload_key')}")
-        start_server(port, block=True); return
     if mode == "all":
-        start_server(port, block=False); time.sleep(1.0)
         log(f"갤러리 → {url}")
         try: open_app(url)
         except Exception: pass
