@@ -661,7 +661,17 @@ def bump_view(mid):
 
 # ===================== Supabase 클라우드 (DB + Storage) =====================
 # config 의 "supabase" 를 채우면 자동으로 켜짐. 비어 있으면 전부 로컬(SQLite)로 동작.
-def sb_cfg(): return CFG.get("supabase") or {}
+# Supabase 공개 기본값 — anon_key 는 공개돼도 안전(RLS 가 데이터 보호). config.json 이 없거나 비어 있어도 클라우드 모드로 동작.
+SB_DEFAULTS = {
+    "url": "https://luljnalcnxfyxmlgoxbc.supabase.co",
+    "anon_key": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx1bGpuYWxjbnhmeXhtbGdveGJjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIwMDU1NDIsImV4cCI6MjA5NzU4MTU0Mn0.WhPOfWiOlokOHVZLmffIKKTDpQunhxwwwJOd6CSoC2k",
+    "bucket": "media",
+}
+def sb_cfg():
+    s = dict(CFG.get("supabase") or {})
+    for _k in ("url", "anon_key", "bucket"):
+        if not s.get(_k): s[_k] = SB_DEFAULTS[_k]
+    return s
 def sb_enabled():
     s = sb_cfg(); return bool(s.get("url") and (s.get("service_key") or s.get("anon_key")))
 def sb_writable():
