@@ -1,0 +1,70 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build single EXE
+        run: >
+          pyinstaller --onefile --windowed --name sc_recorder --noupx
+          --add-data "web;web"
+          --hidden-import psutil --hidden-import flask --hidden-import requests
+          --hidden-import boto3 --hidden-import botocore --hidden-import waitress
+          --hidden-import tkinter
+          --collect-data botocore
+          sc_recorder.py
+
+      - name: Zip EXE (avoids Chrome's executable-download block)
+        shell: pwsh
+        run: Compress-Archive -Path dist/sc_recorder.exe -DestinationPath dist/sc_recorder.zip -Force
+
+      - name: Upload EXE artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sc_recorder-windows
+          path: dist/sc_recorder.exe
+
+      - name: Publish "latest" release (every push to main)
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: 최신 빌드 (latest)
+          body: |
+            sc_recorder.zip 받아서 압축 풀고 sc_recorder.exe 실행 — 파이썬 설치 불필요.
+            보안 경고가 뜨면 "추가 정보 → 실행". 최초 실행 시 영상 도구(ffmpeg)를 한 번 자동으로 내려받아요(1~2분).
+          files: |
+            dist/sc_recorder.zip
+            dist/sc_recorder.exe
+          make_latest: true
+
+      - name: Publish Release (only on version tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/sc_recorder.zip
+            dist/sc_recorder.exe
