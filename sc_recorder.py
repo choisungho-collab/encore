@@ -341,12 +341,14 @@ def parse_rep(path):
     players = []
     for p in (h.get("Players") or []):
         pd = pdescs.get(p.get("ID"), {})
+        _lt = (p.get("Race") or {}).get("Letter")
         players.append({"name": p.get("Name"), "race": (p.get("Race") or {}).get("ShortName"),
+                        "rl": (chr(_lt) if isinstance(_lt, int) and 65 <= _lt <= 90 else "?"),
                         "team": p.get("Team"), "apm": pd.get("APM"),
                         "color": "#%06x" % ((p.get("Color") or {}).get("RGB", 8421504))})
     frames = h.get("Frames", 0) or 0; secs = frames / FPS_GAME
-    t1 = "".join((pl["race"] or "?")[0].upper() for pl in players if pl["team"] == 1)
-    t2 = "".join((pl["race"] or "?")[0].upper() for pl in players if pl["team"] == 2)
+    t1 = "".join(pl["rl"] for pl in players if pl["team"] == 1)
+    t2 = "".join(pl["rl"] for pl in players if pl["team"] == 2)
     meta.update({"map": clean(h.get("Map")), "length": "%d:%02d" % (secs // 60, secs % 60),
                  "type": (h.get("Type") or {}).get("Name"), "winner": comp.get("WinnerTeam"),
                  "saver": next((p.get("Name") for p in (h.get("Players") or [])
@@ -369,17 +371,34 @@ UNIT_SUPPLY = {
 # 기존 유닛에서 전환되는 모프(이미 카운트됨 → 보급 중복 방지)
 MORPH_FROM_UNIT = {"Lurker","Guardian","Devourer","Archon","Dark Archon"}
 PROD_BUILDINGS = {"Gateway","Robotics Facility","Stargate","Barracks","Factory","Starport","Hatchery"}
+# 서플(보급) 건물 — 추가로 지을수록 인구 한도가 뚫림. Z는 오버로드(유닛)로 따로 셈.
+SUPPLY_BLD = {"Pylon","Supply Depot"}
+# 종족 지상 공격/방어 업그레이드 이름(screp Upgrade.Name). 같은 업글을 여러 번 = 그게 레벨(몇업).
+GND_ATK = {"P":["Protoss Ground Weapons"], "T":["Terran Infantry Weapons","Terran Vehicle Weapons"], "Z":["Zerg Melee Attacks","Zerg Missile Attacks"]}
+GND_ARM = {"P":["Protoss Ground Armor"],   "T":["Terran Infantry Armor","Terran Vehicle Plating"],   "Z":["Zerg Carapace"]}
+# 종족별 주력 생산건물 — 빨무에서 물량의 핵심 (개수 = 한방 후 remax 속도)
+MAIN_PROD = {"P":("Gateway","게이트웨이"), "T":("Barracks","배럭"), "Z":("Hatchery","해처리")}
+SUPPLY_KO = {"P":("Pylon","파일런"), "T":("Supply Depot","서플라이 디팟"), "Z":("Overlord","오버로드")}
+def _upgrade_level(frames, gap=2400, cap=3):
+    """업글 커맨드 프레임들 → 실제 레벨 추정. 연구시간(~gap프레임)보다 가까운 재클릭(연타)은 한 레벨로 묶음."""
+    if not frames: return 0
+    fs = sorted(frames); lv = 1; last = fs[0]
+    for fr in fs[1:]:
+        if fr - last >= gap: lv += 1; last = fr
+    return min(lv, cap)
 def extract_analysis(rep_path):
     out = _run([SCREP, "-cmds", rep_path], capture_output=True, timeout=120).stdout
     d = json.loads(out); h = d["Header"]; comp = d.get("Computed", {}) or {}
     pdescs = {p["PlayerID"]: p for p in (comp.get("PlayerDescs") or [])}
     frames = h.get("Frames", 0) or 0; nbins = max(1, int(frames/FPS_GAME//60) + 1)
-    players = {}; order = []; seen_up = defaultdict(set)
+    players = {}; order = []; seen_up = defaultdict(set); leaves = []
     for p in (h.get("Players") or []):
         pid = p.get("ID"); pd = pdescs.get(pid, {})
-        players[pid] = {"id": pid, "name": p.get("Name"), "race": (p.get("Race") or {}).get("ShortName"),
+        _lt = (p.get("Race") or {}).get("Letter")
+        _rl = chr(_lt) if isinstance(_lt, int) and 65 <= _lt <= 90 else None
+        players[pid] = {"id": pid, "name": p.get("Name"), "race": (p.get("Race") or {}).get("ShortName"), "rl": _rl,
             "team": p.get("Team"), "color": "#%06x" % ((p.get("Color") or {}).get("RGB", 8421504)),
-            "apm": pd.get("APM"), "eapm": pd.get("EAPM"), "build": [], "units": Counter(),
+            "apm": pd.get("APM"), "eapm": pd.get("EAPM"), "build": [], "units": Counter(), "up_fr": defaultdict(list),
             "unit_first": {}, "townhalls": [], "apm_series": [0]*nbins, "supply_events": []}
         order.append(pid)
     for c in d.get("Commands", {}).get("Cmds", []):
@@ -395,7 +414,10 @@ def extract_analysis(rep_path):
             pl["build"].append({"t": mmss(f), "name": uname, "cat": "morph"})
         elif tn == "Upgrade":
             up = (c.get("Upgrade") or {}).get("Name") or uname or "Upgrade"
+            pl["up_fr"][up].append(f)
             if up not in seen_up[pid]: seen_up[pid].add(up); pl["build"].append({"t": mmss(f), "name": up, "cat": "upgrade"})
+        elif tn == "Leave Game":
+            leaves.append((f, pid))
         elif tn == "Tech":
             tech = (c.get("Tech") or {}).get("Name") or uname or "Tech"
             if tech not in seen_up[pid]: seen_up[pid].add(tech); pl["build"].append({"t": mmss(f), "name": tech, "cat": "tech"})
@@ -413,21 +435,35 @@ def extract_analysis(rep_path):
             cum += sup
             if t200 is None and cum >= 200: t200 = mmss(fr)
         prodn = sum(1 for b in pl["build"] if b["cat"] in ("building", "morph") and b["name"] in PROD_BUILDINGS)
-        res.append({"id": pl["id"], "name": pl["name"], "race": pl["race"], "team": pl["team"],
+        rl = pl.get("rl") if pl.get("rl") in ("P","T","Z") else _coach_race(pl["race"], list(pl["units"]))
+        atk_lv = max([_upgrade_level(pl["up_fr"].get(n, [])) for n in GND_ATK.get(rl, [])] or [0])
+        arm_lv = max([_upgrade_level(pl["up_fr"].get(n, [])) for n in GND_ARM.get(rl, [])] or [0])
+        sup_name, sup_ko = SUPPLY_KO.get(rl, ("Pylon", "서플"))
+        sup_bld = (pl["units"].get("Overlord", 0) if rl == "Z" else sum(1 for b in pl["build"] if b["name"] == sup_name))
+        sup_cap = sup_bld * 8 + 9   # 대략적 인구 한도 (본진 보급 + 서플건물/오버로드 ×8)
+        mp_name, mp_ko = MAIN_PROD.get(rl, ("Gateway", "생산건물"))
+        mp_n = sum(1 for b in pl["build"] if b["name"] == mp_name)
+        res.append({"id": pl["id"], "name": pl["name"], "race": pl["race"], "rl": rl, "team": pl["team"],
             "color": pl["color"], "apm": pl["apm"], "eapm": pl["eapm"], "build": pl["build"],
             "units": [{"name": k, "n": v, "first": pl["unit_first"].get(k)} for k, v in us],
             "townhalls": pl["townhalls"], "apm_series": pl["apm_series"],
             "max_supply": min(cum, 200), "total_supply": cum, "supply200": t200, "prod": prodn,
+            "atk_lv": atk_lv, "arm_lv": arm_lv, "supply_bld": sup_bld, "supply_cap": sup_cap, "supply_ko": sup_ko,
+            "main_prod_n": mp_n, "main_prod_ko": mp_ko,
             "summary": {"buildings": sum(1 for b in pl["build"] if b["cat"] in ("building", "morph")),
                         "units": sum(pl["units"].values()),
                         "upgrades": sum(1 for b in pl["build"] if b["cat"] in ("upgrade", "tech")),
                         "townhalls": len(pl["townhalls"]), "prod": prodn,
+                        "atk_lv": atk_lv, "arm_lv": arm_lv, "supply_bld": sup_bld, "supply_cap": sup_cap, "supply_ko": sup_ko,
+                        "main_prod_n": mp_n, "main_prod_ko": mp_ko,
                         "max_supply": min(cum, 200), "supply200": t200}})
     secs = frames / FPS_GAME
     meta = {"map": clean(h.get("Map")), "length": f"{int(secs//60)}:{int(secs%60):02d}",
             "winner": comp.get("WinnerTeam"),
             "saver": next((p.get("Name") for p in (h.get("Players") or []) if p.get("ID") == comp.get("RepSaverPlayerID")), None)}
-    return {"meta": meta, "players": res}
+    leave_list = sorted([{"sec": int(max(0, fr)/FPS_GAME), "t": mmss(fr), "name": (players.get(pid) or {}).get("name")}
+                         for fr, pid in leaves], key=lambda x: x["sec"])
+    return {"meta": meta, "players": res, "leaves": leave_list}
 
 # 임팩트 유닛(테크 마일스톤용) → 한글
 TECH_UNITS = {
@@ -439,10 +475,10 @@ def _mmss_to_sec(t):
     try: m, s = str(t).split(":"); return int(m)*60 + int(s)
     except Exception: return 0
 def compute_highlights(a):
-    """리플레이 데이터로 하이라이트 추정: 교전(활동량 피크)·테크 마일스톤·첫 확장."""
+    """리플레이 기반 하이라이트: 최대 교전·게임체인저 테크·첫 확장·GG/퇴장(승부처)."""
     players = a.get("players") or []
     out = []
-    # 1) 교전 추정 — 전원 분당 활동량(APM) 합의 국소 피크
+    # 1) 교전 — 전원 분당 활동량(APM) 합의 국소 피크. 가장 큰 게 '최대 교전'.
     nb = max((len(p.get("apm_series") or []) for p in players), default=0)
     if nb >= 3:
         total = [0]*nb
@@ -450,19 +486,20 @@ def compute_highlights(a):
             for i, v in enumerate(p.get("apm_series") or []):
                 if i < nb: total[i] += v
         cand = []
-        for i in range(2, nb):
+        for i in range(1, nb):
             nxt = total[i+1] if i+1 < nb else 0
             if total[i] > 0 and total[i] >= total[i-1] and total[i] >= nxt:
                 cand.append((total[i], i))
         cand.sort(reverse=True)
         picked = []
         for v, i in cand:
-            if all(abs(i-j) >= 2 for j in picked):
-                picked.append(i)
+            if all(abs(i-j) >= 2 for _, j in picked): picked.append((v, i))
             if len(picked) >= 3: break
-        for i in sorted(picked):
-            out.append({"sec": i*60, "t": f"{i}:00", "label": "대규모 교전 추정", "kind": "battle"})
-    # 2) 테크 마일스톤 — 임팩트 유닛의 전체 최초 등장
+        maxv = picked[0][0] if picked else 0
+        for v, i in sorted(picked, key=lambda x: x[1]):
+            out.append({"sec": i*60, "t": f"{i}:00",
+                        "label": "최대 교전" if v == maxv else "교전 피크", "kind": "battle"})
+    # 2) 게임체인저 테크 — 임팩트 유닛 첫 등장
     firsts = {}
     for p in players:
         for u in (p.get("units") or []):
@@ -471,7 +508,7 @@ def compute_highlights(a):
                 sec = _mmss_to_sec(ft)
                 if nm not in firsts or sec < firsts[nm][0]:
                     firsts[nm] = (sec, ft, p.get("name"))
-    for nm, (sec, ft, who) in sorted(firsts.items(), key=lambda kv: kv[1][0])[:5]:
+    for nm, (sec, ft, who) in sorted(firsts.items(), key=lambda kv: kv[1][0])[:4]:
         out.append({"sec": sec, "t": ft, "label": f"첫 {TECH_UNITS[nm]}", "who": who, "kind": "tech"})
     # 3) 첫 확장 — 가장 빠른 2번째 타운홀
     exp = None
@@ -481,6 +518,14 @@ def compute_highlights(a):
             sec = _mmss_to_sec(ths[1].get("t"))
             if exp is None or sec < exp[0]: exp = (sec, ths[1].get("t"), p.get("name"))
     if exp: out.append({"sec": exp[0], "t": exp[1], "label": "첫 확장", "who": exp[2], "kind": "expand"})
+    # 4) GG / 퇴장 — 누가 GG 치고 나가는 순간 = 무조건 하이라이트(경기의 승부처)
+    leaves = a.get("leaves") or []
+    for idx, L in enumerate(leaves):
+        last = (idx == len(leaves) - 1)
+        nm = L.get("name") or "선수"
+        out.append({"sec": L.get("sec", 0), "t": L.get("t", ""),
+                    "label": ("GG — 경기 종료" if last else f"{nm} GG·퇴장"),
+                    "who": nm, "kind": "gg"})
     out.sort(key=lambda hh: hh["sec"])
     return out
 
@@ -587,7 +632,8 @@ def coach_player(p, peers):
     top=combat[0] if combat else None
     apm=p.get("apm"); eapm=p.get("eapm"); series=p.get("apm_series") or [0]
     timings={"gas":gas,"prod":prod_n,"up_n":up_n,"up1":up1,"exp":exp,"army":round(army),"workers":workers,
-             "max_supply":p.get("max_supply"),"supply200":p.get("supply200"),"total_supply":p.get("total_supply"),"tcount":len(p.get("townhalls",[]))}
+             "max_supply":p.get("max_supply"),"supply200":p.get("supply200"),"total_supply":p.get("total_supply"),"tcount":len(p.get("townhalls",[])),
+             "atk_lv":p.get("atk_lv"),"arm_lv":p.get("arm_lv"),"supply_bld":p.get("supply_bld"),"supply_ko":p.get("supply_ko"),"main_prod_n":p.get("main_prod_n"),"main_prod_ko":p.get("main_prod_ko")}
     bnames={b.get("name") for b in build}
     # 빨무 핵심 1: 감지 수단(다크/럴커/클로킹/마인 대비). 저그는 오버로드가 자동 감지라 제외.
     if race=="P" and "Observer" not in units and "Photon Cannon" not in bnames:
@@ -611,7 +657,19 @@ def coach_player(p, peers):
         T("tip","prod","생산 건물 "+str(prod_n)+"개","생산 건물이 다른 선수 평균("+("%.0f"%avg_prod)+")보다 적어. 빠른무한은 한방 싸움 뒤 다시 꽉 채우기(remax)가 핵심이라, 생산 건물을 늘리면 회복이 빨라져.")
     elif prod_n >= max(6, avg_prod*1.2):
         T("good","prod","생산력 좋음 "+str(prod_n)+"개","생산 건물을 넉넉히 지어서 병력 보충이 빨랐어. 이게 빠른무한의 기본기야.")
-    if up_n==0:
+    a_=p.get("atk_lv"); r_=p.get("arm_lv"); haslv=(a_ is not None or r_ is not None)
+    a_=a_ or 0; r_=r_ or 0; mxlv=max(a_,r_)
+    if haslv:
+        utitle="업그레이드 공"+str(a_)+"·방"+str(r_)
+        if mxlv==0:
+            T("warn","up",utitle,"공격·방어 업그레이드가 하나도 없어. 빠른무한은 풀업 화력 싸움이라 1업만 차이나도 교전이 크게 갈려. 가스 올리자마자 업글부터 돌리자.")
+        elif mxlv<=1:
+            T("tip","up",utitle,"업그레이드 단계가 낮아. 빠른무한은 같은 병력도 풀업이면 화력이 확 달라져 — 병력 뽑으면서 공/방을 3업까지 꾸준히 올리자.")
+        elif mxlv>=3:
+            T("good","up",utitle,"공/방을 3업까지 올렸네. 빠른무한 화력 싸움의 핵심을 잘 챙겼어.")
+        else:
+            T("good","up",utitle,"공/방 업그레이드를 꾸준히 돌렸네. 3업까지 마저 채우면 더 강해져.")
+    elif up_n==0:
         T("warn","up","업그레이드 없음","공격·방어 업그레이드가 하나도 없어. 빠른무한은 풀업 화력 싸움이라 1업만 차이나도 교전이 크게 갈려. 가스 올리자마자 업글부터 돌리자.")
     elif up_n<=2:
         T("tip","up","업그레이드 "+str(up_n)+"개 (첫 "+str(up1)+")","업그레이드가 적은 편이야. 병력 뽑는 것과 동시에 업글을 계속 돌리면 같은 병력으로도 화력이 확 올라가.")
@@ -1213,7 +1271,7 @@ def _thumb_attr(g):
 def _card(g, idx=0):
     st, wm = _thumb_attr(g)
     who = esc(g.get("me") or g.get("uploader") or "?")
-    return (f'<div class="card" data-map="{esc(g["map"])}" data-href="{esc(g["match_url"])}">'
+    return (f'<div class="card" data-map="{esc(g["map"])}" data-href="{esc(g["match_url"])}" data-up="{esc(g["uploaded"])}" data-likes="{g["likes"]}" data-views="{g["views"]}" data-np="{g["np"]}">'
             f'<div class="thumb"{st}>{wm}{_restag(g)}'
             f'<button class="bm">{_IC_BOOKMARK}</button>'
             f'<span class="dur">{_IC_CLOCK}{esc(g["length"])}</span>'
@@ -1244,8 +1302,8 @@ def _archive_head():
             '<p class="desc">PC방 불빛 아래 밤을 지새우던 스무 살. 크루와 함께 <b>그때 그 명경기를 영상으로</b> 다시 만납니다.<br>다시 보고 싶은 명경기를 골라보세요.</p></div>')
 
 def _toolbar(stats_html):
-    tools = (f'<div class="tools"><button class="ctrl"><span class="lbl">정렬</span><span>최신순</span>{_IC_CHEV}</button>'
-             f'<button class="ctrl">{_IC_FILTER}필터</button></div>')
+    tools = (f'<div class="tools"><button class="ctrl" id="sortBtn"><span class="lbl">정렬</span><span id="sortLbl">최신순</span>{_IC_CHEV}</button>'
+             f'<button class="ctrl" id="filterBtn">{_IC_FILTER}<span id="filterLbl">필터</span></button></div>')
     return f'<div class="toolbar"><div class="stats">{stats_html}</div>{tools}</div>'
 
 def _player_hero(name, av, games, wr, avg, rc):
@@ -1376,7 +1434,7 @@ a{color:inherit;text-decoration:none}svg{display:block}
  <nav class="nav"><a class="on" href="/">아카이브</a><a href="/about">만든이</a><a href="/manual">매뉴얼</a><a href="/download">다운로드</a></nav>
  <span class="sp"></span>
  <div class="search"><span class="ic"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg></span><input id="q" placeholder="맵 · 아이디 검색"></div>
- <span class="live"><span class="d"></span>녹화 대기 중</span>
+ <span class="live"><span class="d"></span>클라우드 연결됨</span>
 </div></div>
 <div class="wrap">
 <main id="view" data-page="archive">
@@ -1389,7 +1447,29 @@ __TOP__
 addEventListener('scroll',()=>document.getElementById('bar').classList.toggle('scrolled',scrollY>8));
 document.querySelectorAll('.card,.feat').forEach(el=>{el.addEventListener('click',e=>{const bm=e.target.closest('.bm');if(bm){bm.classList.toggle('on');return;}const h=el.dataset.href;if(h)location.href=h;});});
 const q=document.getElementById('q');
-if(q)q.addEventListener('input',()=>{const t=q.value.trim().toLowerCase();document.querySelectorAll('.card').forEach(c=>{const m=(c.dataset.map||'').toLowerCase();c.style.display=(!t||m.includes(t))?'':'none';});});
+(function(){
+  var grid=document.querySelector('.grid');if(!grid)return;
+  var SORTS=['최신순','오래된순','인기순','조회순'],FILTERS=[['전체',0],['2v2',4],['3v3',6],['4v4',8]],si=0,fi=0;
+  var cards=[].slice.call(grid.querySelectorAll('.card')),feat=grid.querySelector('.feat');
+  function apply(){
+    var fnp=FILTERS[fi][1],s=SORTS[si],qt=q?q.value.trim().toLowerCase():'';
+    cards.slice().sort(function(a,b){
+      if(s==='오래된순')return (a.dataset.up||'').localeCompare(b.dataset.up||'');
+      if(s==='인기순')return (+b.dataset.likes||0)-(+a.dataset.likes||0)||(b.dataset.up||'').localeCompare(a.dataset.up||'');
+      if(s==='조회순')return (+b.dataset.views||0)-(+a.dataset.views||0)||(b.dataset.up||'').localeCompare(a.dataset.up||'');
+      return (b.dataset.up||'').localeCompare(a.dataset.up||'');
+    }).forEach(function(c){
+      var ok=(!fnp||(+c.dataset.np)===fnp)&&(!qt||(c.dataset.map||'').toLowerCase().indexOf(qt)>=0);
+      c.style.display=ok?'':'none';grid.appendChild(c);
+    });
+    if(feat)feat.style.display=(si===0&&fi===0&&!qt)?'':'none';
+    var sl=document.getElementById('sortLbl');if(sl)sl.textContent=s;
+    var fl=document.getElementById('filterLbl');if(fl)fl.textContent=FILTERS[fi][0]==='전체'?'필터':FILTERS[fi][0];
+  }
+  var sb=document.getElementById('sortBtn');if(sb)sb.addEventListener('click',function(){si=(si+1)%SORTS.length;apply();});
+  var fb=document.getElementById('filterBtn');if(fb)fb.addEventListener('click',function(){fi=(fi+1)%FILTERS.length;apply();});
+  if(q)q.addEventListener('input',apply);
+})();
 </script></body></html>"""
 
 PAGE_SIZE = 24
@@ -1676,7 +1756,7 @@ svg{display:block}
  <nav class="nav"><a class="on" href="/">아카이브</a><a href="/about">만든이</a><a href="/manual">매뉴얼</a><a href="/download">다운로드</a></nav>
  <span class="sp"></span>
  <span id="dlslot"></span>
- <span class="live"><span class="d"></span>대기 중</span>
+ <span class="live"><span class="d"></span>클라우드 연결됨</span>
 </div></div>
 
 <div class="wrap">
@@ -1713,7 +1793,7 @@ svg{display:block}
    <button class="cs" id="csend">등록</button></div>
   <div class="clist" id="clist"></div>
  </section>
-<footer class="ftr"><div class="ftr-l"><div class="ftr-brand"><svg class="lgmk" viewBox="0 0 32 32" fill="currentColor"><rect x="3.5" y="20" width="6" height="8" rx="1.6"/><rect x="13" y="12.5" width="6" height="15.5" rx="1.6"/><rect x="22.5" y="5" width="6" height="23" rx="1.6"/></svg><b>ENCORE</b></div><p>스무 살의 우리에게 — 다시, 브루드워.</p><p class="ftr-by">만든이 <b>최성호</b> · <span class="hdl">veatbox</span></p></div><div class="ftr-links"><a href="/">아카이브</a><a href="/about">만든이</a><a href="/manual">매뉴얼</a><a href="/download">다운로드</a></div></footer>
+<footer class="ftr"><div class="ftr-l"><div class="ftr-brand"><svg class="lgmk" viewBox="0 0 32 32" fill="currentColor"><rect x="3.5" y="20" width="6" height="8" rx="1.6"/><rect x="13" y="12.5" width="6" height="15.5" rx="1.6"/><rect x="22.5" y="5" width="6" height="23" rx="1.6"/></svg><b>ENCORE</b></div><p>스무 살의 우리에게 — 다시, 브루드워.</p><p class="ftr-by">만든이 <b>최성호</b> · <span class="hdl">veatbox</span></p></div></footer>
 </div>
 
 <script>
@@ -1806,7 +1886,8 @@ const TONEC={good:'cg',tip:'ct',warn:'cw'};
 function coachBlock(p){
  const cr=(typeof COACH!=='undefined'?COACH:[]).find(c=>c.id===p.id);if(!cr)return'';
  const t=cr.timings;
- const facts=`<div class="cfacts"><span>일꾼 <b>${t.workers}</b></span><span>멀티 <b>${t.tcount}</b></span><span>생산건물 <b>${t.prod}</b></span><span>업글 <b>${t.up_n}</b></span><span>총생산 <b>~${t.total_supply||t.army}</b></span></div>`;
+ const _up=(t.atk_lv!=null||t.arm_lv!=null)?`공${t.atk_lv||0}·방${t.arm_lv||0}`:`${t.up_n}개`;const _pn=(t.main_prod_n!=null?t.main_prod_n:t.prod);const _pl=t.main_prod_ko||'생산건물';const _sp=(t.supply_bld!=null)?`<span>${t.supply_ko||'서플'} <b>${t.supply_bld}</b></span>`:'';
+ const facts=`<div class="cfacts"><span>일꾼 <b>${t.workers}</b></span><span>멀티 <b>${t.tcount}</b></span><span>${_pl} <b>${_pn}</b></span><span>업글 <b>${_up}</b></span>${_sp}<span>총생산 <b>~${t.total_supply||t.army}</b></span></div>`;
  const cards=(cr.points||[]).map(pt=>`<div class="ccard ${TONEC[pt.tone]||'ct'}"><div class="cct"><span class="cci">${CIC[pt.k]||I.info}</span><b>${pt.t}</b></div><p>${pt.x}</p></div>`).join('')||'<div class="cnone">코치 포인트가 없어요 — 깔끔한 한 판!</div>';
  return `<div class="coach"><div class="ch coachh">코치 리포트 <span class="cnote">실제 리플레이 기반 · 빠른무한 기준</span></div>${facts}<div class="ccards">${cards}</div></div>`;
 }
@@ -2035,7 +2116,77 @@ def page_get():
 ABOUT_PAGE = r"""<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>만든이 · ENCORE</title><link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/sun-typeface/SUIT@2/fonts/variable/woff2/SUIT-Variable.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/sun-typeface/SUITE@2/fonts/variable/woff2/SUITE-Variable.css"><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet"><style>:root{--bg:#0C0D10;--surface:#131519;--surface2:#181B21;--well:#0E0F13;--ink:#ECEEF2;--ink2:#C5C9D0;--dim:#9AA0AA;--faint:#636872;--line:#1F232B;--line2:#2C313B;--acc:#3D8BFF;--acc-ink:#62A1FF;--acc-soft:rgba(61,139,255,.12);--acc-line:rgba(61,139,255,.34);--r1:9px;--r2:13px;--r3:17px;--fd:'SUIT Variable','Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif;--fh:'SUITE Variable','SUIT Variable',sans-serif;--fm:'IBM Plex Mono',ui-monospace,monospace}*{box-sizing:border-box}html,body{margin:0}body{background:var(--bg);color:var(--ink);font-family:var(--fd);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased;letter-spacing:.005em}a{color:inherit;text-decoration:none}svg{display:block}::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:var(--line2);border-radius:6px;border:3px solid var(--bg)}.wrap{max-width:1180px;margin:0 auto;padding:0 28px 120px}.bar{position:sticky;top:0;z-index:50;background:var(--bg);border-bottom:1px solid var(--line)}.bar.scrolled{box-shadow:0 6px 22px rgba(0,0,0,.4)}.bar-in{max-width:1180px;margin:0 auto;padding:14px 28px;display:flex;align-items:center;gap:18px}.brand{display:flex;align-items:center;gap:10px}.brand .lgmk{width:20px;height:20px;color:var(--ink)}.brand b{font-family:var(--fh);font-weight:800;font-size:17px;letter-spacing:.2em}.nav{display:flex;gap:2px;margin-left:16px}.nav a{font-family:var(--fd);font-weight:600;font-size:14px;color:var(--dim);padding:8px 14px;border-radius:9px;transition:.15s}.nav a.on{color:var(--ink);background:var(--surface)}.nav a:hover{color:var(--ink)}.bar .sp{flex:1}.live{display:inline-flex;align-items:center;gap:8px;font-family:var(--fm);font-size:12px;color:var(--dim);background:var(--surface);border:1px solid var(--line);padding:9px 13px;border-radius:100px}.live .d{width:6px;height:6px;border-radius:50%;background:var(--acc);box-shadow:0 0 0 3px var(--acc-soft)}.ftr{margin-top:74px;padding-top:30px;border-top:1px solid var(--line)}.ftr-brand{display:flex;align-items:center;gap:9px;margin-bottom:13px}.ftr-brand .lgmk{width:18px;height:18px;color:var(--ink)}.ftr-brand b{font-family:var(--fh);font-weight:800;font-size:15px;letter-spacing:.18em}.ftr p{margin:5px 0;font-size:13px;line-height:1.6;color:var(--dim)}.ftr-by{font-family:var(--fd);font-size:13px;color:var(--dim);margin-top:13px}.ftr-by b{color:var(--ink2);font-weight:700}.ftr-by .hdl{font-family:var(--fm);font-size:12px;color:var(--faint)}@media(max-width:760px){.nav{display:none}.live{display:none}}.ahero{padding:58px 0 6px}.aey{font-family:var(--fm);font-size:11px;letter-spacing:.3em;color:var(--acc);margin-bottom:16px}.atitle{font-family:var(--fh);font-weight:800;font-size:clamp(38px,6vw,62px);letter-spacing:-.03em;margin:0;line-height:1.04;color:#F7F4EE}.alead{font-family:var(--fh);font-weight:700;font-size:clamp(18px,2.4vw,23px);line-height:1.7;color:var(--ink2);margin:24px 0 0;max-width:840px;letter-spacing:-.01em}.scene{margin:50px 0 0;max-width:920px}.snaps{display:flex;gap:22px;justify-content:center;align-items:flex-start;flex-wrap:wrap;max-width:920px;margin:50px auto 0}.snap{flex:0 1 290px;max-width:330px}.snap .scap{justify-content:center;text-align:center}.snap .scap::before{display:none}.scene .pic{position:relative;width:100%;border-radius:4px;border:8px solid #E9E2D0;background:#E9E2D0;box-shadow:0 14px 38px rgba(0,0,0,.55),0 2px 5px rgba(0,0,0,.4);overflow:hidden}.scene .pic img{display:block;width:100%;height:auto;filter:saturate(.86) sepia(.12) contrast(1.06) brightness(.95)}
 .scene .pic>svg{display:block;width:100%;height:auto;filter:saturate(.68) sepia(.27) contrast(1.07) brightness(.93)}
 .scene .pic::before{content:"";position:absolute;inset:0;pointer-events:none;opacity:.42;mix-blend-mode:overlay;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>")}
-.scene .pic::after{content:"";position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse 125% 105% at 50% 42%,rgba(40,26,8,0) 48%,rgba(34,20,6,.55) 100%)}.scap{font-family:var(--fm);font-size:12px;color:var(--faint);margin:13px 0 0;letter-spacing:.02em;display:flex;align-items:center;gap:9px}.scap::before{content:'';width:16px;height:1px;background:var(--line2);flex-shrink:0}.story{max-width:840px;margin:42px 0 0}.story p{font-size:17px;line-height:1.92;color:var(--ink2);margin:0 0 22px}.story .em{font-family:var(--fh);font-weight:700;font-size:clamp(19px,2.6vw,24px);line-height:1.65;color:var(--ink);letter-spacing:-.01em;margin-bottom:26px}.story b{color:var(--acc-ink);font-weight:700}.thanks{max-width:840px;margin:58px 0 0;background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:32px 30px}.tlabel{font-family:var(--fm);font-size:11px;letter-spacing:.28em;color:var(--acc);margin-bottom:16px}.thanks p{font-size:16px;line-height:2;color:var(--ink2);margin:0}.thanks .dim{color:var(--faint);font-size:14.5px}.sign{max-width:840px;margin:36px 0 0;display:flex;align-items:center;gap:15px}.sign .sbar{width:32px;height:32px;color:var(--ink);opacity:.9;flex-shrink:0}.sby{font-family:var(--fd);font-weight:700;font-size:15px;color:var(--ink2)}.sby .hdl{font-family:var(--fm);font-weight:500;font-size:13px;color:var(--faint);margin-left:4px}.syr{font-family:var(--fm);font-size:11.5px;color:var(--faint);margin-top:4px}</style></head><body><div class="bar"><div class="bar-in"><a class="brand" href="/"><svg class="lgmk" viewBox="0 0 32 32" fill="currentColor"><rect x="3.5" y="20" width="6" height="8" rx="1.6"/><rect x="13" y="12.5" width="6" height="15.5" rx="1.6"/><rect x="22.5" y="5" width="6" height="23" rx="1.6"/></svg><b>ENCORE</b></a><nav class="nav"><a href="/">아카이브</a><a class="on" href="/about">만든이</a><a href="/manual">매뉴얼</a><a href="/download">다운로드</a></nav><span class="sp"></span><span class="live"><span class="d"></span>녹화 대기 중</span></div></div><div class="wrap"><main id="view" data-page="about"><section class="ahero"><div class="aey">THE STORY</div><h1 class="atitle">한 판만 더.</h1><p class="alead">PC방 불빛 아래, 라면 한 젓가락에 어택땅 한 번.<br>그 시절의 밤은, 아직 끝나지 않았습니다.</p></section><div class="story"><p class="em">스무 살, 우리는 매일 밤 PC방에 모였습니다.</p><p>한 시간에 천 원. 자리부터 맡아두고, 컵라면에 콜라 한 캔. 옆자리 친구와 팀 짜서 빠른무한 한 판. <b>어택땅 한 번에 환호하고, GG 한 번에 무너지던</b> 그 밤들이었죠.</p><p>스타리그를 보며 따라 하던 빌드, 친구 몰래 연습한 컨트롤. 새벽 세 시, 사장님 눈치를 보면서도 우리는 또 ‘<b>한 판만 더</b>’를 외쳤습니다.</p></div><div class="story"><p>그해 여름엔 온 나라가 붉은 티셔츠를 입었습니다. 광장에 모여 ‘대~한민국’을 외치고, 골이 터질 때마다 모르는 사람과 얼싸안던 — <b>그런 시절이, 우리에게 있었습니다.</b></p><p>그리고 우리는 어느새 마흔을 넘겼습니다. 각자의 자리에서 바쁘게 살아가지만, 가끔은 그 밤들이 사무치게 그립습니다.</p></div><div class="story"><p class="em">ENCORE는 그 시절을 위해 만들었습니다.</p><p>다시 모인 크루의 명경기를, 흐릿한 기억이 아니라 <b>선명한 영상</b>으로 남기려고. 켜두기만 하면 알아서 녹화되고 분석돼, 갤러리에 차곡차곡 쌓입니다.</p><p>오늘 밤도 ‘한 판만 더’를 외치는 모든 아재들에게. 다시, 스무 살.</p></div><section class="thanks"><div class="tlabel">SPECIAL THANKS</div><p>스타크래프트를 사랑하는 모든 아재들에게.<br>그리고 함께 빠른무한을 돌려준 우리 크루에게.<br><span class="dim">당신들이 있어, 그 시절이 빛났습니다.</span></p></section><div class="sign"><svg class="sbar" viewBox="0 0 32 32" fill="currentColor"><rect x="3.5" y="20" width="6" height="8" rx="1.6"/><rect x="13" y="12.5" width="6" height="15.5" rx="1.6"/><rect x="22.5" y="5" width="6" height="23" rx="1.6"/></svg><div><div class="sby">만든이 · 최성호 <span class="hdl">veatbox</span></div><div class="syr">2026 — 브루드워를 사랑하는 마음으로</div></div></div></main><footer class="ftr"><div class="ftr-brand"><svg class="lgmk" viewBox="0 0 32 32" fill="currentColor"><rect x="3.5" y="20" width="6" height="8" rx="1.6"/><rect x="13" y="12.5" width="6" height="15.5" rx="1.6"/><rect x="22.5" y="5" width="6" height="23" rx="1.6"/></svg><b>ENCORE</b></div><p>스무 살의 우리에게 — 다시, 브루드워.</p><p class="ftr-by">만든이 <b>최성호</b> · <span class="hdl">veatbox</span></p></footer></div></body></html>"""
+.scene .pic::after{content:"";position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse 125% 105% at 50% 42%,rgba(40,26,8,0) 48%,rgba(34,20,6,.55) 100%)}.scap{font-family:var(--fm);font-size:12px;color:var(--faint);margin:13px 0 0;letter-spacing:.02em;display:flex;align-items:center;gap:9px}.scap::before{content:'';width:16px;height:1px;background:var(--line2);flex-shrink:0}.story{max-width:840px;margin:42px 0 0}.story p{font-size:17px;line-height:1.92;color:var(--ink2);margin:0 0 22px}.story .em{font-family:var(--fh);font-weight:700;font-size:clamp(19px,2.6vw,24px);line-height:1.65;color:var(--ink);letter-spacing:-.01em;margin-bottom:26px}.story b{color:var(--acc-ink);font-weight:700}.thanks{max-width:840px;margin:58px 0 0;background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:32px 30px}.tlabel{font-family:var(--fm);font-size:11px;letter-spacing:.28em;color:var(--acc);margin-bottom:16px}.thanks p{font-size:16px;line-height:2;color:var(--ink2);margin:0}.thanks .dim{color:var(--faint);font-size:14.5px}.sign{max-width:840px;margin:36px 0 0;display:flex;align-items:center;gap:15px}.sign .sbar{width:32px;height:32px;color:var(--ink);opacity:.9;flex-shrink:0}.sby{font-family:var(--fd);font-weight:700;font-size:15px;color:var(--ink2)}.sby .hdl{font-family:var(--fm);font-weight:500;font-size:13px;color:var(--faint);margin-left:4px}.syr{font-family:var(--fm);font-size:11.5px;color:var(--faint);margin-top:4px}</style></head><body><div class="bar"><div class="bar-in"><a class="brand" href="/"><svg class="lgmk" viewBox="0 0 32 32" fill="currentColor"><rect x="3.5" y="20" width="6" height="8" rx="1.6"/><rect x="13" y="12.5" width="6" height="15.5" rx="1.6"/><rect x="22.5" y="5" width="6" height="23" rx="1.6"/></svg><b>ENCORE</b></a><nav class="nav"><a href="/">아카이브</a><a class="on" href="/about">만든이</a><a href="/manual">매뉴얼</a><a href="/download">다운로드</a></nav><span class="sp"></span><span class="live"><span class="d"></span>클라우드 연결됨</span></div></div><div class="wrap"><main id="view" data-page="about"><section class="ahero"><div class="aey">THE STORY</div><h1 class="atitle">한 판만 더.</h1><p class="alead">PC방 불빛 아래, 라면 한 젓가락에 어택땅 한 번.<br>그 시절의 밤은, 아직 끝나지 않았습니다.</p></section><div class="story"><p class="em">스무 살, 우리는 매일 밤 PC방에 모였습니다.</p><p>한 시간에 천 원. 자리부터 맡아두고, 컵라면에 콜라 한 캔. 옆자리 친구와 팀 짜서 빠른무한 한 판. <b>어택땅 한 번에 환호하고, GG 한 번에 무너지던</b> 그 밤들이었죠.</p><p>스타리그를 보며 따라 하던 빌드, 친구 몰래 연습한 컨트롤. 새벽 세 시, 사장님 눈치를 보면서도 우리는 또 ‘<b>한 판만 더</b>’를 외쳤습니다.</p></div><div class="story"><p>그해 여름엔 온 나라가 붉은 티셔츠를 입었습니다. 광장에 모여 ‘대~한민국’을 외치고, 골이 터질 때마다 모르는 사람과 얼싸안던 — <b>그런 시절이, 우리에게 있었습니다.</b></p><p>그리고 우리는 어느새 마흔을 넘겼습니다. 각자의 자리에서 바쁘게 살아가지만, 가끔은 그 밤들이 사무치게 그립습니다.</p></div><div class="story"><p class="em">ENCORE는 그 시절을 위해 만들었습니다.</p><p>다시 모인 크루의 명경기를, 흐릿한 기억이 아니라 <b>선명한 영상</b>으로 남기려고. 켜두기만 하면 알아서 녹화되고 분석돼, 갤러리에 차곡차곡 쌓입니다.</p><p>오늘 밤도 ‘한 판만 더’를 외치는 모든 아재들에게. 다시, 스무 살.</p></div><section class="thanks"><div class="tlabel">SPECIAL THANKS</div><p>스타크래프트를 사랑하는 모든 아재들에게.<br>그리고 함께 빠른무한을 돌려준 우리 크루에게.<br><span class="dim">당신들이 있어, 그 시절이 빛났습니다.</span></p></section><div class="sign"><svg class="sbar" viewBox="0 0 32 32" fill="currentColor"><rect x="3.5" y="20" width="6" height="8" rx="1.6"/><rect x="13" y="12.5" width="6" height="15.5" rx="1.6"/><rect x="22.5" y="5" width="6" height="23" rx="1.6"/></svg><div><div class="sby">만든이 · 최성호 <span class="hdl">veatbox</span></div><div class="syr">2026 — 브루드워를 사랑하는 마음으로</div></div></div></main><footer class="ftr"><div class="ftr-brand"><svg class="lgmk" viewBox="0 0 32 32" fill="currentColor"><rect x="3.5" y="20" width="6" height="8" rx="1.6"/><rect x="13" y="12.5" width="6" height="15.5" rx="1.6"/><rect x="22.5" y="5" width="6" height="23" rx="1.6"/></svg><b>ENCORE</b></div><p>스무 살의 우리에게 — 다시, 브루드워.</p><p class="ftr-by">만든이 <b>최성호</b> · <span class="hdl">veatbox</span></p></footer></div></body></html>"""
+
+MANUAL_PAGE = r"""<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>매뉴얼 · ENCORE</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/sun-typeface/SUIT@2/fonts/variable/woff2/SUIT-Variable.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/sun-typeface/SUITE@2/fonts/variable/woff2/SUITE-Variable.css">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>:root{--bg:#0C0D10;--surface:#131519;--well:#0E0F13;--ink:#ECEEF2;--ink2:#C5C9D0;--dim:#9AA0AA;--faint:#636872;--line:#1F232B;--line2:#2C313B;--acc:#3D8BFF;--acc-ink:#62A1FF;--acc-soft:rgba(61,139,255,.12);--acc-line:rgba(61,139,255,.34);--fd:'SUIT Variable','Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif;--fh:'SUITE Variable','SUIT Variable',sans-serif;--fm:'IBM Plex Mono',ui-monospace,monospace}
+*{box-sizing:border-box}html,body{margin:0}body{background:var(--bg);color:var(--ink);font-family:var(--fd);font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased}a{color:inherit;text-decoration:none}svg{display:block}
+.bar{position:sticky;top:0;z-index:50;background:var(--bg);border-bottom:1px solid var(--line)}.bar-in{max-width:1080px;margin:0 auto;padding:14px 28px;display:flex;align-items:center;gap:18px}.brand{display:flex;align-items:center;gap:10px}.brand .lgmk{width:20px;height:20px;color:var(--ink)}.brand b{font-family:var(--fh);font-weight:800;font-size:17px;letter-spacing:.2em}
+.nav{display:flex;gap:2px;margin-left:16px}.nav a{font-family:var(--fd);font-weight:600;font-size:14px;color:var(--dim);padding:8px 14px;border-radius:9px;transition:.15s}.nav a.on{color:var(--ink);background:var(--surface)}.nav a:hover{color:var(--ink)}.bar .sp{flex:1}.live{display:inline-flex;align-items:center;gap:8px;font-family:var(--fm);font-size:12px;color:var(--dim);background:var(--surface);border:1px solid var(--line);padding:9px 13px;border-radius:100px}.live .d{width:6px;height:6px;border-radius:50%;background:var(--acc);box-shadow:0 0 0 3px var(--acc-soft)}
+.wrap{max-width:1080px;margin:0 auto;padding:0 28px 120px}
+.ftr{margin-top:74px;padding-top:30px;border-top:1px solid var(--line)}.ftr-brand{display:flex;align-items:center;gap:9px;margin-bottom:13px}.ftr-brand .lgmk{width:18px;height:18px;color:var(--ink)}.ftr-brand b{font-family:var(--fh);font-weight:800;font-size:15px;letter-spacing:.18em}.ftr p{margin:5px 0;font-size:13px;color:var(--dim)}.ftr-by{font-family:var(--fd);font-size:13px;color:var(--dim);margin-top:13px}.ftr-by b{color:var(--ink2);font-weight:700}.ftr-by .hdl{font-family:var(--fm);font-size:12px;color:var(--faint)}
+.hero{padding:58px 0 10px}.ey{font-family:var(--fm);font-size:11px;letter-spacing:.3em;color:var(--acc);margin-bottom:16px;text-transform:uppercase}.h1{font-family:var(--fh);font-weight:800;font-size:clamp(34px,5.5vw,54px);letter-spacing:-.03em;margin:0;line-height:1.05;color:#F7F4EE}.lead{font-family:var(--fh);font-weight:700;font-size:clamp(17px,2.2vw,21px);line-height:1.7;color:var(--ink2);margin:22px 0 0;max-width:780px;letter-spacing:-.01em}
+.sec{margin:48px 0 0}.sec h2{font-family:var(--fh);font-weight:800;font-size:22px;margin:0 0 18px}
+.cards{display:grid;grid-template-columns:1fr 1fr;gap:18px}@media(max-width:720px){.cards{grid-template-columns:1fr}.nav{display:none}.live{display:none}}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:26px}.card .tag{font-family:var(--fm);font-size:11px;letter-spacing:.16em;color:var(--acc-ink);text-transform:uppercase}.card h3{font-family:var(--fh);font-weight:800;font-size:20px;margin:10px 0 16px}
+.steps{list-style:none;padding:0;margin:0;counter-reset:s}.steps li{position:relative;padding:0 0 16px 42px;counter-increment:s;color:var(--ink2);font-size:14.5px;line-height:1.65}.steps li:last-child{padding-bottom:0}.steps li::before{content:counter(s);position:absolute;left:0;top:-1px;width:28px;height:28px;border-radius:9px;background:var(--acc-soft);border:1px solid var(--acc-line);color:var(--acc-ink);font-family:var(--fm);font-size:13px;display:grid;place-items:center;font-weight:600}.steps li b{color:var(--ink)}
+.btn{display:inline-flex;align-items:center;gap:9px;font-family:var(--fd);font-weight:700;font-size:15px;background:var(--acc);color:#fff;padding:14px 24px;border-radius:11px;margin-top:6px}.btn:hover{filter:brightness(1.08)}.btn .lgmk{width:18px;height:18px;color:#fff}
+.note{background:var(--well);border:1px solid var(--line);border-radius:12px;padding:16px 18px;color:var(--dim);font-size:13.5px;line-height:1.75;margin-top:20px}.note b{color:var(--ink2)}.note .k{font-family:var(--fm);font-size:12px;color:var(--acc-ink)}
+.prose p{color:var(--ink2);font-size:15.5px;line-height:1.85;max-width:720px;margin:0 0 16px}</style></head><body>
+<div class="bar" id="bar"><div class="bar-in"><div class="brand"><svg class="lgmk" viewBox="0 0 32 32" fill="currentColor"><rect x="3.5" y="20" width="6" height="8" rx="1.6"/><rect x="13" y="12.5" width="6" height="15.5" rx="1.6"/><rect x="22.5" y="5" width="6" height="23" rx="1.6"/></svg><b>ENCORE</b></div><nav class="nav"><a class="" href="/">아카이브</a><a class="" href="/about">만든이</a><a class="on" href="/manual">매뉴얼</a><a class="" href="/download">다운로드</a></nav><span class="sp"></span><span class="live"><span class="d"></span>클라우드 연결됨</span></div></div>
+<div class="wrap">
+<section class="hero"><div class="ey">Guide</div><h1 class="h1">사용법</h1><p class="lead">그때 그 빨무를, 다시. 그냥 보는 것도 내 경기를 올리는 것도 어렵지 않습니다.</p></section>
+<section class="sec"><h2>두 가지 방법</h2><div class="cards">
+<div class="card"><div class="tag">Just Watch</div><h3>그냥 보고 싶다면</h3><ol class="steps">
+<li>설치도 가입도 필요 없습니다. <b>아카이브</b>를 열어 경기를 둘러보세요.</li>
+<li>경기 카드를 누르면 <b>영상</b>이 열립니다. 정렬·필터로 원하는 경기를 골라요.</li>
+<li><b>하이라이트</b>의 점이나 카드를 누르면 그 장면으로 바로 이동합니다.</li>
+<li><b>선수별 상세</b>에서 빌드오더·유닛 구성·APM·코치 리포트(공/방 업글, 멀티, 생산력)를 확인하세요.</li>
+<li>마음에 들면 <b>좋아요</b>와 <b>코멘트</b>를 남겨요.</li></ol></div>
+<div class="card"><div class="tag">Upload</div><h3>내 경기를 올리고 싶다면</h3><ol class="steps">
+<li><b>다운로드</b> 페이지에서 ENCORE 레코더(.exe)를 받습니다.</li>
+<li>받은 파일을 <b>실행</b>하면 갤러리 창이 열립니다. 창은 켜둔 채로.</li>
+<li>스타크래프트로 <b>빠른무한(빨무)</b>을 플레이하세요.</li>
+<li>게임이 끝나면 자동으로 <b>녹화 → 리플레이 분석 → 클라우드 업로드</b>가 됩니다.</li>
+<li>잠시 후 이 아카이브에 경기가 올라옵니다. 끝!</li></ol></div></div>
+<div class="note">영상은 <b>클라우드(공개 저장소)</b>에 올라가고, 이 사이트 주소만 있으면 누구나 볼 수 있어요. 녹화 도구는 Windows에서 동작합니다.</div></section>
+<footer class="ftr"><div class="ftr-brand"><svg class="lgmk" viewBox="0 0 32 32" fill="currentColor"><rect x="3.5" y="20" width="6" height="8" rx="1.6"/><rect x="13" y="12.5" width="6" height="15.5" rx="1.6"/><rect x="22.5" y="5" width="6" height="23" rx="1.6"/></svg><b>ENCORE</b></div><p>스무 살의 우리에게 — 다시, 브루드워.</p><p class="ftr-by">만든이 <b>최성호</b> · <span class="hdl">veatbox</span></p></footer>
+</div></body></html>"""
+
+DOWNLOAD_PAGE = r"""<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>다운로드 · ENCORE</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/sun-typeface/SUIT@2/fonts/variable/woff2/SUIT-Variable.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/sun-typeface/SUITE@2/fonts/variable/woff2/SUITE-Variable.css">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>:root{--bg:#0C0D10;--surface:#131519;--well:#0E0F13;--ink:#ECEEF2;--ink2:#C5C9D0;--dim:#9AA0AA;--faint:#636872;--line:#1F232B;--line2:#2C313B;--acc:#3D8BFF;--acc-ink:#62A1FF;--acc-soft:rgba(61,139,255,.12);--acc-line:rgba(61,139,255,.34);--fd:'SUIT Variable','Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif;--fh:'SUITE Variable','SUIT Variable',sans-serif;--fm:'IBM Plex Mono',ui-monospace,monospace}
+*{box-sizing:border-box}html,body{margin:0}body{background:var(--bg);color:var(--ink);font-family:var(--fd);font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased}a{color:inherit;text-decoration:none}svg{display:block}
+.bar{position:sticky;top:0;z-index:50;background:var(--bg);border-bottom:1px solid var(--line)}.bar-in{max-width:1080px;margin:0 auto;padding:14px 28px;display:flex;align-items:center;gap:18px}.brand{display:flex;align-items:center;gap:10px}.brand .lgmk{width:20px;height:20px;color:var(--ink)}.brand b{font-family:var(--fh);font-weight:800;font-size:17px;letter-spacing:.2em}
+.nav{display:flex;gap:2px;margin-left:16px}.nav a{font-family:var(--fd);font-weight:600;font-size:14px;color:var(--dim);padding:8px 14px;border-radius:9px;transition:.15s}.nav a.on{color:var(--ink);background:var(--surface)}.nav a:hover{color:var(--ink)}.bar .sp{flex:1}.live{display:inline-flex;align-items:center;gap:8px;font-family:var(--fm);font-size:12px;color:var(--dim);background:var(--surface);border:1px solid var(--line);padding:9px 13px;border-radius:100px}.live .d{width:6px;height:6px;border-radius:50%;background:var(--acc);box-shadow:0 0 0 3px var(--acc-soft)}
+.wrap{max-width:1080px;margin:0 auto;padding:0 28px 120px}
+.ftr{margin-top:74px;padding-top:30px;border-top:1px solid var(--line)}.ftr-brand{display:flex;align-items:center;gap:9px;margin-bottom:13px}.ftr-brand .lgmk{width:18px;height:18px;color:var(--ink)}.ftr-brand b{font-family:var(--fh);font-weight:800;font-size:15px;letter-spacing:.18em}.ftr p{margin:5px 0;font-size:13px;color:var(--dim)}.ftr-by{font-family:var(--fd);font-size:13px;color:var(--dim);margin-top:13px}.ftr-by b{color:var(--ink2);font-weight:700}.ftr-by .hdl{font-family:var(--fm);font-size:12px;color:var(--faint)}
+.hero{padding:58px 0 10px}.ey{font-family:var(--fm);font-size:11px;letter-spacing:.3em;color:var(--acc);margin-bottom:16px;text-transform:uppercase}.h1{font-family:var(--fh);font-weight:800;font-size:clamp(34px,5.5vw,54px);letter-spacing:-.03em;margin:0;line-height:1.05;color:#F7F4EE}.lead{font-family:var(--fh);font-weight:700;font-size:clamp(17px,2.2vw,21px);line-height:1.7;color:var(--ink2);margin:22px 0 0;max-width:780px;letter-spacing:-.01em}
+.sec{margin:48px 0 0}.sec h2{font-family:var(--fh);font-weight:800;font-size:22px;margin:0 0 18px}
+.cards{display:grid;grid-template-columns:1fr 1fr;gap:18px}@media(max-width:720px){.cards{grid-template-columns:1fr}.nav{display:none}.live{display:none}}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:26px}.card .tag{font-family:var(--fm);font-size:11px;letter-spacing:.16em;color:var(--acc-ink);text-transform:uppercase}.card h3{font-family:var(--fh);font-weight:800;font-size:20px;margin:10px 0 16px}
+.steps{list-style:none;padding:0;margin:0;counter-reset:s}.steps li{position:relative;padding:0 0 16px 42px;counter-increment:s;color:var(--ink2);font-size:14.5px;line-height:1.65}.steps li:last-child{padding-bottom:0}.steps li::before{content:counter(s);position:absolute;left:0;top:-1px;width:28px;height:28px;border-radius:9px;background:var(--acc-soft);border:1px solid var(--acc-line);color:var(--acc-ink);font-family:var(--fm);font-size:13px;display:grid;place-items:center;font-weight:600}.steps li b{color:var(--ink)}
+.btn{display:inline-flex;align-items:center;gap:9px;font-family:var(--fd);font-weight:700;font-size:15px;background:var(--acc);color:#fff;padding:14px 24px;border-radius:11px;margin-top:6px}.btn:hover{filter:brightness(1.08)}.btn .lgmk{width:18px;height:18px;color:#fff}
+.note{background:var(--well);border:1px solid var(--line);border-radius:12px;padding:16px 18px;color:var(--dim);font-size:13.5px;line-height:1.75;margin-top:20px}.note b{color:var(--ink2)}.note .k{font-family:var(--fm);font-size:12px;color:var(--acc-ink)}
+.prose p{color:var(--ink2);font-size:15.5px;line-height:1.85;max-width:720px;margin:0 0 16px}</style></head><body>
+<div class="bar" id="bar"><div class="bar-in"><div class="brand"><svg class="lgmk" viewBox="0 0 32 32" fill="currentColor"><rect x="3.5" y="20" width="6" height="8" rx="1.6"/><rect x="13" y="12.5" width="6" height="15.5" rx="1.6"/><rect x="22.5" y="5" width="6" height="23" rx="1.6"/></svg><b>ENCORE</b></div><nav class="nav"><a class="" href="/">아카이브</a><a class="" href="/about">만든이</a><a class="" href="/manual">매뉴얼</a><a class="on" href="/download">다운로드</a></nav><span class="sp"></span><span class="live"><span class="d"></span>클라우드 연결됨</span></div></div>
+<div class="wrap">
+<section class="hero"><div class="ey">Download</div><h1 class="h1">레코더 받기</h1><p class="lead">내 빨무를 자동으로 녹화하고 분석해서 아카이브에 올려주는 Windows 프로그램입니다.</p></section>
+<section class="sec"><h2>받고 실행하기</h2><ol class="steps" style="max-width:760px">
+<li>아래 버튼으로 GitHub에서 <b>최신 .exe</b>를 받습니다 (Releases에 최신 빌드가 올라옵니다).</li>
+<li>받은 <b>.exe를 실행</b>합니다. 처음엔 Windows가 보안 경고를 띄울 수 있어요.</li>
+<li>실행되면 <b>갤러리 창이 자동으로 열립니다</b>. 이 창은 켜둔 채로 두세요.</li>
+<li>스타크래프트로 <b>빨무</b>를 플레이하면, 게임이 끝날 때마다 <b>자동 녹화·분석·업로드</b>됩니다.</li></ol>
+<a class="btn" href="https://github.com/choisungho-collab/encore/releases" target="_blank" rel="noopener"><svg class="lgmk" viewBox="0 0 32 32" fill="currentColor"><rect x="3.5" y="20" width="6" height="8" rx="1.6"/><rect x="13" y="12.5" width="6" height="15.5" rx="1.6"/><rect x="22.5" y="5" width="6" height="23" rx="1.6"/></svg>GitHub에서 .exe 받기</a>
+<div class="note"><b>준비물:</b> Windows 10/11 · NVIDIA 그래픽카드 권장(NVENC 하드웨어 녹화). 첫 실행 때 보안 경고가 뜨면 <span class="k">추가 정보 → 실행</span>을 누르면 됩니다. 최신 빌드가 안 보이면 저장소의 <span class="k">Actions</span> 탭에서도 받을 수 있어요.</div></section>
+<footer class="ftr"><div class="ftr-brand"><svg class="lgmk" viewBox="0 0 32 32" fill="currentColor"><rect x="3.5" y="20" width="6" height="8" rx="1.6"/><rect x="13" y="12.5" width="6" height="15.5" rx="1.6"/><rect x="22.5" y="5" width="6" height="23" rx="1.6"/></svg><b>ENCORE</b></div><p>스무 살의 우리에게 — 다시, 브루드워.</p><p class="ftr-by">만든이 <b>최성호</b> · <span class="hdl">veatbox</span></p></footer>
+</div></body></html>"""
+
 
 @app.get("/about")
 def page_about():
@@ -2049,17 +2200,11 @@ def page_asset(name):
 
 @app.get("/manual")
 def page_manual():
-    f = os.path.join(WEB_DIR, "manual.html")
-    if not os.path.isfile(f):
-        return Response("메뉴얼을 찾을 수 없어요 (web/manual.html). <a href='/'>홈으로</a>", mimetype="text/html")
-    return send_file(f)
+    return Response(MANUAL_PAGE, mimetype="text/html")
 
 @app.get("/download")
 def page_download():
-    f = os.path.join(WEB_DIR, "download.html")
-    if not os.path.isfile(f):
-        return Response("다운로드 페이지를 찾을 수 없어요 (web/download.html). <a href='/'>홈으로</a>", mimetype="text/html")
-    return send_file(f)
+    return Response(DOWNLOAD_PAGE, mimetype="text/html")
 
 @app.get("/app.zip")
 def app_zip():
