@@ -304,30 +304,61 @@ def ensure_ffmpeg():
     log("    4) START.bat 다시 실행")
     return None
 
+def _dl(url, timeout, tries=3):
+    """간단 재시도 다운로드 — 504/일시적 게이트웨이 오류·끊김 대응."""
+    last = None
+    for i in range(tries):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            return urllib.request.urlopen(req, timeout=timeout).read()
+        except Exception as e:
+            last = e
+            if i < tries - 1: time.sleep(1.5 * (i + 1))
+    raise last
+
+def _extract_screp(blob, name, dst):
+    if name.lower().endswith(".zip"):
+        z = zipfile.ZipFile(io.BytesIO(blob))
+        m = next(n for n in z.namelist() if n.lower().endswith("screp.exe"))
+        with z.open(m) as s, open(dst, "wb") as d: shutil.copyfileobj(s, d)
+    else:
+        import tarfile
+        t = tarfile.open(fileobj=io.BytesIO(blob))
+        m = next(n for n in t.getnames() if n.lower().endswith("screp.exe"))
+        with t.extractfile(m) as s, open(dst, "wb") as d: shutil.copyfileobj(s, d)
+
+# API가 죽었을 때(레이트리밋/504) 폴백할 알려진 버전들
+_SCREP_FALLBACK = [("v1.13.2", "screp_v1.13.2_windows_amd64.zip"),
+                   ("v1.13.1", "screp_v1.13.1_windows_amd64.zip"),
+                   ("v1.12.18", "screp_v1.12.18_windows_amd64.zip")]
+
 def ensure_screp():
+    # 1) 빌드 때 번들된 screp — 런타임 다운로드 자체가 없으니 504가 날 일이 없음
+    bundled = os.path.join(BUNDLE_DIR, "screp.exe")
+    if os.path.isfile(bundled): return bundled
+    # 2) exe 옆에 이미 받아둔 것 / PATH
     local = os.path.join(HERE, "screp.exe")
     if os.path.isfile(local): return local
     found = shutil.which("screp")
     if found: return found
+    # 3) 다운로드: GitHub API(재시도) → 실패 시 고정 URL 폴백(재시도)
     try:
-        req = urllib.request.Request("https://api.github.com/repos/icza/screp/releases/latest",
-                                     headers={"User-Agent": "sc-recorder"})
-        rel = json.load(urllib.request.urlopen(req, timeout=20))
-        asset = next(a for a in rel.get("assets", [])
-                     if "windows" in a["name"].lower() and ("amd64" in a["name"].lower() or "x86_64" in a["name"].lower()))
-        blob = urllib.request.urlopen(asset["browser_download_url"], timeout=60).read()
-        name = asset["name"].lower()
-        if name.endswith(".zip"):
-            z = zipfile.ZipFile(io.BytesIO(blob))
-            m = next(n for n in z.namelist() if n.lower().endswith("screp.exe"))
-            with z.open(m) as s, open(local, "wb") as d: shutil.copyfileobj(s, d)
-        else:
-            import tarfile
-            t = tarfile.open(fileobj=io.BytesIO(blob))
-            m = next(n for n in t.getnames() if n.lower().endswith("screp.exe"))
-            with t.extractfile(m) as s, open(local, "wb") as d: shutil.copyfileobj(s, d)
-        log("screp 준비 완료 (갤러리에 맵/종족/APM/승패 표시됨).")
-        return local
+        try:
+            rel = json.loads(_dl("https://api.github.com/repos/icza/screp/releases/latest", 30, tries=3))
+            asset = next(a for a in rel.get("assets", [])
+                         if "windows" in a["name"].lower() and ("amd64" in a["name"].lower() or "x86_64" in a["name"].lower()))
+            _extract_screp(_dl(asset["browser_download_url"], 120, tries=3), asset["name"], local)
+        except Exception:
+            for tag, fn in _SCREP_FALLBACK:
+                try:
+                    _extract_screp(_dl(f"https://github.com/icza/screp/releases/download/{tag}/{fn}", 120, tries=2), fn, local)
+                    break
+                except Exception:
+                    continue
+        if os.path.isfile(local):
+            log("screp 준비 완료 (갤러리에 맵/종족/APM/승패 표시됨).")
+            return local
+        raise RuntimeError("다운로드 실패(네트워크/GitHub 일시 오류) — 잠시 후 재실행하면 자동 재시도됩니다")
     except Exception as e:
         log(f"(screp 자동 설치 생략 — 영상은 정상, 메타데이터만 비표시: {e})")
         return None
@@ -458,6 +489,30 @@ def _up_level_times(frames, gap=2400, cap=3):
             out.append(mmss(fr)); last = fr
             if len(out) >= cap: break
     return out[:cap]
+def _worker_ms(cmd_fr, th_fr, rl, total_fr):
+    """일꾼 N기 도달 시각 — 생산 명령(무한맵에선 돈이 많아 미리 연타·예약됨)을 실제 생산 능력으로 상한 처리.
+    베이스(초기 1곳 + 확장) 1곳당 ~빌드타임마다 1기. 게임 종료까지 물리적으로 도달 못한 마일스톤은 생략."""
+    start = 4
+    bt = 342.0 if rl == "Z" else 300.0   # 일꾼 빌드 프레임 (P/T ~12.6s, Z 라바 제한 ~14.4s @ Fastest)
+    cf = sorted(cmd_fr); th = sorted(th_fr)
+    def earliest(n):
+        need = n - start
+        if need <= 0: return 0.0
+        cap = 0.0; t = 0.0; bases = 1
+        for ev in th + [float(total_fr or 0) + 1e9]:
+            span = ev - t; rate = bases / bt
+            if span > 0 and cap + rate * span >= need: return t + (need - cap) / rate
+            cap += max(0.0, rate * span); t = ev; bases += 1
+        return None
+    out = {}
+    for n in (10, 20, 30, 40, 50):
+        if len(cf) < n: continue
+        e = earliest(n)
+        if e is None: continue
+        fr = max(cf[n - 1], e)
+        if total_fr and fr > total_fr: continue
+        out[str(n)] = mmss(fr)
+    return out
 def _upgrade_level(frames, gap=2400, cap=3):
     """업글 커맨드 프레임들 → 실제 레벨 추정. 연구시간(~gap프레임)보다 가까운 재클릭(연타)은 한 레벨로 묶음."""
     if not frames: return 0
@@ -565,7 +620,8 @@ def extract_analysis(rep_path):
         arm_lv = max([_upgrade_level(pl["up_fr"].get(n, [])) for n in GND_ARM.get(rl, [])] or [0])
         _ut = [{"ko": ko, "lv": _up_level_times(pl["up_fr"].get(nm, []))} for (nm, ko) in COMBAT_UP.get(rl, []) if pl["up_fr"].get(nm)]
         _wf = sorted(pl.get("worker_fr", []))
-        _wms = {str(n): mmss(_wf[n-1]) for n in (10, 20, 30, 40, 50) if len(_wf) >= n}
+        _th_fr = sorted(round(_mmss_to_sec(t["t"]) * FPS_GAME) for t in pl["townhalls"])
+        _wms = _worker_ms(_wf, _th_fr, rl, frames)
         _tot_sec = frames/FPS_GAME if frames else 0
         _step = max(5.0, (_tot_sec or 60)/80.0)
         _supc = _cum_at_bins([(fr,sp) for fr,sp in pl["supply_events"]], _tot_sec, _step)

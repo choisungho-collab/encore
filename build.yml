@@ -27,15 +27,34 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      - name: Bundle screp parser (런타임 다운로드 제거 → 504 없음)
+        shell: pwsh
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download --repo icza/screp --pattern "*windows_amd64*.zip" --dir screp_dl
+          $zip = (Get-ChildItem screp_dl/*.zip | Select-Object -First 1).FullName
+          Expand-Archive -Path $zip -DestinationPath screp_bin -Force
+          $exe = (Get-ChildItem screp_bin -Recurse -Filter screp.exe | Select-Object -First 1).FullName
+          Copy-Item $exe -Destination screp.exe -Force
+          Write-Host "screp.exe bundled"
+
       - name: Build single EXE
-        run: >
-          pyinstaller --onefile --windowed --name sc_recorder --noupx
-          --add-data "web;web"
-          --hidden-import psutil --hidden-import flask --hidden-import requests
-          --hidden-import boto3 --hidden-import botocore --hidden-import waitress
-          --hidden-import tkinter
-          --collect-data botocore
-          sc_recorder.py
+        shell: pwsh
+        run: |
+          $a = @(
+            '--onefile','--windowed','--name','sc_recorder','--noupx',
+            '--add-data','web;web',
+            '--hidden-import','psutil','--hidden-import','flask','--hidden-import','requests',
+            '--hidden-import','boto3','--hidden-import','botocore','--hidden-import','waitress',
+            '--hidden-import','tkinter',
+            '--collect-data','botocore'
+          )
+          if (Test-Path screp.exe) { $a += @('--add-binary','screp.exe;.'); Write-Host 'screp bundled into exe' }
+          else { Write-Host 'screp NOT bundled - will download at runtime' }
+          $a += 'sc_recorder.py'
+          pyinstaller @a
 
       - name: Zip EXE (avoids Chrome's executable-download block)
         shell: pwsh
