@@ -583,9 +583,14 @@ def extract_analysis(rep_path):
         elif tn == "Minimap Ping": pl["pings"] += 1
         uname = (c.get("Unit") or {}).get("Name")
         if tn == "Build":
-            pl["build"].append({"t": mmss(f), "name": uname, "cat": "building"})
-            pl["cost_events"].append((f,)+BUILD_MG.get(uname,(0,0)))
-            if uname in TOWN_HALLS: pl["townhalls"].append({"t": mmss(f), "name": uname})
+            _ps = c.get("Pos") or {}; _bx = _ps.get("X"); _by = _ps.get("Y")
+            _bk = (uname, _bx, _by) if _bx is not None else (uname, "nopos", f)  # 같은 건물+같은 좌표=연타(1개로), 좌표 없으면 합치지 않음
+            _bs = pl.setdefault("_bseen", set())
+            if _bk not in _bs:
+                _bs.add(_bk)
+                pl["build"].append({"t": mmss(f), "name": uname, "cat": "building"})
+                pl["cost_events"].append((f,)+BUILD_MG.get(uname,(0,0)))
+                if uname in TOWN_HALLS: pl["townhalls"].append({"t": mmss(f), "name": uname})
         elif tn == "Building Morph":
             pl["build"].append({"t": mmss(f), "name": uname, "cat": "morph"})
             pl["cost_events"].append((f,)+BUILD_MG.get(uname,(0,0)))
@@ -2177,38 +2182,48 @@ def _hide_console():
 def run_gui(cfg, url):
     """아주 작은 상태 표시줄. 평소엔 상태만, 문제가 있을 때만 로그가 펼쳐진다."""
     import tkinter as tk
-    BG="#0F1013"; INK="#ECEEF2"; DIM="#9AA0AA"; FAINT="#636872"
-    JADE="#3D8BFF"; REC="#E8694C"; AMB="#E0B441"; LINE="#23272E"; KOR="Malgun Gothic"
-    W = 430
+    import tkinter.font as _tkfont
+    BG="#0F1013"; SURF="#15171C"; INK="#ECEEF2"; INK2="#C5C9D0"; DIM="#9AA0AA"; FAINT="#6B707A"
+    JADE="#3D8BFF"; JADE2="#62A1FF"; REC="#E8694C"; AMB="#E0B441"; LINE="#23272E"; LINE2="#2C313B"
+    W = 444
     root = tk.Tk(); root.title("ENCORE"); root.configure(bg=BG)
     try: root.iconphoto(True, tk.PhotoImage(data=_ENCORE_ICON))
     except Exception: pass
-    BASE_H, SET_H, LOG_H = 172, 182, 206
+    try:
+        _fam=set(_tkfont.families())
+        def _pick(*c):
+            for f in c:
+                if f in _fam: return f
+            return c[-1]
+    except Exception:
+        def _pick(*c): return c[0]
+    KOR=_pick("Malgun Gothic","맑은 고딕","Segoe UI"); LAT=_pick("Segoe UI","Malgun Gothic"); MON=_pick("Consolas","Cascadia Mono","Segoe UI")
+    BASE_H, SET_H, LOG_H = 200, 210, 208
     root.geometry(f"{W}x{BASE_H}"); root.resizable(False, True)
     st = {"log": False, "settings": False}
 
     head = tk.Frame(root, bg=BG); head.pack(fill="x", padx=14, pady=(10,0))
-    mk = tk.Canvas(head, width=17, height=13, bg=BG, highlightthickness=0); mk.pack(side="left", pady=(2,0))
-    mk.create_rectangle(0,8,4,13, fill=INK, outline=""); mk.create_rectangle(6,4,10,13, fill=INK, outline=""); mk.create_rectangle(13,0,17,13, fill=INK, outline="")
-    tk.Label(head, text="ENCORE", bg=BG, fg=INK, font=(KOR,9,"bold")).pack(side="left", padx=(6,0))
-    games_lbl = tk.Label(head, text="", bg=BG, fg=FAINT, font=("Consolas",9)); games_lbl.pack(side="right")
+    mk = tk.Canvas(head, width=22, height=17, bg=BG, highlightthickness=0); mk.pack(side="left", pady=(2,0))
+    mk.create_rectangle(0,10,5,17, fill=INK, outline=""); mk.create_rectangle(8,5,13,17, fill=INK, outline=""); mk.create_rectangle(17,0,22,17, fill=JADE2, outline="")
+    tk.Label(head, text="ENCORE", bg=BG, fg=INK, font=(LAT,13,"bold")).pack(side="left", padx=(7,0))
+    games_lbl = tk.Label(head, text="", bg=BG, fg=DIM, font=(MON,9)); games_lbl.pack(side="right")
     _cs = cloud_state()
-    _cmap = {"cloud": (JADE, "☁ 클라우드"), "readonly": (AMB, "⚠ 키 필요"), "local": (FAINT, "● 로컬")}
+    _cmap = {"cloud": (JADE2, "☁ 클라우드"), "readonly": (AMB, "⚠ 키 필요"), "local": (DIM, "● 로컬")}
     _cc, _ct = _cmap[_cs]
-    tk.Label(head, text=_ct, bg=BG, fg=_cc, font=(KOR,8,"bold")).pack(side="right", padx=(0,10))
+    tk.Label(head, text=_ct, bg=SURF, fg=_cc, font=(KOR,9,"bold"), padx=8, pady=2).pack(side="right", padx=(0,9))
 
     midf = tk.Frame(root, bg=BG); midf.pack(fill="x", padx=14, pady=(6,0))
     dot = tk.Canvas(midf, width=12, height=12, bg=BG, highlightthickness=0); dot.pack(side="left", pady=(5,0))
     did = dot.create_oval(1,1,11,11, fill=FAINT, outline="")
     stx = tk.Frame(midf, bg=BG); stx.pack(side="left", padx=(9,0))
-    status_lbl = tk.Label(stx, text="시작 중…", bg=BG, fg=INK, font=(KOR,15,"bold"), anchor="w"); status_lbl.pack(anchor="w")
-    sub_lbl = tk.Label(stx, text="", bg=BG, fg=DIM, font=(KOR,8), anchor="w"); sub_lbl.pack(anchor="w")
+    status_lbl = tk.Label(stx, text="시작 중…", bg=BG, fg=INK, font=(KOR,16,"bold"), anchor="w"); status_lbl.pack(anchor="w")
+    sub_lbl = tk.Label(stx, text="", bg=BG, fg=DIM, font=(KOR,9), anchor="w"); sub_lbl.pack(anchor="w")
 
     logwrap = tk.Frame(root, bg=BG)
-    errbar = tk.Label(logwrap, text="", bg="#3A1E18", fg="#ffb4a6", font=(KOR,8), anchor="w",
-                      padx=9, pady=5, justify="left", wraplength=W-40)
-    logtxt = tk.Text(logwrap, bg="#0C0D10", fg=DIM, font=("Consolas",8), bd=0, padx=9, pady=7,
-                     height=9, wrap="word", state="disabled")
+    errbar = tk.Label(logwrap, text="", bg="#3A1E18", fg="#ffb4a6", font=(KOR,9), anchor="w",
+                      padx=10, pady=6, justify="left", wraplength=W-40)
+    logtxt = tk.Text(logwrap, bg="#0C0D10", fg=DIM, font=(MON,9), bd=0, padx=10, pady=8,
+                     height=8, wrap="word", state="disabled")
 
     # === 콜백 ===
     def open_gallery():
@@ -2234,31 +2249,31 @@ def run_gui(cfg, url):
     # === 녹화 설정 패널 (접이식) ===
     PANEL = "#0B0C0F"
     optwrap = tk.Frame(root, bg=PANEL, highlightbackground=LINE, highlightthickness=1)
-    tk.Label(optwrap, text="녹화 설정", bg=PANEL, fg=DIM, font=(KOR,8,"bold")).pack(anchor="w", padx=13, pady=(9,3))
+    tk.Label(optwrap, text="녹화 설정", bg=PANEL, fg=INK2, font=(KOR,9,"bold")).pack(anchor="w", padx=14, pady=(11,5))
     SCALE_OPTS=[("자동 (최상)","auto"),("원본 해상도","source"),("1080p","1080"),("720p","720"),("480p","480")]
     ENC_OPTS=[("자동 (GPU 우선)","auto"),("GPU · NVENC","nvenc"),("CPU · x264","x264")]
     CAP_OPTS=[("자동","auto"),("WGC (전체화면 OK)","wgc"),("DDA","ddagrab"),("GDI","gdigrab")]
     MON_OPTS=[("자동","auto"),("모니터 1","0"),("모니터 2","1"),("모니터 3","2")]
     def opt_row(label, opts, key):
-        row = tk.Frame(optwrap, bg=PANEL); row.pack(fill="x", padx=13, pady=2)
-        tk.Label(row, text=label, bg=PANEL, fg=FAINT, font=(KOR,8), width=6, anchor="w").pack(side="left")
+        row = tk.Frame(optwrap, bg=PANEL); row.pack(fill="x", padx=14, pady=3)
+        tk.Label(row, text=label, bg=PANEL, fg=INK2, font=(KOR,9), width=6, anchor="w").pack(side="left")
         cur = str(cfg.get(key, "auto")); m = {l: v for l, v in opts}
         curlbl = next((l for l, v in opts if v == cur), opts[0][0])
         var = tk.StringVar(value=curlbl)
         def on_sel(lbl, k=key, mp=m, lb=label):
             cfg[k] = mp[lbl]; _save_cfg(); log(f"설정: {lb} → {lbl} (다음 녹화부터 적용)")
         om = tk.OptionMenu(row, var, *[l for l, _ in opts], command=on_sel)
-        om.config(bg="#1A1D24", fg=INK, font=(KOR,8), activebackground="#262B33", activeforeground=INK,
-                  relief="flat", bd=0, highlightthickness=0, anchor="w", padx=9, pady=3, cursor="hand2")
-        try: om["menu"].config(bg="#15171C", fg=INK, activebackground=JADE, activeforeground="#fff", font=(KOR,8), bd=0)
+        om.config(bg="#181B21", fg=INK, font=(KOR,9), activebackground="#23272F", activeforeground=INK,
+                  relief="flat", bd=0, highlightthickness=1, highlightbackground=LINE2, anchor="w", padx=10, pady=4, cursor="hand2")
+        try: om["menu"].config(bg=SURF, fg=INK, activebackground=JADE, activeforeground="#fff", font=(KOR,9), bd=0, activeborderwidth=0)
         except Exception: pass
         om.pack(side="left", fill="x", expand=True)
     opt_row("화질", SCALE_OPTS, "scale")
     opt_row("인코더", ENC_OPTS, "encoder")
     opt_row("캡처", CAP_OPTS, "capture")
     opt_row("모니터", MON_OPTS, "output_idx")
-    tk.Label(optwrap, text="기본값(자동)이 최상 화질 — GPU로 게임 끊김 없이 녹화합니다", bg=PANEL, fg=FAINT,
-             font=(KOR,7), wraplength=W-44, justify="left").pack(anchor="w", padx=13, pady=(3,9))
+    tk.Label(optwrap, text="기본값(자동)이 최상 화질 — GPU로 게임 끊김 없이 녹화합니다", bg=PANEL, fg=DIM,
+             font=(KOR,8), wraplength=W-48, justify="left").pack(anchor="w", padx=14, pady=(5,11))
 
     # === 패널 토글 + 리사이즈 ===
     def _resize():
@@ -2286,19 +2301,22 @@ def run_gui(cfg, url):
 
     # === 버튼 헬퍼 ===
     def btn(parent, text, cmd, primary=False):
-        base = JADE if primary else "#1A1D24"; hov = "#5BA3E0" if primary else "#272C34"; fg = "#FFFFFF" if primary else INK
-        b = tk.Label(parent, text=text, bg=base, fg=fg, font=(KOR,9,"bold"), padx=16, pady=9, cursor="hand2")
+        base = JADE if primary else "#181B21"; hov = JADE2 if primary else "#23272F"; fg = "#FFFFFF" if primary else INK
+        bord = JADE if primary else LINE2
+        b = tk.Label(parent, text=text, bg=base, fg=fg, font=(KOR,10,"bold"), padx=15, pady=9, cursor="hand2",
+                     highlightthickness=1, highlightbackground=bord, highlightcolor=bord)
         b.bind("<Button-1>", lambda e: cmd())
         b.bind("<Enter>", lambda e: b.config(bg=hov)); b.bind("<Leave>", lambda e: b.config(bg=base))
         return b
     def link(parent, text, cmd, color=DIM):
-        l = tk.Label(parent, text=text, bg=BG, fg=color, font=(KOR,8,"bold"), cursor="hand2")
+        l = tk.Label(parent, text=text, bg=BG, fg=color, font=(KOR,9,"bold"), cursor="hand2")
         l.bind("<Button-1>", lambda e: cmd())
         l.bind("<Enter>", lambda e: l.config(fg=INK)); l.bind("<Leave>", lambda e: l.config(fg=color))
         return l
 
     # === 액션 버튼 행 ===
-    acts = tk.Frame(root, bg=BG); acts.pack(fill="x", padx=13, pady=(9,0))
+    tk.Frame(root, bg=LINE, height=1).pack(fill="x", padx=14, pady=(11,0))
+    acts = tk.Frame(root, bg=BG); acts.pack(fill="x", padx=13, pady=(10,0))
     btn(acts, "갤러리", open_gallery, primary=True).pack(side="left")
     btn(acts, "폴더 열기", open_folder).pack(side="left", padx=(7,0))
     if _sbe:
@@ -2308,8 +2326,8 @@ def run_gui(cfg, url):
     # === 푸터 (토글 + 종료) ===
     foot = tk.Frame(root, bg=BG); foot.pack(side="bottom", fill="x", padx=15, pady=(8,10))
     settog = link(foot, "\u2699 설정", toggle_settings, DIM); settog.pack(side="left")
-    logtog = link(foot, "로그 \u25be", toggle_log, FAINT); logtog.pack(side="left", padx=(15,0))
-    link(foot, "종료", do_quit, FAINT).pack(side="right")
+    logtog = link(foot, "로그 \u25be", toggle_log, DIM); logtog.pack(side="left", padx=(16,0))
+    link(foot, "종료", do_quit, DIM).pack(side="right")
     root.protocol("WM_DELETE_WINDOW", do_quit)
 
     def _prep_and_run():
