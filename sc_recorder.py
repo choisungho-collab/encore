@@ -535,6 +535,8 @@ def extract_analysis(rep_path):
     d = json.loads(out); h = d["Header"]; comp = d.get("Computed", {}) or {}
     pdescs = {p["PlayerID"]: p for p in (comp.get("PlayerDescs") or [])}
     frames = h.get("Frames", 0) or 0; nbins = max(1, int(frames/FPS_GAME//60) + 1)
+    CF_STEP = 4.0                                       # 정밀 교전 빈(초) — 클립 시각 정확도용
+    cf_n = max(1, int((frames/FPS_GAME)//CF_STEP) + 1)
     players = {}; order = []; seen_up = defaultdict(set); leaves = []
     for p in (h.get("Players") or []):
         pid = p.get("ID"); pd = pdescs.get(pid, {})
@@ -546,7 +548,7 @@ def extract_analysis(rep_path):
             "unit_first": {}, "townhalls": [], "apm_series": [0]*nbins, "supply_events": [], "cost_events": [],
             "cmd_mix": Counter(), "hotkey_n": 0, "groups": set(), "drops": 0, "pings": 0,
             "scout_bases": set(), "scout_first_fr": None, "atk_first_fr": None, "drop_first_fr": None,
-            "aggr_series": [0]*nbins, "train_frames": [],
+            "aggr_series": [0]*nbins, "train_frames": [], "combat_fine": [0]*cf_n,
             "start": ((pd.get("StartLocation") or {}).get("X"), (pd.get("StartLocation") or {}).get("Y"))}
         order.append(pid)
     NEAR2 = 800*800   # 적 본진 반경^2 (정찰/공격 판정)
@@ -562,6 +564,7 @@ def extract_analysis(rep_path):
         b = min(nbins-1, int(f/FPS_GAME//60)); pl["apm_series"][b] += 1
         pl["cmd_mix"][tn] += 1
         if tn in ("Right Click", "Targeted Order"):
+            pl["combat_fine"][min(cf_n-1, int(f/FPS_GAME//CF_STEP))] += 1
             _ps = c.get("Pos") or {}; _x = _ps.get("X"); _y = _ps.get("Y")
             if _x is not None:
                 for (_ex, _ey) in enemy_starts.get(pid, []):
@@ -578,7 +581,7 @@ def extract_analysis(rep_path):
             pl["hotkey_n"] += 1; _g = c.get("Group")
             if (c.get("HotkeyType") or {}).get("Name") == "Assign" and _g is not None: pl["groups"].add(_g)
         elif tn == "Unload":
-            pl["drops"] += 1
+            pl["drops"] += 1; pl.setdefault("drop_frames", []).append(f)
             if pl["drop_first_fr"] is None: pl["drop_first_fr"] = f
         elif tn == "Minimap Ping": pl["pings"] += 1
         uname = (c.get("Unit") or {}).get("Name")
@@ -638,6 +641,10 @@ def extract_analysis(rep_path):
         sup_cap = sup_bld * 8 + 9   # 대략적 인구 한도 (본진 보급 + 서플건물/오버로드 ×8)
         mp_name, mp_ko = MAIN_PROD.get(rl, ("Gateway", "생산건물"))
         mp_n = sum(1 for b in pl["build"] if b["name"] == mp_name)
+        _drf = sorted(pl.get("drop_frames", [])); _dsec = []
+        for _fr in _drf:
+            _s = int(max(0, _fr)/FPS_GAME)
+            if not _dsec or _s - _dsec[-1] >= 12: _dsec.append(_s)   # ~12초 내 연속 언로드 = 한 번의 드랍
         res.append({"id": pl["id"], "name": pl["name"], "race": pl["race"], "rl": rl, "team": pl["team"],
             "color": pl["color"], "apm": pl["apm"], "eapm": pl["eapm"], "build": pl["build"],
             "units": [{"name": k, "n": v, "first": pl["unit_first"].get(k)} for k, v in us],
@@ -646,7 +653,7 @@ def extract_analysis(rep_path):
             "scouted": len(pl["scout_bases"]),
             "atk_first": (mmss(pl["atk_first_fr"]) if pl["atk_first_fr"] is not None else None),
             "hotkey": pl["hotkey_n"], "groups": len(pl["groups"]), "drops": pl["drops"], "pings": pl["pings"],
-            "drop_first": (mmss(pl["drop_first_fr"]) if pl["drop_first_fr"] is not None else None),
+            "drop_first": (mmss(pl["drop_first_fr"]) if pl["drop_first_fr"] is not None else None), "drop_secs": _dsec,
             "prod_max_gap": (round(max([(tf[i]-tf[i-1])/FPS_GAME for i in range(1,len(tf))] or [0])) if (tf:=sorted(pl["train_frames"])) else 0),
             "prod_active": (round(100*len(set(int(x/FPS_GAME//60) for x in tf))/max(1,(max(set(int(x/FPS_GAME//60) for x in tf))-min(set(int(x/FPS_GAME//60) for x in tf))+1))) if tf else 0),
             "cmd_mix": dict(pl["cmd_mix"]),
@@ -667,7 +674,13 @@ def extract_analysis(rep_path):
             "saver": next((p.get("Name") for p in (h.get("Players") or []) if p.get("ID") == comp.get("RepSaverPlayerID")), None)}
     leave_list = sorted([{"sec": int(max(0, fr)/FPS_GAME), "t": mmss(fr), "name": (players.get(pid) or {}).get("name")}
                          for fr, pid in leaves], key=lambda x: x["sec"])
-    return {"meta": meta, "players": res, "leaves": leave_list}
+    team_fine = {}
+    for pid in order:
+        _t = players[pid]["team"]; _cf = players[pid]["combat_fine"]
+        _tf = team_fine.setdefault(_t, [0]*cf_n)
+        for _k in range(cf_n): _tf[_k] += _cf[_k]
+    combat_fine = {"step": CF_STEP, "n": cf_n, "teams": {str(_t): _v for _t, _v in team_fine.items()}}
+    return {"meta": meta, "players": res, "leaves": leave_list, "combat_fine": combat_fine}
 
 # 임팩트 유닛(테크 마일스톤용) → 한글
 TECH_UNITS = {
@@ -679,47 +692,50 @@ def _mmss_to_sec(t):
     try: m, s = str(t).split(":"); return int(m)*60 + int(s)
     except Exception: return 0
 def compute_highlights(a):
-    """리플레이 명령 기반 하이라이트: 실제 교전(다수 동시 활동 + 적진 액션) · 게임체인저 테크 · 첫 확장 · 첫 드랍 · GG."""
+    """리플레이 명령 기반 하이라이트. 교전은 분 단위로 후보를 고른 뒤
+    정밀 교전 빈(combat_fine)으로 양 팀이 동시에 가장 활발한 '실제 클래시 초'를 짚는다."""
     players = a.get("players") or []
     out = []
-    nb = max((len(p.get("apm_series") or []) for p in players), default=0)
-    if nb >= 3:
-        intensity = [0]*nb; frontline = [0]*nb; meds = {}
-        for p in players:
-            body = [v for v in (p.get("apm_series") or []) if v > 0]
-            meds[p.get("id")] = (sorted(body)[len(body)//2] if body else 0)
-        for p in players:
-            s = p.get("apm_series") or []; ag = p.get("aggr_series") or []
-            for i in range(nb):
-                if i < len(s): intensity[i] += s[i]
-                if i < len(ag): frontline[i] += ag[i]
-        contested = [0]*nb
-        for i in range(nb):
-            cc = 0
-            for p in players:
-                s = p.get("apm_series") or []
-                if i < len(s) and s[i] > 0 and s[i] >= meds.get(p.get("id"), 0): cc += 1
-            contested[i] = cc
-        score = [0.0]*nb
-        for i in range(nb):
-            sc = intensity[i] * (1 + 0.4*max(0, contested[i]-1)) + 5*frontline[i]
-            if contested[i] < 2: sc *= 0.4
-            score[i] = sc
-        cand = []
-        for i in range(1, nb):
-            nxt = score[i+1] if i+1 < nb else 0
-            if score[i] > 0 and score[i] >= score[i-1] and score[i] >= nxt:
-                cand.append((score[i], i, frontline[i]))
-        cand.sort(reverse=True)
-        picked = []
-        for v, i, fl in cand:
-            if all(abs(i-j) >= 2 for _, j, _ in picked): picked.append((v, i, fl))
-            if len(picked) >= 3: break
-        maxv = picked[0][0] if picked else 0
-        for v, i, fl in sorted(picked, key=lambda x: x[1]):
-            lbl = "최대 교전" if v == maxv else ("주요 교전" if fl > 0 else "교전 피크")
-            out.append({"sec": i*60, "t": f"{i}:00", "label": lbl, "kind": "battle"})
-    # 게임체인저 테크 — 임팩트 유닛 첫 등장
+    def _ts(s):
+        s = int(max(0, s)); return f"{s//60}:{s%60:02d}"
+
+    # --- 정밀 교전 빈(팀별) ---
+    cf = a.get("combat_fine") or {}
+    cf_step = float(cf.get("step") or 4.0)
+    cf_teams = [v for v in (cf.get("teams") or {}).values() if v]
+    cf_n = max((len(v) for v in cf_teams), default=0)
+
+    # --- 교전: 양 팀이 동시에 폭증하는 '상호 교전' 피크를 정밀 빈에서 직접 탐지 ---
+    # (한 팀만 활발한 드랍/견제, 양 팀 다 한가한 베이스라인은 자동 배제)
+    if len(cf_teams) >= 2 and cf_n >= 3:
+        W = 1                                          # 평활 반경 ±1빈(≈±4초)
+        def _sm(s, k): return sum((s[j] if 0 <= j < len(s) else 0) for j in range(k-W, k+W+1))
+        g = [0]*cf_n; tot = [0]*cf_n
+        for k in range(cf_n):
+            vals = sorted((_sm(s, k) for s in cf_teams), reverse=True)
+            a1 = vals[0]; a2 = vals[1] if len(vals) > 1 else 0
+            g[k] = a2; tot[k] = a1 + a2                # a2 = 둘째로 활발한 팀 = 상호 교전 강도
+        gmax = max(g) if g else 0
+        if gmax > 0:
+            posv = sorted(x for x in g if x > 0)
+            base = posv[len(posv)//2] if posv else 0   # 양 팀 동시 활동의 평상 수준
+            thr = max(0.3*gmax, 2.5*base, 6)           # 상대(최대 대비)·평상 대비·절대 바닥 동시 충족
+            peaks = []
+            for k in range(cf_n):
+                if g[k] >= thr and g[k] >= (g[k-1] if k > 0 else 0) and g[k] >= (g[k+1] if k+1 < cf_n else 0):
+                    peaks.append((g[k]*tot[k], k))     # 교전 규모(상호강도×총량)로 정렬
+            peaks.sort(reverse=True)
+            keep = []
+            for sc, k in peaks:
+                sec = int(k*cf_step + cf_step/2)
+                if all(abs(sec - s2) >= 40 for _, s2 in keep): keep.append((sc, sec))
+                if len(keep) >= 3: break
+            kmax = keep[0][0] if keep else 0
+            for sc, sec in sorted(keep, key=lambda x: x[1]):
+                out.append({"sec": sec, "t": _ts(sec),
+                            "label": ("최대 교전" if sc == kmax else "주요 교전"), "kind": "battle"})
+
+    # 게임체인저 테크 — 임팩트 유닛 첫 등장 (프레임 기반, 이미 정밀)
     firsts = {}
     for p in players:
         for u in (p.get("units") or []):
@@ -737,21 +753,36 @@ def compute_highlights(a):
             sec = _mmss_to_sec(ths[1].get("t"))
             if exp is None or sec < exp[0]: exp = (sec, ths[1].get("t"), p.get("name"))
     if exp: out.append({"sec": exp[0], "t": exp[1], "label": "첫 확장", "who": exp[2], "kind": "expand"})
-    # 첫 드랍 견제
-    drop = None
+    # 드랍 견제 (정밀 — 선수별 클러스터된 드랍, 시간순 최대 2개)
+    drop_ev = []
     for p in players:
-        df = p.get("drop_first")
-        if df:
-            sec = _mmss_to_sec(df)
-            if drop is None or sec < drop[0]: drop = (sec, df, p.get("name"))
-    if drop and drop[0] >= 180:
-        out.append({"sec": drop[0], "t": drop[1], "label": "첫 드랍 견제", "who": drop[2], "kind": "drop"})
-    # GG / 퇴장
+        for s in (p.get("drop_secs") or []):
+            if s >= 180: drop_ev.append((s, p.get("name")))
+    if not drop_ev:                                   # 폴백: 예전 단일 drop_first 데이터
+        for p in players:
+            df = p.get("drop_first")
+            if df:
+                s = _mmss_to_sec(df)
+                if s >= 180: drop_ev.append((s, p.get("name")))
+    drop_ev.sort()
+    picked_d = []
+    for s, who in drop_ev:
+        if all(abs(s - ps) >= 45 for ps, _ in picked_d): picked_d.append((s, who))
+        if len(picked_d) >= 2: break
+    for s, who in picked_d:
+        out.append({"sec": s, "t": _ts(s), "label": "드랍 견제", "who": who, "kind": "drop"})
+    # GG / 퇴장 — 연쇄 퇴장(팀게임 일괄 GG)은 간격 기준으로 묶어 한 이벤트당 하나만
     leaves = a.get("leaves") or []
-    for idx, L in enumerate(leaves):
-        last = (idx == len(leaves) - 1); nm = L.get("name") or "선수"
-        out.append({"sec": L.get("sec", 0), "t": L.get("t", ""),
-                    "label": ("GG — 경기 종료" if last else f"{nm} GG·퇴장"), "who": nm, "kind": "gg"})
+    clusters = []
+    for L in sorted(leaves, key=lambda x: x.get("sec", 0)):
+        s = L.get("sec", 0)
+        if clusters and (s - clusters[-1][-1].get("sec", 0)) <= 8: clusters[-1].append(L)
+        else: clusters.append([L])
+    for ci, cl in enumerate(clusters):
+        rep = cl[0]; nm = rep.get("name") or "선수"        # 대표 = 첫 퇴장(=GG 콜 시점)
+        if ci == len(clusters) - 1: lbl = "GG — 경기 종료"
+        else: lbl = (f"{nm} 등 퇴장" if len(cl) > 1 else f"{nm} GG·퇴장")
+        out.append({"sec": rep.get("sec", 0), "t": rep.get("t", ""), "label": lbl, "who": nm, "kind": "gg"})
     out.sort(key=lambda hh: hh["sec"])
     return out
 
@@ -977,6 +1008,7 @@ def sync_existing_to_cloud(log_fn=None):
         else:
             lg("Supabase 설정이 없어요. config.json 의 supabase 를 먼저 채워주세요.")
         return (0, 0, 0)
+    recover_orphan_clips(lg)         # 게임 직후 종료 등으로 ingest 전에 멈춘 평면 영상 먼저 복구
     rebuild_db_from_recordings(lg)   # 폴더엔 있는데 DB엔 없는 경기 먼저 복구
     c = db()
     try: rows = c.execute("SELECT * FROM matches ORDER BY id ASC").fetchall()
@@ -1148,6 +1180,60 @@ def rebuild_db_from_recordings(log_fn=None):
     return added
 
 
+def recover_orphan_clips(log_fn=None):
+    """게임 직후 PC를 바로 꺼서 ingest 전에 멈춘 평면 clip_*.mp4 를,
+    AutoSave 리플레이와 (저장시각≈녹화종료 + 게임길이≤영상길이) 기준으로 짝지어 복구한다."""
+    lg = log_fn or log
+    if not os.path.isdir(REC_DIR): return 0
+    cand = {}   # stamp -> (path, is_av)
+    for p in sorted(glob.glob(os.path.join(REC_DIR, "clip_*.mp4"))):
+        m = re.match(r"clip_(\d{8}_\d{6})(_av)?\.mp4$", os.path.basename(p))
+        if not m: continue
+        stamp, is_av = m.group(1), bool(m.group(2))
+        cur = cand.get(stamp)
+        if cur is None or (is_av and not cur[1]):     # 같은 게임이면 소리 합쳐진 _av 우선
+            cand[stamp] = (p, is_av)
+    if not cand: return 0
+    repdir = CFG.get("replay_autosave_dir") or detect_replay_dir()
+    reps = []
+    if repdir and os.path.isdir(repdir):
+        for rp in glob.glob(os.path.join(repdir, "**", "*.rep"), recursive=True):
+            try: reps.append((rp, os.path.getmtime(rp)))
+            except OSError: pass
+    if not reps:
+        lg("미처리 영상이 있지만 AutoSave 리플레이 폴더를 못 찾았어요 — config.json 의 replay_autosave_dir 를 확인하세요.")
+        return 0
+    lg(f"미처리 영상 {len(cand)}개 발견 — 리플레이와 짝짓는 중…")
+    used = set(); recovered = 0
+    for stamp, (vpath, is_av) in sorted(cand.items()):
+        try: tv = datetime.datetime.strptime(stamp, "%Y%m%d_%H%M%S").timestamp()
+        except Exception: continue
+        lv = _ffprobe_dur(vpath) or 0
+        tend = (tv + lv) if lv else tv                # 녹화 종료 ≈ 게임 종료 ≈ 리플레이 저장 시각
+        best = None; bestd = None
+        for rp, mt in reps:
+            if rp in used: continue
+            if mt < tv - 120: continue                # 영상보다 너무 이른 리플레이 제외
+            try: rmeta = parse_rep(rp) if SCREP else {}
+            except Exception: rmeta = {}
+            if SCREP and not (rmeta or {}).get("players"): continue   # 실제 게임만
+            lr = _len_sec((rmeta or {}).get("length") or "")
+            if lv and lr and lr > lv * 1.15 + 30: continue            # 게임이 영상보다 길 수 없음
+            d = abs(mt - tend)
+            if bestd is None or d < bestd: best, bestd = rp, d
+        if best is None or (lv and bestd is not None and bestd > 180):  # 시각이 3분 넘게 어긋나면 신뢰 불가 → 보류
+            lg(f"  · 보류(맞는 리플레이 못 찾음): clip_{stamp}"); continue
+        used.add(best)
+        lg(f"  · 복구: clip_{stamp}  ←  {os.path.basename(best)}")
+        try:
+            ingest(vpath, best, uploader=CFG.get("username") or None)
+            recovered += 1
+        except Exception as e:
+            lg(f"  · 복구 실패(clip_{stamp}): {e}")
+    if recovered: lg(f"✓ 미처리 영상 복구 완료 — {recovered}건")
+    return recovered
+
+
 def player_games(name):
     if sb_enabled(): return sb_player_games(name)
     c = db(); rows = c.execute("SELECT * FROM matches ORDER BY id DESC").fetchall(); c.close()
@@ -1252,6 +1338,7 @@ def make_clips(video_path, highlights, game_len_sec, out_dir, lead=6.0, maxn=3, 
         try:
             _run([FFMPEG, "-y", "-loglevel", "error", "-ss", f"{vstart:.2f}", "-i", video_path,
                   "-t", f"{dur:.0f}", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+                  "-g", "48", "-keyint_min", "24",
                   "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", clip], timeout=180)
             if os.path.isfile(clip) and os.path.getsize(clip) > 5000:
                 made.append((idx, clip))
@@ -1489,11 +1576,22 @@ PAGE_SIZE = 24
 # ===================== 6. 녹화기 (ffmpeg) =====================
 _ENC_CACHE = None
 _ENC_IS_SW = False   # 소프트웨어(libx264) 인코딩 여부 → 다운스케일 판단에 사용
+_ENC_FORCE_SW = False   # 런타임 NVENC 실패가 누적되면 강제로 소프트웨어로 고정
+def _force_software_encoder(reason=""):
+    """게임 도중 GPU 인코더(NVENC)가 반복 실패할 때 호출 — 이후 녹화는 libx264로."""
+    global _ENC_FORCE_SW, _ENC_CACHE
+    if _ENC_FORCE_SW: return
+    _ENC_FORCE_SW = True; _ENC_CACHE = None   # 캐시 비워 다음 인코딩부터 재선택
+    if reason: log("[안정성] " + reason)
+def _enc_is_software():
+    _encoder_args()   # _ENC_IS_SW 확정
+    return _ENC_IS_SW
 def _encoder_args():
     """인코더 자동 선택. NVENC는 '실제로 인코딩 되는지'까지 테스트 — 목록엔 있어도 런타임 실패면 libx264로."""
     global _ENC_CACHE, _ENC_IS_SW
     if _ENC_CACHE is not None: return _ENC_CACHE
     pref = (CFG.get("encoder") or "auto").lower()
+    if _ENC_FORCE_SW: pref = "x264"   # 런타임 폴백 발동 시 사용자 설정보다 우선
     have = ""
     try:
         have = _run([FFMPEG, "-hide_banner", "-encoders"],
@@ -1522,14 +1620,20 @@ def _encoder_args():
         use_nvenc = ("h264_nvenc" in have) and _nvenc_ok()
         if ("h264_nvenc" in have) and not use_nvenc:
             log("  NVENC가 목록엔 있지만 실제 인코딩에 실패 → 소프트웨어(libx264)로 전환")
+    # 키프레임 간격 ~2초 — 시크(특히 분할 보기 다중 영상 동시 시크) 속도를 위해 GOP 고정.
+    # 기본은 GOP가 ~250프레임(8초)이라 시크 시 최대 8초어치를 디코드해야 해 버벅인다.
+    try: _gop = max(15, int(round(2 * float(CFG.get("fps", FPS) or FPS))))
+    except Exception: _gop = 60
     if use_nvenc:
         _ENC_IS_SW = False
-        _ENC_CACHE = ["-c:v", "h264_nvenc", "-preset", "p5", "-cq", "20"]; name = "NVENC (NVIDIA 하드웨어)"
+        _ENC_CACHE = ["-c:v", "h264_nvenc", "-preset", "p5", "-cq", "20",
+                      "-g", str(_gop)]; name = "NVENC (NVIDIA 하드웨어)"
     else:
         _ENC_IS_SW = True
         preset = (CFG.get("preset") or "auto").lower()
         if preset in ("auto", ""): preset = "superfast"   # 소프트웨어는 게임 끊김 방지 위해 가벼운 프리셋
-        _ENC_CACHE = ["-c:v", "libx264", "-preset", preset, "-crf", "25"]; name = f"libx264 (소프트웨어, {preset})"
+        _ENC_CACHE = ["-c:v", "libx264", "-preset", preset, "-crf", "25",
+                      "-g", str(_gop), "-keyint_min", str(max(1, _gop // 2))]; name = f"libx264 (소프트웨어, {preset})"
     log(f"인코더: {name}")
     return _ENC_CACHE
 
@@ -1724,12 +1828,7 @@ class Recorder:
         enc = _encoder_args(); pathx = self.path; fps = self.fps
         shared = {"buf": None, "wh": None, "n": 0, "err": None}
         stop_ev = threading.Event(); proc_box = {"p": None}
-        try:
-            cap = WindowsCapture(cursor_capture=None, draw_border=None, monitor_index=1, window_name=None)
-        except Exception as e:
-            log(f"  WGC 초기화 실패: {e}"); return False
-
-        @cap.event
+        # 프레임/종료 콜백 — 테두리 설정과 무관하게 재사용(폴백 시 새 캡처에 다시 등록)
         def on_frame_arrived(frame, capture_control):
             if stop_ev.is_set():
                 try: capture_control.stop()
@@ -1741,10 +1840,12 @@ class Recorder:
                 shared["n"] = shared.get("n", 0) + 1
             except Exception as e:
                 if shared.get("err") is None: shared["err"] = repr(e)
-
-        @cap.event
         def on_closed():
             pass
+        def _wgc_make(border):
+            c = WindowsCapture(cursor_capture=None, draw_border=border, monitor_index=1, window_name=None)
+            c.event(on_frame_arrived); c.event(on_closed)
+            return c
 
         def feeder():
             t0 = time.time()
@@ -1784,10 +1885,23 @@ class Recorder:
                 try: p.terminate()
                 except Exception: pass
 
-        try:
-            control = cap.start_free_threaded()
-        except Exception as e:
-            log(f"  WGC 시작 실패: {e}"); return False
+        # 녹화 중 노란 테두리 제거: draw_border=False (Win11 빌드 22000+에서 IsBorderRequired 지원).
+        # 구형 OS에서 그 설정으로 시작이 안 되면 기본값(테두리 표시)으로 폴백 — WGC 백엔드 자체는 유지.
+        cap = control = None
+        for _border in (False, None):
+            try:
+                cap = _wgc_make(_border); control = cap.start_free_threaded()
+                if _border is None:
+                    log("  WGC: 캡처 테두리 끄기 미지원 OS → 기본 설정으로 시작(테두리가 보일 수 있음)")
+                break
+            except Exception as e:
+                control = None
+                if _border is False:
+                    log(f"  WGC 테두리 끄기로 시작 실패({e}) → 기본 설정으로 재시도")
+                else:
+                    log(f"  WGC 시작 실패: {e}"); return False
+        if control is None:
+            return False
         ft = threading.Thread(target=feeder, daemon=True); ft.start()
         self._wgc_control = control
         self._wgc_state = {"stop": stop_ev, "feeder": ft, "proc_box": proc_box}
@@ -1875,9 +1989,16 @@ class Recorder:
                 log(f"녹화 시작 오류({mode} #{idx}): {e}"); self._kill()
         if not self.warned_black:
             self.warned_black = True
-            log("[!] 화면 캡처를 확인 못 했어요(검은 화면일 수 있음). 그래도 녹화는 계속합니다.")
-            log("    • 먼저 한 판 하고 localhost:8000 에서 영상 확인 (메뉴 정지화면 오탐일 수 있음)")
-            log("    • config.json 의 \"capture\" 를 \"wgc\" 로 바꾸거나, 스타를 '창 모드(전체 화면)'로 해보세요")
+            _found, _fg, _min = sc_window_state(CFG.get("starcraft_process") or "StarCraft.exe")
+            if _min:
+                log("[!] 스타크래프트가 최소화되어 있어요 — 게임 화면을 띄워두면 자동으로 정상 녹화됩니다.")
+            elif _found and not _fg:
+                log("[!] 스타크래프트가 뒤에 있어요(다른 창이 앞) — 게임 창을 앞으로 두면 화면이 잡힙니다.")
+                log("    • 듀얼 모니터면 config.json 의 \"output_idx\" 를 게임이 있는 모니터 번호(0/1/2)로 지정해 보세요")
+            else:
+                log("[!] 화면 캡처를 확인 못 했어요(검은 화면일 수 있음). 그래도 녹화는 계속합니다.")
+                log("    • 먼저 한 판 하고 갤러리에서 영상 확인 (메뉴 정지화면 오탐일 수 있음)")
+                log("    • config.json 의 \"capture\" 를 \"wgc\" 로 바꾸거나, 스타를 '창 모드(전체 화면)'로 해보세요")
         try:
             self._spawn("ddagrab", 0); time.sleep(1.0); self.mode = "ddagrab"; self.output_idx = 0; self.backend = "ffmpeg"
             return self._alive()
@@ -1918,6 +2039,44 @@ def sc_running(name):
             if (p.info["name"] or "").lower() == n: return True
         except (psutil.NoSuchProcess, psutil.AccessDenied): pass
     return False
+
+def sc_window_state(procname):
+    """스타크래프트 창 상태 → (창있음, 포커스됨, 최소화됨). 윈도우가 아니거나 못 찾으면 (False, False, False).
+    검은 화면 오탐(최소화·다른 모니터)을 정확히 안내하는 데 사용."""
+    if sys.platform != "win32":
+        return (False, False, False)
+    try:
+        import ctypes
+        from ctypes import wintypes
+        u = ctypes.windll.user32
+        target = (procname or "").lower(); pids = set()
+        for p in psutil.process_iter(["name", "pid"]):
+            try:
+                if (p.info["name"] or "").lower() == target: pids.add(p.info["pid"])
+            except (psutil.NoSuchProcess, psutil.AccessDenied): pass
+        if not pids:
+            return (False, False, False)
+        box = {"hwnd": None}
+        WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        def _cb(hwnd, _lp):
+            try:
+                if not u.IsWindowVisible(hwnd): return True
+                pid = wintypes.DWORD()
+                u.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                if pid.value in pids:
+                    box["hwnd"] = hwnd; return False   # 첫 가시 창에서 멈춤
+            except Exception:
+                pass
+            return True
+        u.EnumWindows(WNDENUMPROC(_cb), 0)
+        hwnd = box["hwnd"]
+        if not hwnd:
+            return (True, False, False)               # 프로세스는 있으나 가시 창 없음(로딩 등)
+        minimized = bool(u.IsIconic(hwnd))
+        foreground = bool(u.GetForegroundWindow() == hwnd)
+        return (True, foreground, minimized)
+    except Exception:
+        return (False, False, False)
 
 def list_reps(d):
     if not os.path.isdir(d): return {}
@@ -2061,7 +2220,7 @@ def _dispatch(video, rep):
 def recorder_loop(cfg):
     proc = cfg["starcraft_process"]; autosave = cfg["replay_autosave_dir"]
     poll = float(cfg.get("poll_seconds", 4)); rec = Recorder(int(cfg.get("fps", FPS)))
-    known = list_reps(autosave); was = False; active = False
+    known = list_reps(autosave); was = False; active = False; enc_fail = 0
     try: ensure_audio()
     except Exception: pass
     log("준비 완료. 스타를 켜면 자동으로 녹화가 시작됩니다. (이 창은 켜둔 채로 두세요)")
@@ -2074,6 +2233,12 @@ def recorder_loop(cfg):
                 if not rec._recording():
                     if active: log("녹화 스트림이 끊겨 자동으로 다시 시작합니다.")
                     active = rec.start()
+                    if not active:                       # 재시작이 안 붙음 → 누적되면 인코더 문제로 판단
+                        enc_fail += 1
+                        if enc_fail >= 2 and not _enc_is_software():
+                            _force_software_encoder("녹화가 연달아 실패했어요 — GPU 인코더(NVENC) 문제로 보고 "
+                                                    "소프트웨어(CPU) 인코더로 전환합니다. 화질은 그대로예요.")
+                            rec.verified = False; active = rec.start()
                 cur = list_reps(autosave); new = [f for f in cur if f not in known]
                 if new:
                     newest = max(new, key=lambda f: cur[f])
@@ -2098,7 +2263,9 @@ def recorder_loop(cfg):
                 known = cur; log("대기 상태.")
             # 웹 표시용 실시간 상태 갱신
             if run and rec._recording():
-                REC_STATE.update(rec=True, text="녹화 중")
+                enc_fail = 0                              # 정상 녹화 중이면 실패 카운터 초기화
+                _wf, _wfg, _wmin = sc_window_state(proc)
+                REC_STATE.update(rec=True, text=("녹화 중 — 게임 최소화됨" if _wmin else "녹화 중"))
             elif run:
                 REC_STATE.update(rec=False, text="스타크래프트 감지됨")
             else:
@@ -2180,12 +2347,13 @@ def _hide_console():
     except Exception: pass
 
 def run_gui(cfg, url):
-    """아주 작은 상태 표시줄. 평소엔 상태만, 문제가 있을 때만 로그가 펼쳐진다."""
+    """아주 작은 상태창. 평소엔 상태만, 필요할 때만 설정·로그를 펼친다."""
     import tkinter as tk
     import tkinter.font as _tkfont
-    BG="#0F1013"; SURF="#15171C"; INK="#ECEEF2"; INK2="#C5C9D0"; DIM="#9AA0AA"; FAINT="#6B707A"
-    JADE="#3D8BFF"; JADE2="#62A1FF"; REC="#E8694C"; AMB="#E0B441"; LINE="#23272E"; LINE2="#2C313B"
-    W = 444
+    BG="#0E1117"; SURF="#161B25"; INK="#EAEDF3"; INK2="#C5CAD3"; DIM="#8B93A3"; FAINT="#5B6373"
+    JADE="#4F8CFF"; JADE2="#73A6FF"; REC="#FF5D52"; AMB="#E7A73F"; LINE="#202736"; LINE2="#2C3445"
+    PANEL="#0B0E14"
+    W = 340
     root = tk.Tk(); root.title("ENCORE"); root.configure(bg=BG)
     try: root.iconphoto(True, tk.PhotoImage(data=_ENCORE_ICON))
     except Exception: pass
@@ -2198,31 +2366,33 @@ def run_gui(cfg, url):
     except Exception:
         def _pick(*c): return c[0]
     KOR=_pick("Malgun Gothic","맑은 고딕","Segoe UI"); LAT=_pick("Segoe UI","Malgun Gothic"); MON=_pick("Consolas","Cascadia Mono","Segoe UI")
-    BASE_H, SET_H, LOG_H = 200, 210, 208
+    BASE_H, SET_H, LOG_H = 182, 262, 196
     root.geometry(f"{W}x{BASE_H}"); root.resizable(False, True)
     st = {"log": False, "settings": False}
 
-    head = tk.Frame(root, bg=BG); head.pack(fill="x", padx=14, pady=(10,0))
-    mk = tk.Canvas(head, width=22, height=17, bg=BG, highlightthickness=0); mk.pack(side="left", pady=(2,0))
-    mk.create_rectangle(0,10,5,17, fill=INK, outline=""); mk.create_rectangle(8,5,13,17, fill=INK, outline=""); mk.create_rectangle(17,0,22,17, fill=JADE2, outline="")
-    tk.Label(head, text="ENCORE", bg=BG, fg=INK, font=(LAT,13,"bold")).pack(side="left", padx=(7,0))
-    games_lbl = tk.Label(head, text="", bg=BG, fg=DIM, font=(MON,9)); games_lbl.pack(side="right")
+    # === 헤더: 로고+ENCORE (좌) · 클라우드 배지 (우) ===
+    head = tk.Frame(root, bg=BG); head.pack(fill="x", padx=14, pady=(11,0))
+    mk = tk.Canvas(head, width=20, height=15, bg=BG, highlightthickness=0); mk.pack(side="left", pady=(1,0))
+    mk.create_rectangle(0,9,4,15, fill=INK, outline=""); mk.create_rectangle(7,4,11,15, fill=INK, outline=""); mk.create_rectangle(15,0,19,15, fill=JADE2, outline="")
+    tk.Label(head, text="ENCORE", bg=BG, fg=INK, font=(LAT,12,"bold")).pack(side="left", padx=(7,0))
     _cs = cloud_state()
     _cmap = {"cloud": (JADE2, "☁ 클라우드"), "readonly": (AMB, "⚠ 키 필요"), "local": (DIM, "● 로컬")}
     _cc, _ct = _cmap[_cs]
-    tk.Label(head, text=_ct, bg=SURF, fg=_cc, font=(KOR,9,"bold"), padx=8, pady=2).pack(side="right", padx=(0,9))
+    tk.Label(head, text=_ct, bg=SURF, fg=_cc, font=(KOR,9,"bold"), padx=8, pady=2).pack(side="right")
 
-    midf = tk.Frame(root, bg=BG); midf.pack(fill="x", padx=14, pady=(6,0))
-    dot = tk.Canvas(midf, width=12, height=12, bg=BG, highlightthickness=0); dot.pack(side="left", pady=(5,0))
-    did = dot.create_oval(1,1,11,11, fill=FAINT, outline="")
+    # === 상태: 점 + 상태(한 줄) + 보조(안내 · 경기 N) ===
+    midf = tk.Frame(root, bg=BG); midf.pack(fill="x", padx=14, pady=(8,0))
+    dot = tk.Canvas(midf, width=11, height=11, bg=BG, highlightthickness=0); dot.pack(side="left", pady=(5,0))
+    did = dot.create_oval(1,1,10,10, fill=FAINT, outline="")
     stx = tk.Frame(midf, bg=BG); stx.pack(side="left", padx=(9,0))
-    status_lbl = tk.Label(stx, text="시작 중…", bg=BG, fg=INK, font=(KOR,16,"bold"), anchor="w"); status_lbl.pack(anchor="w")
+    status_lbl = tk.Label(stx, text="시작 중…", bg=BG, fg=INK, font=(KOR,15,"bold"), anchor="w"); status_lbl.pack(anchor="w")
     sub_lbl = tk.Label(stx, text="", bg=BG, fg=DIM, font=(KOR,9), anchor="w"); sub_lbl.pack(anchor="w")
 
+    # === 로그 패널 (접이식) ===
     logwrap = tk.Frame(root, bg=BG)
     errbar = tk.Label(logwrap, text="", bg="#3A1E18", fg="#ffb4a6", font=(KOR,9), anchor="w",
                       padx=10, pady=6, justify="left", wraplength=W-40)
-    logtxt = tk.Text(logwrap, bg="#0C0D10", fg=DIM, font=(MON,9), bd=0, padx=10, pady=8,
+    logtxt = tk.Text(logwrap, bg="#0A0C10", fg=DIM, font=(MON,9), bd=0, padx=10, pady=8,
                      height=8, wrap="word", state="disabled")
 
     # === 콜백 ===
@@ -2246,8 +2416,23 @@ def run_gui(cfg, url):
         try: json.dump(cfg, open(CONFIG_PATH, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
         except Exception as e: log(f"설정 저장 실패: {e}")
 
+    # === 버튼 헬퍼 ===
+    def btn(parent, text, cmd, primary=False, small=False):
+        base = JADE if primary else "#1B212D"; hov = JADE2 if primary else "#262C36"; fg = "#FFFFFF" if primary else INK
+        bord = JADE if primary else LINE2
+        px, py, fs = (12, 5, 9) if small else (15, 8, 10)
+        b = tk.Label(parent, text=text, bg=base, fg=fg, font=(KOR,fs,"bold"), padx=px, pady=py, cursor="hand2",
+                     highlightthickness=1, highlightbackground=bord, highlightcolor=bord)
+        b.bind("<Button-1>", lambda e: cmd())
+        b.bind("<Enter>", lambda e: b.config(bg=hov)); b.bind("<Leave>", lambda e: b.config(bg=base))
+        return b
+    def link(parent, text, cmd, color=DIM):
+        l = tk.Label(parent, text=text, bg=BG, fg=color, font=(KOR,9,"bold"), cursor="hand2")
+        l.bind("<Button-1>", lambda e: cmd())
+        l.bind("<Enter>", lambda e: l.config(fg=INK)); l.bind("<Leave>", lambda e: l.config(fg=color))
+        return l
+
     # === 녹화 설정 패널 (접이식) ===
-    PANEL = "#0B0C0F"
     optwrap = tk.Frame(root, bg=PANEL, highlightbackground=LINE, highlightthickness=1)
     tk.Label(optwrap, text="녹화 설정", bg=PANEL, fg=INK2, font=(KOR,9,"bold")).pack(anchor="w", padx=14, pady=(11,5))
     SCALE_OPTS=[("자동 (최상)","auto"),("원본 해상도","source"),("1080p","1080"),("720p","720"),("480p","480")]
@@ -2263,7 +2448,7 @@ def run_gui(cfg, url):
         def on_sel(lbl, k=key, mp=m, lb=label):
             cfg[k] = mp[lbl]; _save_cfg(); log(f"설정: {lb} → {lbl} (다음 녹화부터 적용)")
         om = tk.OptionMenu(row, var, *[l for l, _ in opts], command=on_sel)
-        om.config(bg="#181B21", fg=INK, font=(KOR,9), activebackground="#23272F", activeforeground=INK,
+        om.config(bg="#1B212D", fg=INK, font=(KOR,9), activebackground="#262C36", activeforeground=INK,
                   relief="flat", bd=0, highlightthickness=1, highlightbackground=LINE2, anchor="w", padx=10, pady=4, cursor="hand2")
         try: om["menu"].config(bg=SURF, fg=INK, activebackground=JADE, activeforeground="#fff", font=(KOR,9), bd=0, activeborderwidth=0)
         except Exception: pass
@@ -2273,7 +2458,13 @@ def run_gui(cfg, url):
     opt_row("캡처", CAP_OPTS, "capture")
     opt_row("모니터", MON_OPTS, "output_idx")
     tk.Label(optwrap, text="기본값(자동)이 최상 화질 — GPU로 게임 끊김 없이 녹화합니다", bg=PANEL, fg=DIM,
-             font=(KOR,8), wraplength=W-48, justify="left").pack(anchor="w", padx=14, pady=(5,11))
+             font=(KOR,8), wraplength=W-48, justify="left").pack(anchor="w", padx=14, pady=(5,9))
+    if _sbe:
+        tk.Frame(optwrap, bg=LINE, height=1).pack(fill="x", padx=14, pady=(0,8))
+        mrow = tk.Frame(optwrap, bg=PANEL); mrow.pack(fill="x", padx=14, pady=(0,11))
+        tk.Label(mrow, text="유지보수", bg=PANEL, fg=DIM, font=(KOR,8), anchor="w").pack(side="left")
+        btn(mrow, "재분석", do_reanalyze, small=True).pack(side="right")
+        btn(mrow, "업로드", do_sync, small=True).pack(side="right", padx=(0,7))
 
     # === 패널 토글 + 리사이즈 ===
     def _resize():
@@ -2284,49 +2475,31 @@ def run_gui(cfg, url):
         st["log"] = open_
         if open_:
             logwrap.pack(fill="both", expand=True, padx=11, pady=(0,7))
-            if LAST_ERR.get("msg"): errbar.config(text="\u26a0 " + LAST_ERR["msg"]); errbar.pack(fill="x", pady=(0,5))
+            if LAST_ERR.get("msg"): errbar.config(text="⚠ " + LAST_ERR["msg"]); errbar.pack(fill="x", pady=(0,5))
             else: errbar.pack_forget()
-            logtxt.pack(fill="both", expand=True); logtog.config(text="로그 \u25b4")
+            logtxt.pack(fill="both", expand=True); logtog.config(text="로그 ▴")
         else:
-            logwrap.pack_forget(); logtog.config(text="로그 \u25be")
+            logwrap.pack_forget(); logtog.config(text="로그 ▾")
         _resize()
     def set_settings(open_):
         if open_ and st["log"]: set_log(False)
         st["settings"] = open_
-        if open_: optwrap.pack(fill="x", padx=12, pady=(2,2)); settog.config(text="\u2699 설정 \u25b4", fg=JADE)
-        else: optwrap.pack_forget(); settog.config(text="\u2699 설정", fg=DIM)
+        if open_: optwrap.pack(fill="x", padx=12, pady=(2,2)); settog.config(text="⚙ 설정 ▴", fg=JADE)
+        else: optwrap.pack_forget(); settog.config(text="⚙ 설정", fg=DIM)
         _resize()
     def toggle_log(): set_log(not st["log"])
     def toggle_settings(): set_settings(not st["settings"])
 
-    # === 버튼 헬퍼 ===
-    def btn(parent, text, cmd, primary=False):
-        base = JADE if primary else "#181B21"; hov = JADE2 if primary else "#23272F"; fg = "#FFFFFF" if primary else INK
-        bord = JADE if primary else LINE2
-        b = tk.Label(parent, text=text, bg=base, fg=fg, font=(KOR,10,"bold"), padx=15, pady=9, cursor="hand2",
-                     highlightthickness=1, highlightbackground=bord, highlightcolor=bord)
-        b.bind("<Button-1>", lambda e: cmd())
-        b.bind("<Enter>", lambda e: b.config(bg=hov)); b.bind("<Leave>", lambda e: b.config(bg=base))
-        return b
-    def link(parent, text, cmd, color=DIM):
-        l = tk.Label(parent, text=text, bg=BG, fg=color, font=(KOR,9,"bold"), cursor="hand2")
-        l.bind("<Button-1>", lambda e: cmd())
-        l.bind("<Enter>", lambda e: l.config(fg=INK)); l.bind("<Leave>", lambda e: l.config(fg=color))
-        return l
-
-    # === 액션 버튼 행 ===
-    tk.Frame(root, bg=LINE, height=1).pack(fill="x", padx=14, pady=(11,0))
-    acts = tk.Frame(root, bg=BG); acts.pack(fill="x", padx=13, pady=(10,0))
-    btn(acts, "갤러리", open_gallery, primary=True).pack(side="left")
+    # === 주요 액션: 갤러리 (강조) + 폴더 열기 ===
+    tk.Frame(root, bg=LINE, height=1).pack(fill="x", padx=14, pady=(8,0))
+    acts = tk.Frame(root, bg=BG); acts.pack(fill="x", padx=13, pady=(8,0))
+    btn(acts, "갤러리", open_gallery, primary=True).pack(side="left", fill="x", expand=True)
     btn(acts, "폴더 열기", open_folder).pack(side="left", padx=(7,0))
-    if _sbe:
-        btn(acts, "업로드", do_sync).pack(side="left", padx=(7,0))
-        btn(acts, "재분석", do_reanalyze).pack(side="left", padx=(7,0))
 
     # === 푸터 (토글 + 종료) ===
     foot = tk.Frame(root, bg=BG); foot.pack(side="bottom", fill="x", padx=15, pady=(8,10))
-    settog = link(foot, "\u2699 설정", toggle_settings, DIM); settog.pack(side="left")
-    logtog = link(foot, "로그 \u25be", toggle_log, DIM); logtog.pack(side="left", padx=(16,0))
+    settog = link(foot, "⚙ 설정", toggle_settings, DIM); settog.pack(side="left")
+    logtog = link(foot, "로그 ▾", toggle_log, DIM); logtog.pack(side="left", padx=(16,0))
     link(foot, "종료", do_quit, DIM).pack(side="right")
     root.protocol("WM_DELETE_WINDOW", do_quit)
 
@@ -2338,7 +2511,9 @@ def run_gui(cfg, url):
         except Exception as e:
             log(f"도구 준비 중 문제: {e}")
         if not FFMPEG:
-            log("\u26a0 ffmpeg 준비 실패 — 인터넷 연결 확인 후 다시 실행해 주세요."); return
+            log("⚠ ffmpeg 준비 실패 — 인터넷 연결 확인 후 다시 실행해 주세요."); return
+        try: recover_orphan_clips()
+        except Exception as e: log(f"미처리 영상 복구 건너뜀: {e}")
         try: rebuild_db_from_recordings()
         except Exception as e: log(f"폴더 복구 건너뜀: {e}")
         recorder_loop(cfg)
@@ -2356,18 +2531,19 @@ def run_gui(cfg, url):
             if n > 300: logtxt.delete("1.0", f"{n-300}.0")
             logtxt.see("end"); logtxt.config(state="disabled")
         if REC_STATE.get("recording"):
-            dot.itemconfig(did, fill=REC); status_lbl.config(text="녹화 중", fg=REC); sub_lbl.config(text="게임 화면 녹화 중")
+            dot.itemconfig(did, fill=REC); status_lbl.config(text="녹화 중", fg=REC); sub = "게임 화면 녹화 중"
         elif REC_STATE.get("ready"):
-            dot.itemconfig(did, fill=JADE); status_lbl.config(text="대기 중", fg=INK); sub_lbl.config(text="스타 켜면 자동 녹화")
+            dot.itemconfig(did, fill=JADE); status_lbl.config(text="대기 중", fg=INK); sub = "스타 켜면 자동 녹화"
         else:
-            dot.itemconfig(did, fill=AMB); status_lbl.config(text="준비 중…", fg=INK); sub_lbl.config(text="최초 실행 — 도구 준비 중 (1~2분)")
+            dot.itemconfig(did, fill=AMB); status_lbl.config(text="준비 중…", fg=INK); sub = "최초 실행 — 도구 준비 중 (1~2분)"
         try:
-            n = count_matches(); e = (REC_STATE.get("encoder") or "").split()
-            games_lbl.config(text=(f"경기 {n} · {e[0]}" if e else f"경기 {n}"))
+            n = count_matches()
+            if n: sub = f"{sub} · 경기 {n}"
         except Exception: pass
+        sub_lbl.config(text=sub)
         if LAST_ERR.get("msg") and (time.time() - LAST_ERR.get("t", 0) < 8):
             if not st["log"]: set_log(True)
-            else: errbar.config(text="\u26a0 " + LAST_ERR["msg"])
+            else: errbar.config(text="⚠ " + LAST_ERR["msg"])
         root.after(500, poll)
 
     try: root.update()
