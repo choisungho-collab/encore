@@ -4,6 +4,12 @@ on:
   push:
     branches: [ main ]
   workflow_dispatch:
+    inputs:
+      bump:
+        description: '버전 증가 단위 (수동 실행 시 선택)'
+        type: choice
+        options: [patch, minor, major]
+        default: patch
 
 permissions:
   contents: write
@@ -14,6 +20,29 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # 버전 계산용으로 태그 전부 가져오기
+
+      - name: 다음 버전 계산
+        id: ver
+        shell: bash
+        run: |
+          git fetch --tags --force >/dev/null 2>&1 || true
+          bump="${{ github.event.inputs.bump }}"
+          [ -z "$bump" ] && bump="patch"   # push 트리거는 입력 없음 → patch
+          latest=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          if [ -z "$latest" ]; then
+            next="v1.0.0"
+          else
+            ver="${latest#v}"; IFS=. read -r MA MI PA <<< "$ver"
+            case "$bump" in
+              major) next="v$((MA+1)).0.0" ;;
+              minor) next="v${MA}.$((MI+1)).0" ;;
+              *)     next="v${MA}.${MI}.$((PA+1))" ;;
+            esac
+          fi
+          echo "next=$next" >> "$GITHUB_OUTPUT"
+          echo "이전: ${latest:-(없음)}  →  다음: $next  ($bump)"
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -44,17 +73,11 @@ jobs:
           if (-not (Test-Path dist/sc_recorder.zip)) { throw "sc_recorder.zip 생성 실패" }
           Get-ChildItem dist | Format-Table Name, Length
 
-      - name: 기존 latest 릴리즈/태그 정리 (날짜 갱신 + 옛 .exe 제거)
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release delete latest --yes --cleanup-tag || true
-
-      - name: Publish "latest" release (zip만 게시)
+      - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: latest
-          name: 최신 빌드 (latest)
+          tag_name: ${{ steps.ver.outputs.next }}
+          name: ${{ steps.ver.outputs.next }}
           body: |
             sc_recorder.zip 받아서 압축 풀고 sc_recorder.exe 실행 — 파이썬 설치 불필요.
             보안 경고가 뜨면 "추가 정보 → 실행". 최초 실행 시 ffmpeg를 한 번 자동으로 내려받아요(1~2분).
