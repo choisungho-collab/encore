@@ -44,6 +44,12 @@ jobs:
           if (-not (Test-Path dist/sc_recorder.zip)) { throw "sc_recorder.zip 생성 실패" }
           Get-ChildItem dist | Format-Table Name, Length
 
+      - name: 기존 latest 릴리즈/태그 정리 (날짜 갱신 + 옛 .exe 제거)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release delete latest --yes --cleanup-tag || true
+
       - name: Publish "latest" release (zip만 게시)
         uses: softprops/action-gh-release@v2
         with:
