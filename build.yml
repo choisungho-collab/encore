@@ -3,7 +3,6 @@ name: Build Windows EXE
 on:
   push:
     branches: [ main ]
-    tags: [ 'v*' ]
   workflow_dispatch:
 
 permissions:
@@ -38,40 +37,20 @@ jobs:
           --exclude-module cv2 --exclude-module opencv-python --exclude-module matplotlib
           sc_recorder.py
 
-      - name: Zip the EXE (브라우저의 .exe 다운로드 차단 회피용 .zip)
+      - name: Zip the EXE (브라우저의 .exe 다운로드 차단 회피용)
         shell: pwsh
         run: |
           Compress-Archive -Path dist/sc_recorder.exe -DestinationPath dist/sc_recorder.zip -Force
           if (-not (Test-Path dist/sc_recorder.zip)) { throw "sc_recorder.zip 생성 실패" }
           Get-ChildItem dist | Format-Table Name, Length
 
-      - name: Upload artifact (zip)
-        uses: actions/upload-artifact@v4
-        with:
-          name: sc_recorder-windows
-          path: dist/sc_recorder.zip
-
-      - name: Publish "latest" release (push to main)
-        if: github.ref == 'refs/heads/main'
+      - name: Publish "latest" release (zip만 게시)
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          name: Latest build
+          name: 최신 빌드 (latest)
           body: |
-            Download sc_recorder.zip, unzip it, and run sc_recorder.exe - no Python needed.
-            If Windows SmartScreen warns, click "More info -> Run anyway". On first launch it downloads the video tool (ffmpeg) once (1-2 min).
-          files: |
-            dist/sc_recorder.zip
-            dist/sc_recorder.exe
+            sc_recorder.zip 받아서 압축 풀고 sc_recorder.exe 실행 — 파이썬 설치 불필요.
+            보안 경고가 뜨면 "추가 정보 → 실행". 최초 실행 시 ffmpeg를 한 번 자동으로 내려받아요(1~2분).
+          files: dist/sc_recorder.zip
           make_latest: true
-
-      - name: Publish release (version tag)
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          body: |
-            Download sc_recorder.zip, unzip it, and run sc_recorder.exe - no Python needed.
-            If Windows SmartScreen warns, click "More info -> Run anyway". On first launch it downloads the video tool (ffmpeg) once (1-2 min).
-          files: |
-            dist/sc_recorder.zip
-            dist/sc_recorder.exe
