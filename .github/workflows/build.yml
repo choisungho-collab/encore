@@ -29,8 +29,9 @@ jobs:
         run: |
           git fetch --tags --force >/dev/null 2>&1 || true
           bump="${{ github.event.inputs.bump }}"
-          [ -z "$bump" ] && bump="patch"   # push 트리거는 입력 없음 → patch
-          latest=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          if [ -z "$bump" ]; then bump="patch"; fi   # push 트리거는 입력 없음 → patch
+          # semver 태그가 0개면 grep이 exit 1 → set -eo pipefail이 스텝을 죽이므로 '|| true'로 방어
+          latest=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)
           if [ -z "$latest" ]; then
             next="v1.0.0"
           else
