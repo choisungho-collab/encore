@@ -1014,6 +1014,12 @@ def sb_upload(local, path, ctype):
     return "%s/storage/v1/object/public/%s/%s" % (base, bk, path)
 def sb_insert_match(row):
     import requests
+    try:
+        sv = (row.get("saver") or "").strip()
+        if sv:
+            row.setdefault("owner_puuid", sv.lower())
+            claim_identity(sv)                      # 이 기기 = 이 이름 (이름 같으면 no-op)
+    except Exception: pass
     r = requests.post(_sb_base() + "/rest/v1/matches",
                       headers={**_sb_h(write=True), "Prefer": "resolution=merge-duplicates,return=minimal"},
                       data=json.dumps(row, ensure_ascii=False).encode("utf-8"), timeout=60)
@@ -1064,6 +1070,53 @@ def sb_patch_match(mid, fields):
                    data=json.dumps(fields, ensure_ascii=False, default=str).encode("utf-8"), timeout=30)
     if r.status_code not in (200, 204):
         raise RuntimeError("PATCH %s: %s" % (r.status_code, (r.text or "")[:150]))
+# ---------------- ENCORE 로그인(이름 기반 계정) ----------------
+#  · 계정 = 정규화된 스타 인게임 이름(saver). 같은 이름으로 녹화하면 어느 PC든 그 계정.
+#  · 기기 비밀키: data 폴더에 영구 보관(zip 덮어쓰기에도 유지) → 로그인 코드 발급 자격.
+#  · 판 업로드/재분석 때 claim_identity 로 "이 기기 = 이 이름" 바인딩(이름 바뀔 때만 호출).
+_ID_FILE = os.path.join(DATA_DIR, "encore_identity.json")
+def _identity_load():
+    try: return json.load(open(_ID_FILE, encoding="utf-8")) or {}
+    except Exception: return {}
+def _identity_save(st):
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        json.dump(st, open(_ID_FILE, "w", encoding="utf-8"), ensure_ascii=False)
+    except Exception: pass
+def device_secret():
+    st = _identity_load()
+    if not st.get("device_secret"):
+        st["device_secret"] = secrets.token_hex(24); _identity_save(st)
+    return st["device_secret"]
+def _sb_rpc(fn, body, timeout=15):
+    import requests
+    r = requests.post(_sb_base() + "/rest/v1/rpc/" + fn, headers=_sb_h(),
+                      data=json.dumps(body, ensure_ascii=False).encode("utf-8"), timeout=timeout)
+    if r.status_code not in (200, 201, 204):
+        raise RuntimeError("rpc %s %s: %s" % (fn, r.status_code, (r.text or "")[:150]))
+    try: return r.json()
+    except Exception: return None
+def claim_identity(name):
+    """이 기기를 name 계정에 바인딩. 같은 이름이면 no-op. 실패해도 업로드에 영향 없음."""
+    nm = (name or "").strip()
+    if not nm or not sb_enabled(): return
+    st = _identity_load()
+    if st.get("name") == nm and st.get("puuid"): return
+    try:
+        r = _sb_rpc("claim_identity", {"p_name": nm, "p_secret": device_secret()})
+        pu = (r or {}).get("puuid") or nm.lower()
+        st.update({"name": nm, "puuid": pu}); _identity_save(st)
+        log(f"Identity → {nm} ({pu})")
+    except Exception as e:
+        log(f"identity claim skipped: {e}")
+def issue_login_code():
+    """갤러리 자동 로그인용 1회 코드. 아직 판을 안 찍어 바인딩이 없으면 None."""
+    st = _identity_load()
+    if not st.get("puuid") or not sb_enabled(): return None
+    code = secrets.token_hex(16)
+    _sb_rpc("issue_login_code", {"p_secret": device_secret(), "p_code": code}, timeout=10)
+    return code
+
 def sb_get_comments(mid):
     return _sb_get("comments?match_id=eq.%s&select=id,author,body,created&order=created.asc" % mid).json()
 def sb_add_comment(mid, author, body):
@@ -1203,6 +1256,7 @@ def reanalyze_all(log_fn=None):
                 "map": meta.get("map"), "matchup": meta.get("matchup"),
                 "length": meta.get("length"), "length_sec": _len_sec(meta.get("length") or ""),
                 "type": meta.get("type"), "winner": winner, "saver": saver,
+                "owner_puuid": ((saver or "").strip().lower() or None),
                 "np": len(players), "players": players, "won": won, "analysis": a})
             done += 1; lg(f"  · reanalyzed ✓ {meta.get('map') or mid}")
         except Exception as e:
@@ -2437,8 +2491,16 @@ def run_gui(cfg, url):
 
     # ---------- callbacks ----------
     def open_gallery():
-        try: open_app(url)
-        except Exception: pass
+        def _go():
+            u = url
+            try:
+                c = issue_login_code()               # 아직 판 없으면 None → 그냥 열기
+                if c: u = url + "/#code=" + c        # 웹(encore-auth.js)이 소비 → 자동 로그인
+            except Exception as e:
+                log(f"login code skipped: {e}")
+            try: open_app(u)
+            except Exception: pass
+        threading.Thread(target=_go, daemon=True).start()
     def open_folder():
         try:
             if sys.platform=="win32": os.startfile(REC_DIR)
