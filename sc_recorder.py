@@ -2635,10 +2635,22 @@ def _pick_wheel(urls, pytag):
             return u.get("url"), n
     return None, None
 
+def _cv2_stub():
+    """windows_capture는 모듈 최상단에서 cv2(opencv, ~40MB)를 import하지만 실제로는
+    save_as_image(우리 미사용)에만 쓴다. 진짜 cv2가 없으면 스텁을 꽂아 40MB 다운로드를 피한다.
+    (기존 번들 빌드에서 WGC가 죽어 있던 숨은 원인 — build.yml이 cv2를 exclude하고 있었다.)"""
+    try:
+        import cv2  # noqa: F401  (개발 환경 등 진짜가 있으면 그걸 사용)
+    except Exception:
+        import types as _t
+        _cv = _t.ModuleType("cv2"); _cv.imwrite = lambda *a, **k: False
+        sys.modules["cv2"] = _cv
+
 def _ensure_wgc_engine():
     """WGC 캡처 엔진(windows-capture + numpy)을 exe에 번들하지 않고, ffmpeg/screp처럼
     첫 실행 때 1회 다운로드해 data/pyeng 에 둔다(합계 ~12MB) — exe는 작게 유지.
     성공 시 True. 실패해도 녹화는 DDA/GDI로 정상 동작."""
+    _cv2_stub()
     try:
         import windows_capture, numpy  # noqa: F401
         return True
@@ -2661,8 +2673,9 @@ def _ensure_wgc_engine():
         import requests, zipfile, io
         os.makedirs(eng, exist_ok=True)
         pytag = f"cp{sys.version_info[0]}{sys.version_info[1]}"
-        # windows-capture는 코드가 쓰는 1.x API(frame_buffer/start_free_threaded)로 고정
-        for pkg, ver in (("numpy", None), ("windows-capture", "1.5.0")):
+        # windows-capture 2.0.0 — 휠 소스 레벨로 API 호환 확인(생성자 동일+window_hwnd 추가,
+        # event 이름 기반 동일, frame_buffer/start_free_threaded 존속). 정확 고정으로 3.x 서프라이즈 방지.
+        for pkg, ver in (("numpy", None), ("windows-capture", "2.0.0")):
             api = f"https://pypi.org/pypi/{pkg}/{ver}/json" if ver else f"https://pypi.org/pypi/{pkg}/json"
             j = requests.get(api, timeout=30).json()
             url, name = _pick_wheel(j.get("urls") or [], pytag)
