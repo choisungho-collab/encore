@@ -35,7 +35,8 @@ jobs:
           --add-data "web;web"
           --hidden-import psutil --hidden-import requests --hidden-import tkinter
           --hidden-import pyaudiowpatch
-          --exclude-module boto3 --exclude-module botocore
+          --exclude-module boto3 --exclude-module botocore --exclude-module numpy
+          --exclude-module windows_capture
           --exclude-module flask --exclude-module werkzeug --exclude-module jinja2
           --exclude-module waitress
           --exclude-module cv2 --exclude-module opencv-python --exclude-module matplotlib

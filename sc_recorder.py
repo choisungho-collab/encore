@@ -1688,7 +1688,8 @@ def _compress_for_upload(video_path):
         src_sz = os.path.getsize(video_path)
         if src_sz < _CMP_MIN_MB * 1048576: return
         base = _encoder_args()
-        if "h264_nvenc" in base:
+        # 녹화가 돌고 있으면 GPU(NVENC) 세션 경합을 피하려 CPU로 압축한다(낮은 우선순위·절반 스레드라 게임 영향 최소).
+        if "h264_nvenc" in base and not REC_STATE.get("recording"):
             venc = ["-c:v", "h264_nvenc", "-preset", "p7", "-cq", "23"]; nm = "NVENC p7"
         else:
             venc = ["-c:v", "libx264", "-preset", "medium", "-crf", "23",
@@ -2014,8 +2015,16 @@ class Recorder:
                 "-framerate", str(self.fps), "-i", "desktop", *vf, *tail]
     def _spawn(self, mode, output_idx=0):
         self.path = os.path.join(REC_DIR, f"clip_{datetime.datetime.now():%Y%m%d_%H%M%S}.mp4")
+        try:                                            # stderr를 파일로 — 스트림이 죽으면 이유를 로그에 띄운다
+            if getattr(self, "_errf", None):
+                try: self._errf.close()
+                except Exception: pass
+            self._errf = open(os.path.join(REC_DIR, "rec_ffmpeg.log"), "w", encoding="utf-8", errors="replace")
+        except Exception:
+            self._errf = None
         self.proc = subprocess.Popen(self._cmd(self.path, mode, output_idx),
-                      stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                      stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                      stderr=(self._errf or subprocess.DEVNULL),
                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         self._vt0 = time.time()
     def _alive(self):
@@ -2136,14 +2145,10 @@ class Recorder:
         try:
             from windows_capture import WindowsCapture
         except ImportError:
-            # EXE(번들) 안에서는 pip 설치가 원천적으로 불가능하다(sys.executable = sc_recorder.exe).
-            # 이 빌드에 WGC 엔진이 안 들어있으면 소란 없이 DDA/GDI 캡처로 폴백한다.
-            if FROZEN:
-                log("  WGC engine not in this build → using DDA/GDI capture instead"); return False
-            # 개발 모드(파이썬 직접 실행)에서만 자동 설치를 시도한다.
+            # 엔진은 exe에 번들하지 않는다(작은 exe 유지). 백그라운드 1회 다운로드가 아직이면 이번 세션은 DDA/GDI.
+            if not _ensure_wgc_engine():
+                log("  WGC engine not ready yet → using DDA/GDI capture this time"); return False
             try:
-                log("Installing WGC engine (windows-capture)…")
-                _run([sys.executable, "-m", "pip", "install", "-q", "windows-capture", "--break-system-packages"], timeout=240)
                 from windows_capture import WindowsCapture
             except Exception as e:
                 log(f"  WGC unavailable ({e}) → using DDA/GDI capture instead"); return False
@@ -2555,6 +2560,15 @@ def _flush_pending():
                 else: still.append(it)
         except Exception: still.append(it)
     _save_pending(still)
+def _ffmpeg_tail(n=2):
+    """직전 녹화 ffmpeg 로그(rec_ffmpeg.log)의 마지막 에러 줄 — 스트림 드롭 원인 표시용."""
+    try:
+        p = os.path.join(REC_DIR, "rec_ffmpeg.log")
+        lines = [l.strip() for l in open(p, encoding="utf-8", errors="replace").readlines() if l.strip()]
+        return " / ".join(lines[-n:]) if lines else ""
+    except Exception:
+        return ""
+
 def _pipe(stage):
     """백그라운드 파이프라인 단계(processing/uploading/None) → GUI 헤더 표시용."""
     try: REC_STATE["pipe"] = stage
@@ -2611,6 +2625,63 @@ def _status_line(rec_on, ready, pipe, ingame, rec_el, game_el):
 # ── 게임 시작 감지(화면 인식): 인게임 HUD(하단 콘솔·우상단 자원 스트립)의 고정 어두운 UI를 추정.
 #    WGC 캡처 경로에서만 동작(프레임이 이미 메모리에 있어 비용 0). 오탐 방지 히스테리시스: 진입 3초·이탈 5초.
 #    ※ 표시(상태 라벨)용으로만 사용 — 녹화 시작/정지는 절대 이 신호로 제어하지 않음(오탐 시 영상 유실 방지).
+WGC_DL = {"busy": False}
+def _pick_wheel(urls, pytag):
+    """PyPI 파일 목록에서 win_amd64 + (현재 cpXY | abi3) 휠 선택."""
+    for u in urls:
+        n = u.get("filename", "")
+        if not n.endswith(".whl") or "win_amd64" not in n: continue
+        if pytag in n or "abi3" in n or "py3-none" in n:
+            return u.get("url"), n
+    return None, None
+
+def _ensure_wgc_engine():
+    """WGC 캡처 엔진(windows-capture + numpy)을 exe에 번들하지 않고, ffmpeg/screp처럼
+    첫 실행 때 1회 다운로드해 data/pyeng 에 둔다(합계 ~12MB) — exe는 작게 유지.
+    성공 시 True. 실패해도 녹화는 DDA/GDI로 정상 동작."""
+    try:
+        import windows_capture, numpy  # noqa: F401
+        return True
+    except Exception:
+        pass
+    if sys.platform != "win32":
+        return False
+    eng = os.path.join(DATA_DIR, "pyeng")
+    if os.path.isdir(eng):
+        if eng not in sys.path: sys.path.insert(0, eng)
+        try:
+            import importlib; importlib.invalidate_caches()
+            import windows_capture, numpy  # noqa: F401
+            return True
+        except Exception:
+            pass
+    if WGC_DL.get("busy"): return False
+    WGC_DL["busy"] = True
+    try:
+        import requests, zipfile, io
+        os.makedirs(eng, exist_ok=True)
+        pytag = f"cp{sys.version_info[0]}{sys.version_info[1]}"
+        # windows-capture는 코드가 쓰는 1.x API(frame_buffer/start_free_threaded)로 고정
+        for pkg, ver in (("numpy", None), ("windows-capture", "1.5.0")):
+            api = f"https://pypi.org/pypi/{pkg}/{ver}/json" if ver else f"https://pypi.org/pypi/{pkg}/json"
+            j = requests.get(api, timeout=30).json()
+            url, name = _pick_wheel(j.get("urls") or [], pytag)
+            if not url:
+                log(f"  Capture engine: no wheel for {pkg} ({pytag}/win_amd64)"); return False
+            log(f"  Downloading capture engine: {name} …")
+            b = requests.get(url, timeout=600).content
+            zipfile.ZipFile(io.BytesIO(b)).extractall(eng)
+        if eng not in sys.path: sys.path.insert(0, eng)
+        import importlib; importlib.invalidate_caches()
+        import windows_capture, numpy  # noqa: F401
+        log("✓ WGC capture engine ready — takes effect from the next recording")
+        return True
+    except Exception as e:
+        log(f"  Capture engine setup failed → recording continues with DDA/GDI: {e}")
+        return False
+    finally:
+        WGC_DL["busy"] = False
+
 GAME_DET = {"cur": None, "cand": None, "cand_t": 0.0, "seen": False}
 def _game_det_reset(assume_lobby=False):
     """감지 상태 초기화. assume_lobby=True(게임 종료 직후)면, 이번 세션에서 감지가 실제로
@@ -2638,9 +2709,11 @@ def _hud_sample(arr):
     except Exception:
         return None
 def _hud_ingame(m):
-    """인게임 추정: 하단·우상단은 어두운 고정 UI이고 뷰포트가 그보다 밝음. (초기 임계값 — 실사용 로그로 조정 가능)"""
+    """인게임 추정 — 실제 스크린샷 실측으로 보정한 임계값.
+    실측(2026-07-03): 인게임 bot 25.4 / top 48.5 / mid 36.8 · 로비 bot 37.4 / top 106.4 / mid 37.0
+    → 판별력의 핵심은 top(로비엔 맵 미리보기 등 밝은 UI, 인게임은 어두운 자원 스트립)과 mid−bot."""
     if not m: return None
-    return bool(m["bot"] < 58 and m["top"] < 66 and (m["mid"] - m["bot"]) > 8)
+    return bool(m["bot"] < 48 and m["top"] < 64 and (m["mid"] - m["bot"]) > 4)
 def _game_det_update(flag, now=None):
     """히스테리시스 적용 상태 전이. 전이 시에만 로그 1줄."""
     if flag is None: return
@@ -2677,6 +2750,7 @@ def recorder_loop(cfg):
     known = list_reps(autosave); was = False; active = False; enc_fail = 0
     try: ensure_audio()
     except Exception: pass
+    threading.Thread(target=_ensure_wgc_engine, daemon=True).start()   # WGC 엔진 1회 다운로드(백그라운드, ~12MB)
     log("Ready. Launch StarCraft and recording starts automatically. (keep this window open)")
     while True:
         try:
@@ -2685,7 +2759,9 @@ def recorder_loop(cfg):
                 log("StarCraft detected."); known = list_reps(autosave); active = rec.start()
             if run:
                 if not rec._recording():
-                    if active: log("Recording stream dropped; restarting automatically.")
+                    if active:
+                        _ft = _ffmpeg_tail()
+                        log("Recording stream dropped; restarting automatically." + (f"  (ffmpeg: {_ft})" if _ft else ""))
                     active = rec.start()
                     if not active:                       # 재시작이 안 붙음 → 누적되면 인코더 문제로 판단
                         enc_fail += 1
