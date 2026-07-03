@@ -29,7 +29,7 @@
   "gallery_url": "",
   "encoder": "auto",
   "ui": "window",
-  "scale": "auto",
+  "scale": "1080",
   "preset": "auto",
   "output_idx": "auto",
   "capture": "auto",

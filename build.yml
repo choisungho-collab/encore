@@ -3,13 +3,8 @@ name: Build Windows EXE
 on:
   push:
     branches: [ main ]
+    tags: [ 'v*' ]
   workflow_dispatch:
-    inputs:
-      bump:
-        description: '버전 증가 단위 (수동 실행 시 선택)'
-        type: choice
-        options: [patch, minor, major]
-        default: patch
 
 permissions:
   contents: write
@@ -20,30 +15,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0   # 버전 계산용으로 태그 전부 가져오기
-
-      - name: 다음 버전 계산
-        id: ver
-        shell: bash
-        run: |
-          git fetch --tags --force >/dev/null 2>&1 || true
-          bump="${{ github.event.inputs.bump }}"
-          if [ -z "$bump" ]; then bump="patch"; fi   # push 트리거는 입력 없음 → patch
-          # semver 태그가 0개면 grep이 exit 1 → set -eo pipefail이 스텝을 죽이므로 '|| true'로 방어
-          latest=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)
-          if [ -z "$latest" ]; then
-            next="v1.0.0"
-          else
-            ver="${latest#v}"; IFS=. read -r MA MI PA <<< "$ver"
-            case "$bump" in
-              major) next="v$((MA+1)).0.0" ;;
-              minor) next="v${MA}.$((MI+1)).0" ;;
-              *)     next="v${MA}.${MI}.$((PA+1))" ;;
-            esac
-          fi
-          echo "next=$next" >> "$GITHUB_OUTPUT"
-          echo "이전: ${latest:-(없음)}  →  다음: $next  ($bump)"
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -59,28 +30,51 @@ jobs:
       - name: Build single EXE
         run: >
           pyinstaller --onefile --windowed --name sc_recorder --noupx
+          --icon icon.ico
+          --version-file version_info.txt
+          --add-data "web;web"
           --hidden-import psutil --hidden-import requests --hidden-import tkinter
-          --hidden-import pyaudiowpatch --hidden-import windows_capture --collect-all windows_capture
+          --hidden-import pyaudiowpatch
           --exclude-module boto3 --exclude-module botocore
           --exclude-module flask --exclude-module werkzeug --exclude-module jinja2
           --exclude-module waitress
           --exclude-module cv2 --exclude-module opencv-python --exclude-module matplotlib
           sc_recorder.py
 
-      - name: Zip the EXE (브라우저의 .exe 다운로드 차단 회피용)
+      - name: Zip the EXE (브라우저의 .exe 다운로드 차단 회피용 .zip)
         shell: pwsh
         run: |
           Compress-Archive -Path dist/sc_recorder.exe -DestinationPath dist/sc_recorder.zip -Force
           if (-not (Test-Path dist/sc_recorder.zip)) { throw "sc_recorder.zip 생성 실패" }
           Get-ChildItem dist | Format-Table Name, Length
 
-      - name: Publish release
+      - name: Upload artifact (zip)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sc_recorder-windows
+          path: dist/sc_recorder.zip
+
+      - name: Publish "latest" release (push to main)
+        if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.ver.outputs.next }}
-          name: ${{ steps.ver.outputs.next }}
+          tag_name: latest
+          name: Latest build
           body: |
-            sc_recorder.zip 받아서 압축 풀고 sc_recorder.exe 실행 — 파이썬 설치 불필요.
-            보안 경고가 뜨면 "추가 정보 → 실행". 최초 실행 시 ffmpeg를 한 번 자동으로 내려받아요(1~2분).
-          files: dist/sc_recorder.zip
+            Download sc_recorder.zip, unzip it, and run sc_recorder.exe - no Python needed.
+            If Windows SmartScreen warns, click "More info -> Run anyway". On first launch it downloads the video tool (ffmpeg) once (1-2 min).
+          files: |
+            dist/sc_recorder.zip
+            dist/sc_recorder.exe
           make_latest: true
+
+      - name: Publish release (version tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          body: |
+            Download sc_recorder.zip, unzip it, and run sc_recorder.exe - no Python needed.
+            If Windows SmartScreen warns, click "More info -> Run anyway". On first launch it downloads the video tool (ffmpeg) once (1-2 min).
+          files: |
+            dist/sc_recorder.zip
+            dist/sc_recorder.exe
