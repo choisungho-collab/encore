@@ -2687,8 +2687,10 @@ def run_gui(cfg, url):
             return c[-1]
     except Exception:
         def _pick(*c): return c[0]
-    LAT=_pick("Segoe UI","Arial"); MON=_pick("Consolas","Cascadia Mono","Courier New")
-    fW=(LAT,17,"bold"); fSub=(LAT,10); fChip=(MON,9,"bold"); fBtn=(LAT,10,"bold"); fMeta=(MON,9,"bold")
+    LAT=_pick("Segoe UI Variable Text","Segoe UI","Arial")          # 본문
+    LATD=_pick("Segoe UI Variable Display","Segoe UI Semibold","Segoe UI","Arial")  # 타이틀
+    MON=_pick("Cascadia Mono","Consolas","Courier New")
+    fW=(LATD,16,"bold"); fSub=(LAT,10); fChip=(MON,9,"bold"); fBtn=(LAT,10,"bold"); fMeta=(MON,9,"bold")
 
     try:
         def _scene(d1x,d2x):
@@ -2760,13 +2762,9 @@ def run_gui(cfg, url):
     # ---------- canvas (scene + status + meta + actions) ----------
     cv=_ZC(root, width=Z(W), height=Z(CH), bg=GND, highlightthickness=0); cv.pack(fill="x")
     cv_img=cv.create_image(0,0, anchor="nw", image=scene_idle) if scene_idle else None
-    lid=cv.create_oval(17,28,29,40, fill=AZ, outline="")
-    wid=cv.create_text(40,30, anchor="w", text="Starting\u2026", fill=INK, font=fW)
-    sid=cv.create_text(150,33, anchor="w", text="", fill=INK2, font=fSub)
-    def _layout_status():
-        try:
-            bb=cv.bbox(wid); x=((bb[2]/UIS) if bb else 120)+10; cv.coords(sid, x, 34)
-        except Exception: pass
+    lid=cv.create_oval(18,20,28,30, fill=AZ, outline="")
+    wid=cv.create_text(40,25, anchor="w", text="Starting\u2026", fill=INK, font=fW)
+    sid=cv.create_text(41,49, anchor="w", text="", fill=INK2, font=fSub)   # 타이틀 아래 둘째 줄 — 우측 메타와 겹침 없음
 
     # rounded-rect helper
     def _round(x1,y1,x2,y2,r,**kw):
@@ -3013,17 +3011,13 @@ def run_gui(cfg, url):
             st["rec"]=False
             if scene_idle and cv_img is not None: cv.itemconfig(cv_img, image=scene_idle)
         if rec:
-            el=int(time.time()-st["rec_start"]); sub=f"\u00b7 {el//60:d}:{el%60:02d}"
+            el=int(time.time()-st["rec_start"]); sub=f"{el//60:d}:{el%60:02d} elapsed"
             cv.itemconfig(wid, text="Recording", fill=INK)
         elif REC_STATE.get("ready"):
-            sub="\u00b7 auto-records"; cv.itemconfig(wid, text="Ready", fill=INK)
+            sub="auto-records when a game starts"; cv.itemconfig(wid, text="Ready", fill=INK)
         else:
-            sub="\u00b7 preparing tools (1-2 min)"; cv.itemconfig(wid, text="Starting\u2026", fill=INK)
-        try:
-            n=count_matches()
-            if n: sub=f"{sub} \u00b7 {n} games"
-        except Exception: pass
-        cv.itemconfig(sid, text=sub); _layout_status()
+            sub="preparing tools (1-2 min)"; cv.itemconfig(wid, text="Starting\u2026", fill=INK)
+        cv.itemconfig(sid, text=sub)
         if UP_DONE.get("t",0) > UP_DONE.get("shown",0):
             UP_DONE["shown"]=UP_DONE["t"]; show_toast()
         if LAST_ERR.get("msg") and (time.time()-LAST_ERR.get("t",0) < 8):
