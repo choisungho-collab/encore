@@ -218,6 +218,8 @@ def load_or_make_config():
             "preset": "auto",    # auto | ultrafast | superfast | veryfast | fast ...  (libx264 속도/품질)
             "output_idx": "auto",   # auto | 0 | 1 | 2  (멀티모니터면 게임 있는 모니터 번호)
             "capture": "auto",   # auto | wgc | ddagrab | gdigrab   (wgc=OBS식, 전체화면도 잡힘)
+            "upload_compress": "auto",   # auto | off  (업로드 전 재인코딩 — 해상도 유지, 용량 30~60% 절감)
+            "game_detect": "auto",   # auto | off  (WGC 화면 인식으로 게임 시작 감지 — 상태 표시용)
             "local_video_keep_days": "0",   # 0=계속 보관 | 7 | 14 | 30  (업로드 완료된 로컬 영상을 N일 뒤 자동 삭제 — 클라우드 보관본·리플레이(.rep)·썸네일은 유지)
             "port": free_port(8000),
             "fps": FPS,
@@ -396,8 +398,13 @@ def parse_rep(path):
     t2 = "".join(pl["rl"] for pl in players if pl["team"] == 2)
     meta.update({"map": clean(h.get("Map")), "length": "%d:%02d" % (secs // 60, secs % 60),
                  "type": (h.get("Type") or {}).get("Name"), "winner": comp.get("WinnerTeam"),
-                 "saver": next((p.get("Name") for p in (h.get("Players") or [])
-                               if p.get("ID") == comp.get("RepSaverPlayerID")), None),
+                 "saver": (next((p.get("Name") for p in (h.get("Players") or [])
+                                if p.get("ID") == comp.get("RepSaverPlayerID")), None)
+                           # RepSaver 매칭 실패(컴퓨터전·옵저버 등) 폴백: 인간 플레이어가 정확히 1명이면 그 사람
+                           or next(iter([p.get("Name") for p in (h.get("Players") or [])
+                                         if ((p.get("Type") or {}).get("Name") == "Human")]
+                                        if sum(1 for p in (h.get("Players") or [])
+                                               if (p.get("Type") or {}).get("Name") == "Human") == 1 else []), None)),
                  "players": players,
                  "matchup": (f"{t1} vs {t2}" if t1 and t2 else None)})
     return meta
@@ -940,8 +947,15 @@ def set_analysis(mid, js):
 # ===================== 코치 리포트 (규칙 기반, API 불필요) =====================
 
 def _len_sec(l):
-    try: m, s = l.split(":"); return int(m)*60+int(s)
-    except Exception: return 0
+    # "M:SS" 와 "H:MM:SS"(1시간 넘는 긴 게임) 둘 다 지원. 못 읽으면 0.
+    try:
+        parts = [int(x) for x in str(l).strip().split(":")]
+    except Exception:
+        return 0
+    if len(parts) == 3: return parts[0]*3600 + parts[1]*60 + parts[2]
+    if len(parts) == 2: return parts[0]*60 + parts[1]
+    if len(parts) == 1: return parts[0]
+    return 0
 
 RACE_KO = {"ran": "테란", "zerg": "저그", "toss": "프로토스"}
 
@@ -1370,7 +1384,7 @@ def reanalyze_all(log_fn=None):
     if not sb_cfg().get("service_key"):
         lg("⚠ No service_key — updating existing games may be blocked by RLS. Fill supabase.service_key in config.json to be safe.")
     try:
-        matches = sb_get_matches(limit=100000, cols="id,replay,map,video,preview")  # analysis 통째 수신 방지(어차피 새로 만들어 덮어씀)
+        matches = sb_get_matches(limit=100000, cols="id,replay,map,video,preview,lead_sec:analysis->meta->>lead_sec")  # analysis 통째 수신은 피하되, 재계산 불가한 lead_sec 만 함께 받음
     except Exception as e:
         lg(f"✗ Couldn't load the game list: {e}"); return 0
     lg(f"Reanalyzing {len(matches)} existing games…")
@@ -1396,6 +1410,13 @@ def reanalyze_all(log_fn=None):
             meta = parse_rep(rep); a = extract_analysis(rep)
             try: a["highlights"] = compute_highlights(a)
             except Exception: pass
+            # 재분석은 영상을 다시 트리밍하지 않으므로, 최초 업로드 때 측정한 게임 시작 오프셋(lead_sec)은
+            # 그대로 유효하다. extract_analysis 로는 재계산할 수 없으니 기존 값을 반드시 보존한다.
+            # (이 값이 없으면 웹이 재생 시작 위치를 잘못 잡아 영상 끝으로 점프한다.)
+            _old_lead = m.get("lead_sec")
+            if _old_lead not in (None, ""):
+                try: a.setdefault("meta", {})["lead_sec"] = float(_old_lead)
+                except Exception: pass
             players = meta.get("players") or []; saver = meta.get("saver"); winner = meta.get("winner")
             sp = next((p for p in players if p.get("name") == saver), None)
             won = (sp.get("team") == winner) if (sp and winner is not None) else None
@@ -1655,6 +1676,43 @@ def make_clips(video_path, highlights, game_len_sec, out_dir, lead=6.0, maxn=3, 
             pass
     return made
 
+_CMP_MIN_MB = 30      # 이보다 작은 파일은 재인코딩 이득이 작아 건너뜀
+def _compress_for_upload(video_path):
+    """업로드 전 재인코딩 — 게임이 끝난 뒤라 실시간 제약이 없어, 압축 효율 좋은 설정을 쓸 수 있다.
+    해상도(1080p) 유지 · 오디오 재인코딩 없이 복사. NVENC 있으면 p7·CQ23(빠름·게임 무영향),
+    없으면 x264 medium·CRF23(스레드 절반 + 낮은 프로세스 우선순위 — 다음 판 게임에 영향 최소화).
+    결과가 원본의 80% 이하일 때만 교체, 길이가 훼손되면 폐기. 실패해도 업로드는 원본으로 계속."""
+    try:
+        if str(CFG.get("upload_compress", "auto")).lower() in ("off", "0", "false", "no"): return
+        if not (FFMPEG and video_path and os.path.isfile(video_path)): return
+        src_sz = os.path.getsize(video_path)
+        if src_sz < _CMP_MIN_MB * 1048576: return
+        base = _encoder_args()
+        if "h264_nvenc" in base:
+            venc = ["-c:v", "h264_nvenc", "-preset", "p7", "-cq", "23"]; nm = "NVENC p7"
+        else:
+            venc = ["-c:v", "libx264", "-preset", "medium", "-crf", "23",
+                    "-threads", str(max(1, (os.cpu_count() or 4) // 2))]; nm = "x264 medium"
+        tmp = video_path + ".cmp.mp4"
+        log(f"Compressing for upload ({nm}) — {src_sz/1048576:.0f}MB…")
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | (0x00004000 if os.name == "nt" else 0)  # BELOW_NORMAL 우선순위
+        r = _run([FFMPEG, "-y", "-loglevel", "error", "-i", video_path, *venc,
+                  "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", tmp],
+                 timeout=4*3600, creationflags=flags)
+        ok = (r.returncode == 0 and os.path.isfile(tmp) and os.path.getsize(tmp) > 40000)
+        if ok:
+            d0 = _ffprobe_dur(video_path) or 0; d1 = _ffprobe_dur(tmp) or 0
+            if d0 and abs(d0 - d1) > 2.5: ok = False        # 길이 훼손 방지
+        if ok and os.path.getsize(tmp) <= src_sz * 0.8:
+            new_sz = os.path.getsize(tmp); os.replace(tmp, video_path)
+            log(f"  Compression done: {src_sz/1048576:.0f}MB → {new_sz/1048576:.0f}MB ({100-int(new_sz*100/src_sz)}% smaller)")
+        else:
+            try: os.remove(tmp)
+            except OSError: pass
+            log("  Compression skipped (little gain) — uploading the original")
+    except Exception as e:
+        log(f"  Compression failed → uploading the original: {e}")
+
 def ingest(video_path, rep_path, uploader=None, t0=None, rep_mtime=None):
     if not video_path or not os.path.isfile(video_path) or os.path.getsize(video_path) < 10000:
         log("Video is empty, skipping registration."); return
@@ -1705,6 +1763,9 @@ def ingest(video_path, rep_path, uploader=None, t0=None, rep_mtime=None):
                 if -30.0 <= _ls <= 60.0: _lead_sec = round(_ls, 2)
     except Exception as _e:
         log(f"lead_sec measure skipped: {_e}")
+    _compress_for_upload(video_path)                # 업로드 전 재인코딩(트리밍 뒤 = 게임 구간만 인코딩)
+    try: size = os.path.getsize(video_path)         # 트리밍·압축 반영한 실제 업로드 크기
+    except Exception: pass
     if sb_writable():
         analysis = None
         try:
@@ -1740,6 +1801,7 @@ def ingest(video_path, rep_path, uploader=None, t0=None, rep_mtime=None):
                     pv_url = sb_upload(_pv, f"previews/{gid}.mp4", "video/mp4")
             except Exception as _e:
                 log(f"  preview skip: {_e}")
+            _pipe("uploading")
             video_url = sb_upload(video_path, f"videos/{gid}.mp4", "video/mp4")
             thumb_url = sb_upload(tmp_thumb, f"thumbs/{gid}.jpg", "image/jpeg") if has_thumb else None
             replay_url = sb_upload(rdst, f"replays/{gid}.rep", "application/octet-stream") if rdst else None
@@ -1898,7 +1960,7 @@ def _encoder_args():
     except Exception: _gop = 60
     if use_nvenc:
         _ENC_IS_SW = False
-        _ENC_CACHE = ["-c:v", "h264_nvenc", "-preset", "p5", "-cq", "20",
+        _ENC_CACHE = ["-c:v", "h264_nvenc", "-preset", "p5", "-cq", "22",
                       "-g", str(_gop)]; name = "NVENC (NVIDIA 하드웨어)"
     else:
         _ENC_IS_SW = True
@@ -2045,7 +2107,7 @@ class Recorder:
         return (path if box.get("ok") else None, t0)
 
     def _finalize(self):
-        """영상 클립 + 병렬 녹음한 소리를 합쳐 최종 mp4. 소리 없으면 영상만 그대로."""
+        """영상 클립 + 병렬 녹음한 소리를 합쳐 최종 mp4 (동기 — 종료/예외 경로용)."""
         vid = self.path if (self.path and os.path.isfile(self.path)) else None
         wav, at0 = self._stop_audio()
         if not vid:
@@ -2053,45 +2115,38 @@ class Recorder:
                 if wav and os.path.isfile(wav): os.remove(wav)
             except OSError: pass
             return None
-        if not (wav and os.path.isfile(wav) and os.path.getsize(wav) > 2000):
-            return vid                                  # 소리 없음 → 영상만(기존 동작)
-        if not FFMPEG:
-            return vid
-        try:
-            out = (vid[:-4] if vid.lower().endswith(".mp4") else vid) + "_av.mp4"
-            voff = 0.0
-            if self._vt0 and at0 and self._vt0 > at0:
-                voff = min(10.0, self._vt0 - at0)       # 영상이 늦게 시작한 만큼 소리 앞부분을 잘라 싱크
-            cmd = [FFMPEG, "-y", "-loglevel", "error"]
-            if voff > 0.05: cmd += ["-ss", f"{voff:.3f}"]
-            cmd += ["-i", wav, "-i", vid, "-map", "1:v:0", "-map", "0:a:0",
-                    "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-                    "-movflags", "+faststart", "-shortest", out]
-            _run(cmd, timeout=900)
-            if os.path.isfile(out) and os.path.getsize(out) > 40000:
-                for f in (vid, wav):
-                    try: os.remove(f)
-                    except OSError: pass
-                self.path = out; log("■ Audio merge complete"); return out
-            log("  (audio) merge result empty, using video only")
+        out = _merge_audio(vid, wav, at0, self._vt0)
+        if out: self.path = out
+        return out
+
+    def _pend(self):
+        """빠른 반환용: 병합 없이 영상·오디오 경로만 회수. 병합은 _dispatch(백그라운드)에서 —
+        게임 종료 → 다음 판 대기 녹화 재시작 공백을 30초대 → 2~3초로 줄인다."""
+        vid = self.path if (self.path and os.path.isfile(self.path)) else None
+        wav, at0 = self._stop_audio()
+        if not vid:
             try:
-                if os.path.isfile(out): os.remove(out)
+                if wav and os.path.isfile(wav): os.remove(wav)
             except OSError: pass
-            return vid
-        except Exception as e:
-            log(f"  (audio) merge failed → video only: {e}"); return vid
+            return None
+        return {"v": vid, "w": wav, "a": at0, "t": self._vt0}
 
     def _start_wgc(self, verify=True):
         """WGC(OBS식)로 프레임을 받아 ffmpeg로 인코딩. 정지화면이어도 직전 프레임을 고정 fps로 계속 먹임(전체화면 게임도 잡힘)."""
         try:
             from windows_capture import WindowsCapture
         except ImportError:
+            # EXE(번들) 안에서는 pip 설치가 원천적으로 불가능하다(sys.executable = sc_recorder.exe).
+            # 이 빌드에 WGC 엔진이 안 들어있으면 소란 없이 DDA/GDI 캡처로 폴백한다.
+            if FROZEN:
+                log("  WGC engine not in this build → using DDA/GDI capture instead"); return False
+            # 개발 모드(파이썬 직접 실행)에서만 자동 설치를 시도한다.
             try:
                 log("Installing WGC engine (windows-capture)…")
                 _run([sys.executable, "-m", "pip", "install", "-q", "windows-capture", "--break-system-packages"], timeout=240)
                 from windows_capture import WindowsCapture
             except Exception as e:
-                log(f"  WGC unavailable (install failed: {e})"); return False
+                log(f"  WGC unavailable ({e}) → using DDA/GDI capture instead"); return False
         try:
             import numpy as _np
         except Exception as e:
@@ -2140,6 +2195,8 @@ class Recorder:
                 return
             proc_box["p"] = p; self._vt0 = time.time()
             interval = 1.0 / max(1, fps); nxt = time.time()
+            _det_on = str(CFG.get("game_detect", "auto")).lower() not in ("off", "0", "false", "no")
+            _det_n = 0
             while not stop_ev.is_set():
                 b = shared["buf"]
                 if b is not None:
@@ -2147,6 +2204,11 @@ class Recorder:
                         if b.shape[1] != w: b = b[:, :w]            # 스트라이드 보정
                         p.stdin.write(_np.ascontiguousarray(b).tobytes())
                     except Exception: break
+                    _det_n += 1
+                    if _det_on and _det_n >= fps:                   # 1초에 한 번: 화면으로 인게임 여부 추정(표시용)
+                        _det_n = 0
+                        try: _game_det_update(_hud_ingame(_hud_sample(b)))
+                        except Exception: pass
                 nxt += interval; d = nxt - time.time()
                 if d > 0: time.sleep(d)
                 else: nxt = time.time()
@@ -2217,6 +2279,7 @@ class Recorder:
 
     def start(self):
         if self._recording(): return True
+        _game_det_reset()                       # 새 캡처 세션 — 이전 세션의 인게임 판정 제거
         _free=_disk_free_gb()
         if _free is not None and _free < 0.5:
             if time.time()-getattr(self,"_dwarn",0) > 300:
@@ -2283,8 +2346,9 @@ class Recorder:
             return self._alive()
         except Exception:
             self.proc = None; return False
-    def stop(self):
+    def stop(self, merge=True):
         self.last_seconds = (time.time() - self._t_start) if self._t_start else 0.0
+        _game_det_reset(assume_lobby=True)
         if self.backend == "wgc":
             st = self._wgc_state or {}
             ev = st.get("stop")
@@ -2298,7 +2362,7 @@ class Recorder:
                 except Exception: pass
             self.backend = "ffmpeg"; self._wgc_control = None; self._wgc_state = None
             log("■ Recording stopped")
-            return self._finalize()
+            return self._finalize() if merge else self._pend()
         if not self.proc: return None
         p = self.proc; self.proc = None
         try:
@@ -2309,7 +2373,7 @@ class Recorder:
                 except subprocess.TimeoutExpired: p.terminate()
         except Exception: pass
         log("■ Recording stopped")
-        return self._finalize()
+        return self._finalize() if merge else self._pend()
 
 def sc_running(name):
     n = name.lower()
@@ -2491,10 +2555,121 @@ def _flush_pending():
                 else: still.append(it)
         except Exception: still.append(it)
     _save_pending(still)
+def _pipe(stage):
+    """백그라운드 파이프라인 단계(processing/uploading/None) → GUI 헤더 표시용."""
+    try: REC_STATE["pipe"] = stage
+    except Exception: pass
+
+def _merge_audio(vid, wav, at0, vt0):
+    """영상 + 병렬 녹음 wav 병합 → 최종 mp4 경로. 소리 없으면 영상 그대로. (백그라운드에서 호출)"""
+    if not vid: return None
+    if not (wav and os.path.isfile(wav) and os.path.getsize(wav) > 2000):
+        return vid                                  # 소리 없음 → 영상만(기존 동작)
+    if not FFMPEG:
+        return vid
+    try:
+        out = (vid[:-4] if vid.lower().endswith(".mp4") else vid) + "_av.mp4"
+        voff = 0.0
+        if vt0 and at0 and vt0 > at0:
+            voff = min(10.0, vt0 - at0)             # 영상이 늦게 시작한 만큼 소리 앞부분을 잘라 싱크
+        cmd = [FFMPEG, "-y", "-loglevel", "error"]
+        if voff > 0.05: cmd += ["-ss", f"{voff:.3f}"]
+        cmd += ["-i", wav, "-i", vid, "-map", "1:v:0", "-map", "0:a:0",
+                "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+                "-movflags", "+faststart", "-shortest", out]
+        _run(cmd, timeout=900)
+        if os.path.isfile(out) and os.path.getsize(out) > 40000:
+            for f in (vid, wav):
+                try: os.remove(f)
+                except OSError: pass
+            log("■ Audio merge complete"); return out
+        log("  (audio) merge result empty, using video only")
+        try:
+            if os.path.isfile(out): os.remove(out)
+        except OSError: pass
+        return vid
+    except Exception as e:
+        log(f"  (audio) merge failed → video only: {e}"); return vid
+
+def _status_line(rec_on, ready, pipe, ingame, rec_el, game_el):
+    """GUI 헤더(제목, 서브텍스트) 결정 — Ready → Recording → Processing → Uploading 파이프라인 표시."""
+    if pipe == "uploading":
+        return ("Uploading", "sending the last game to the archive" + (" · standby recording on" if rec_on else ""))
+    if pipe == "processing":
+        return ("Processing", "trimming · analyzing the last game" + (" · standby recording on" if rec_on else ""))
+    if rec_on:
+        if ingame is True:
+            e = int(max(0, game_el)); return ("Recording", f"{e//60:d}:{e%60:02d} in game")
+        if ingame is False:
+            # 로비/메뉴: 대기 캡처는 돌지만(잘려나갈 부분) 사용자 관점에선 '다음 게임 준비' 상태
+            return ("Ready", "in lobby — records automatically when the game starts")
+        e = int(max(0, rec_el)); return ("Recording", f"{e//60:d}:{e%60:02d} elapsed")
+    if ready:
+        return ("Ready", "auto-records when a game starts")
+    return ("Starting\u2026", "preparing tools (1-2 min)")
+
+# ── 게임 시작 감지(화면 인식): 인게임 HUD(하단 콘솔·우상단 자원 스트립)의 고정 어두운 UI를 추정.
+#    WGC 캡처 경로에서만 동작(프레임이 이미 메모리에 있어 비용 0). 오탐 방지 히스테리시스: 진입 3초·이탈 5초.
+#    ※ 표시(상태 라벨)용으로만 사용 — 녹화 시작/정지는 절대 이 신호로 제어하지 않음(오탐 시 영상 유실 방지).
+GAME_DET = {"cur": None, "cand": None, "cand_t": 0.0, "seen": False}
+def _game_det_reset(assume_lobby=False):
+    """감지 상태 초기화. assume_lobby=True(게임 종료 직후)면, 이번 세션에서 감지가 실제로
+    동작했던 경우에 한해 '로비'로 즉시 판정 — Uploading→Ready 전환이 매끄럽다.
+    감지가 없던 세션(DDA/GDI)은 None(판단 불가)으로 돌아가 기존 표시를 유지한다."""
+    if assume_lobby and GAME_DET.get("seen"):
+        GAME_DET.update(cur=False, cand=False, cand_t=0.0, seen=False)
+        try: REC_STATE["ingame"] = False; REC_STATE["game_since"] = None
+        except Exception: pass
+        return
+    GAME_DET.update(cur=None, cand=None, cand_t=0.0, seen=False)
+    try: REC_STATE["ingame"] = None; REC_STATE["game_since"] = None
+    except Exception: pass
+def _hud_sample(arr):
+    """BGRA 프레임(HxWx4 ndarray)에서 밝기 통계 추출 (8px 서브샘플 — 1080p 기준 3만 픽셀, <1ms)."""
+    try:
+        h, w = arr.shape[0], arr.shape[1]
+        if h < 200 or w < 200: return None
+        g = arr[::8, ::8, 1].astype("float32")     # G채널 ≈ 밝기
+        gh, gw = g.shape
+        bot = g[int(gh*0.86):, :]                   # 하단 콘솔 밴드(미니맵·유닛 패널)
+        top = g[:max(2, int(gh*0.05)), int(gw*0.55):]  # 우상단 자원 스트립
+        mid = g[int(gh*0.25):int(gh*0.70), :]       # 게임 뷰포트
+        return {"bot": float(bot.mean()), "top": float(top.mean()), "mid": float(mid.mean())}
+    except Exception:
+        return None
+def _hud_ingame(m):
+    """인게임 추정: 하단·우상단은 어두운 고정 UI이고 뷰포트가 그보다 밝음. (초기 임계값 — 실사용 로그로 조정 가능)"""
+    if not m: return None
+    return bool(m["bot"] < 58 and m["top"] < 66 and (m["mid"] - m["bot"]) > 8)
+def _game_det_update(flag, now=None):
+    """히스테리시스 적용 상태 전이. 전이 시에만 로그 1줄."""
+    if flag is None: return
+    gd = GAME_DET; gd["seen"] = True; now = now if now is not None else time.time()
+    if flag != gd.get("cand"):
+        gd["cand"] = flag; gd["cand_t"] = now
+    need = 2.0 if gd.get("cur") is None else (3.0 if flag else 5.0)   # 리셋 직후 첫 판정은 빠르게
+    if flag != gd.get("cur") and (now - gd["cand_t"]) >= need:
+        gd["cur"] = flag
+        try:
+            REC_STATE["ingame"] = flag
+            if flag:
+                REC_STATE["game_since"] = gd["cand_t"]
+                log("Game start detected (in-game HUD on screen)")
+            else:
+                REC_STATE["game_since"] = None
+                log("Game screen ended (lobby/menu)")
+        except Exception: pass
+
 def _dispatch(video, rep, t0=None, rep_mtime=None):
-    if (CFG.get("cloud") or {}).get("function_url"): upload_cloud(video, rep)
-    elif CFG.get("mode") == "recorder": upload_remote(video, rep)
-    else: ingest(video, rep, uploader=(CFG.get("username") or None), t0=t0, rep_mtime=rep_mtime)
+    try:
+        _pipe("processing")
+        if isinstance(video, dict):                 # stop(merge=False)의 반환 — 오디오 병합을 여기(백그라운드)서
+            video = _merge_audio(video.get("v"), video.get("w"), video.get("a"), video.get("t"))
+        if (CFG.get("cloud") or {}).get("function_url"): _pipe("uploading"); upload_cloud(video, rep)
+        elif CFG.get("mode") == "recorder": _pipe("uploading"); upload_remote(video, rep)
+        else: ingest(video, rep, uploader=(CFG.get("username") or None), t0=t0, rep_mtime=rep_mtime)
+    finally:
+        _pipe(None)
 
 def recorder_loop(cfg):
     proc = cfg["starcraft_process"]; autosave = cfg["replay_autosave_dir"]
@@ -2523,22 +2698,24 @@ def recorder_loop(cfg):
                     newest = max(new, key=lambda f: cur[f])
                     log(f"Game-end detected: {os.path.basename(newest)}")
                     time.sleep(1.5)
-                    vid = rec.stop(); active = False
-                    threading.Thread(target=_dispatch, args=(vid, newest, rec._t_start, cur.get(newest)), daemon=True).start()
+                    pend = rec.stop(merge=False); active = False   # 병합은 백그라운드 — 다음 판 녹화 공백 최소화
+                    threading.Thread(target=_dispatch, args=(pend, newest, rec._t_start, cur.get(newest)), daemon=True).start()
                     known = cur
                     if sc_running(proc): active = rec.start()
             if not run and was:
                 log("StarCraft closed.")
-                vid = rec.stop(); active = False; rec.verified = False
+                pend = rec.stop(merge=False); active = False; rec.verified = False
                 cur = list_reps(autosave); new = [f for f in cur if f not in known]
-                if vid and new:
+                if pend and new:
                     newest = max(new, key=lambda f: cur[f])
-                    threading.Thread(target=_dispatch, args=(vid, newest, rec._t_start, cur.get(newest)), daemon=True).start()
-                elif vid and os.path.isfile(vid):
+                    threading.Thread(target=_dispatch, args=(pend, newest, rec._t_start, cur.get(newest)), daemon=True).start()
+                elif pend:
                     # 리플레이가 없으면(메뉴·대기 화면 등) 게임이 아니므로 저장하지 않고 폐기 — 용량 낭비 방지
                     log(f"  Recording with no replay ({rec.last_seconds:.0f}s) isn't a game — discarding without saving.")
-                    try: os.remove(vid)
-                    except OSError: pass
+                    for _f in (pend.get("v"), pend.get("w")):
+                        try:
+                            if _f and os.path.isfile(_f): os.remove(_f)
+                        except OSError: pass
                 known = cur; log("Idle.")
             # 웹 표시용 실시간 상태 갱신
             if run and rec._recording():
@@ -2717,6 +2894,7 @@ def run_gui(cfg, url):
             try:
                 c = issue_login_code()               # 아직 판 없으면 None → 그냥 열기
                 if c: u = url + "/#code=" + c        # 웹(encore-auth.js)이 소비 → 자동 로그인
+                else: log("Opening gallery without login — this PC isn't linked to an account yet (upload one game and it links automatically)")
             except Exception as e:
                 log(f"login code skipped: {e}")
             try: open_app(u)
@@ -3010,13 +3188,11 @@ def run_gui(cfg, url):
         elif not rec and st["rec"]:
             st["rec"]=False
             if scene_idle and cv_img is not None: cv.itemconfig(cv_img, image=scene_idle)
-        if rec:
-            el=int(time.time()-st["rec_start"]); sub=f"{el//60:d}:{el%60:02d} elapsed"
-            cv.itemconfig(wid, text="Recording", fill=INK)
-        elif REC_STATE.get("ready"):
-            sub="auto-records when a game starts"; cv.itemconfig(wid, text="Ready", fill=INK)
-        else:
-            sub="preparing tools (1-2 min)"; cv.itemconfig(wid, text="Starting\u2026", fill=INK)
+        _gs=REC_STATE.get("game_since")
+        _ttl,sub=_status_line(rec, bool(REC_STATE.get("ready")), REC_STATE.get("pipe"), REC_STATE.get("ingame"),
+                              (time.time()-st["rec_start"]) if rec else 0.0,
+                              (time.time()-_gs) if _gs else 0.0)
+        cv.itemconfig(wid, text=_ttl, fill=INK)
         cv.itemconfig(sid, text=sub)
         if UP_DONE.get("t",0) > UP_DONE.get("shown",0):
             UP_DONE["shown"]=UP_DONE["t"]; show_toast()
