@@ -115,7 +115,9 @@ SCREP  = None
 CFG    = {}
 
 import queue as _queue
+from collections import deque as _deque
 GUI_Q = _queue.Queue(maxsize=4000)
+LOG_BUF = _deque(maxlen=400)   # 로그창이 닫혀 있어도 최근 로그를 항상 보관(열면 즉시 채움)
 APP_VERSION = "1.0.0"
 REC_STATE = {"recording": False, "encoder": "", "ready": False}
 LAST_ERR = {"msg": "", "t": 0.0}
@@ -133,6 +135,8 @@ def log(m):
     if "Ready. Launch StarCraft" in s: REC_STATE["ready"] = True
     if s.startswith("Encoder:"): REC_STATE["encoder"] = s.split("Encoder:", 1)[1].strip()
     if ("Uploaded" in s) and ("\u2713" in s): UP_DONE["t"] = time.time()
+    try: LOG_BUF.append(line)
+    except Exception: pass
     try: GUI_Q.put_nowait(line)
     except Exception: pass
     try:
@@ -2145,9 +2149,9 @@ class Recorder:
         try:
             from windows_capture import WindowsCapture
         except ImportError:
-            # 엔진은 exe에 번들하지 않는다(작은 exe 유지). 백그라운드 1회 다운로드가 아직이면 이번 세션은 DDA/GDI.
+            # EXE는 WGC 엔진이 번들됨. 여기 도달 = 개발 환경(미설치) → 1회 준비 시도, 실패 시 DDA/GDI.
             if not _ensure_wgc_engine():
-                log("  WGC engine not ready yet → using DDA/GDI capture this time"); return False
+                log("  WGC engine unavailable → using DDA/GDI capture this time"); return False
             try:
                 from windows_capture import WindowsCapture
             except Exception as e:
@@ -2647,9 +2651,9 @@ def _cv2_stub():
         sys.modules["cv2"] = _cv
 
 def _ensure_wgc_engine():
-    """WGC 캡처 엔진(windows-capture + numpy)을 exe에 번들하지 않고, ffmpeg/screp처럼
-    첫 실행 때 1회 다운로드해 data/pyeng 에 둔다(합계 ~12MB) — exe는 작게 유지.
-    성공 시 True. 실패해도 녹화는 DDA/GDI로 정상 동작."""
+    """WGC 캡처 엔진(windows-capture + numpy)을 준비한다.
+    EXE에는 번들되어 맨 위 import가 즉시 성공한다. 개발 환경(미설치)에서만
+    data/pyeng 로 1회 다운로드한다. 실패해도 녹화는 DDA/GDI로 정상 동작."""
     _cv2_stub()
     try:
         import windows_capture, numpy  # noqa: F401
@@ -2763,7 +2767,8 @@ def recorder_loop(cfg):
     known = list_reps(autosave); was = False; active = False; enc_fail = 0
     try: ensure_audio()
     except Exception: pass
-    threading.Thread(target=_ensure_wgc_engine, daemon=True).start()   # WGC 엔진 1회 다운로드(백그라운드, ~12MB)
+    if not FROZEN:  # EXE는 WGC 엔진(windows-capture+numpy)이 번들됨. 개발 환경에서만 1회 준비.
+        threading.Thread(target=_ensure_wgc_engine, daemon=True).start()
     log("Ready. Launch StarCraft and recording starts automatically. (keep this window open)")
     while True:
         try:
@@ -3201,6 +3206,12 @@ def run_gui(cfg, url):
             if LAST_ERR.get("msg"): errbar.config(text="\u26a0 " + LAST_ERR["msg"]); errbar.pack(fill="x", pady=(0,5))
             else: errbar.pack_forget()
             logtxt.pack(fill="both", expand=True); cv.itemconfig(menu_g, fill=AZ2)
+            try:
+                if float(logtxt.index("end-1c")) <= 1.0 and LOG_BUF:
+                    logtxt.config(state="normal")
+                    logtxt.insert("end", "\n".join(LOG_BUF)+"\n")
+                    logtxt.see("end"); logtxt.config(state="disabled")
+            except Exception: pass
         else:
             logwrap.pack_forget(); cv.itemconfig(menu_g, fill=DIM)
         _resize()
