@@ -87,6 +87,43 @@ UPLOAD_DIR = os.path.join(DATA_DIR, "uploads")
 REC_DIR    = os.path.join(DATA_DIR, "recordings")
 INDEX_PATH = os.path.join(DATA_DIR, "index.json")
 DB_PATH    = os.path.join(DATA_DIR, "matches.db")
+
+# ── (신뢰성) 원자적 JSON 저장 — 쓰는 도중 크래시/정전에도 파일이 깨지지 않음 ──
+def _atomic_write_json(path, obj, **kw):
+    kw.setdefault("ensure_ascii", False)
+    d = os.path.dirname(path) or "."
+    try: os.makedirs(d, exist_ok=True)
+    except Exception: pass
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(obj, f, **kw)
+        f.flush()
+        try: os.fsync(f.fileno())
+        except Exception: pass
+    os.replace(tmp, path)
+
+# ── (신뢰성) 글로벌 크래시 로그 — 메인/스레드 예외를 DATA_DIR/crash.log 에 기록 ──
+CRASH_LOG = os.path.join(DATA_DIR, "crash.log")
+def _write_crash(kind, exc_type, exc, tb):
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(CRASH_LOG, "a", encoding="utf-8") as f:
+            f.write("\n" + "=" * 60 + "\n")
+            f.write("[%s] %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), kind))
+            f.write("".join(traceback.format_exception(exc_type, exc, tb)))
+    except Exception:
+        pass
+_prev_excepthook = sys.excepthook
+def _excepthook(exc_type, exc, tb):
+    _write_crash("MAIN THREAD", exc_type, exc, tb)
+    _prev_excepthook(exc_type, exc, tb)
+sys.excepthook = _excepthook
+def _thread_excepthook(args):
+    _write_crash("THREAD %s" % getattr(args, "thread", None), args.exc_type, args.exc_value, args.exc_traceback)
+try:
+    threading.excepthook = _thread_excepthook   # Python 3.8+
+except Exception:
+    pass
 CONFIG_PATH= os.path.join(HERE, "config.json")
 WEB_DIR    = os.path.join(BUNDLE_DIR, "web")
 FPS        = 30
@@ -230,14 +267,14 @@ def load_or_make_config():
             "poll_seconds": 4,
             "autostart": True, "min_game_sec": 120,
         }
-        json.dump(cfg, open(CONFIG_PATH, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+        _atomic_write_json(CONFIG_PATH, cfg, indent=2)
         log(f"Config auto-created → {CONFIG_PATH}")
     # service_key 영구보관: 한 번 넣으면 data 폴더에 저장 → 이후 zip 통째로 덮어써도 유지
     try:
         _sk = ((cfg.get("supabase") or {}).get("service_key") or "").strip()
         _secret = os.path.join(DATA_DIR, "encore_secret.json")
         if _sk:
-            json.dump({"service_key": _sk}, open(_secret, "w", encoding="utf-8"))
+            _atomic_write_json(_secret, {"service_key": _sk})
         elif os.path.isfile(_secret):
             _v = (json.load(open(_secret, encoding="utf-8")) or {}).get("service_key") or ""
             if _v: cfg.setdefault("supabase", {})["service_key"] = _v
@@ -270,8 +307,21 @@ def ensure_audio():
         return False
 
 def ensure_ffmpeg():
-    local = os.path.join(HERE, "ffmpeg.exe")
-    if os.path.isfile(local): return local
+    # 업데이트(새 폴더에 압축 해제)해도 재다운로드하지 않도록 사용자 폴더(_data_root)에 보관.
+    bindir = os.path.join(_data_root(), "bin")
+    try: os.makedirs(bindir, exist_ok=True)
+    except Exception: bindir = HERE
+    shared = os.path.join(bindir, "ffmpeg.exe")
+    if os.path.isfile(shared): return shared
+    legacy = os.path.join(HERE, "ffmpeg.exe")
+    if os.path.isfile(legacy):
+        try:   # 기존 앱 폴더에 있으면 공유 폴더로 옮겨 다음 업데이트부터 재사용
+            shutil.move(legacy, shared)
+            lp = os.path.join(HERE, "ffprobe.exe")
+            if os.path.isfile(lp): shutil.move(lp, os.path.join(bindir, "ffprobe.exe"))
+            return shared
+        except Exception:
+            return legacy
     found = shutil.which("ffmpeg")
     if found: return found
     log("Downloading ffmpeg… (~90MB, first run only, 1-2 min)")
@@ -297,26 +347,22 @@ def ensure_ffmpeg():
             data = urllib.request.urlopen(req, timeout=180).read()
             z = zipfile.ZipFile(io.BytesIO(data))
             member = next(n for n in z.namelist() if n.lower().endswith("/bin/ffmpeg.exe"))
-            with z.open(member) as src, open(local, "wb") as dst:
+            with z.open(member) as src, open(shared, "wb") as dst:
                 shutil.copyfileobj(src, dst)
             try:
                 pm = next((n for n in z.namelist() if n.lower().endswith("/bin/ffprobe.exe")), None)
                 if pm:
-                    with z.open(pm) as src, open(os.path.join(HERE, "ffprobe.exe"), "wb") as dst:
+                    with z.open(pm) as src, open(os.path.join(bindir, "ffprobe.exe"), "wb") as dst:
                         shutil.copyfileobj(src, dst)
             except Exception:
                 pass
             log(f"ffmpeg ready. (source: {label})")
-            return local
+            return shared
         except Exception as e:
             log(f"    {label} failed: {e} → trying next source")
-    log("[!] All ffmpeg auto-downloads failed. Please download it manually:")
-    log("    1) Download https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip")
-    log("    2) Unzip it and find  bin\\ffmpeg.exe  inside")
-    log(f"    3) Copy it into this folder:  {HERE}")
-    log("    4) Run START.bat again")
+    log("[!] ffmpeg 자동 다운로드 실패. 수동: gyan.dev essentials zip 받아 bin\\ffmpeg.exe 를")
+    log(f"    다음 폴더에 복사 후 재실행:  {bindir}")
     return None
-
 def _dl(url, timeout, tries=3):
     """간단 재시도 다운로드 — 504/일시적 게이트웨이 오류·끊김 대응."""
     last = None
@@ -1167,30 +1213,71 @@ def cleanup_local_videos(log_fn=None):
         lg(f"로컬 영상 자동 정리: {n}개 삭제 · {freed/2**30:.1f}GB 확보 (클라우드 보관본은 유지)")
     return n
 
+def _gallery_origin():
+    return (CFG.get("gallery_url") or "https://encorestar.netlify.app/").rstrip("/")
+
+def _my_ident():
+    """(puuid, device_secret) — 서명 업로드/소유 등록에 쓰는 신원. puuid 없으면 (None, secret)."""
+    try:
+        pu = (_identity_load() or {}).get("puuid")
+    except Exception:
+        pu = None
+    return pu, device_secret()
+
 def sb_upload(local, path, ctype):
-    """Supabase Storage 업로드 → 공개 URL (버킷이 public 이어야 함)."""
-    import requests
-    base = _sb_base(); bk = _sb_bucket(); k = _sb_key(write=True)
+    """서명 프록시(/api/storage)로 1회용 URL 받아 Storage 에 PUT → 공개 URL.
+       service_key 불필요. 실패 시(구 배포 등) 레거시 직접 업로드로 폴백."""
+    import requests, os
+    pu, secret = _my_ident()
+    size = 0
+    try: size = os.path.getsize(local)
+    except Exception: pass
+    if pu:   # 표준 경로: 서명 업로드
+        try:
+            pr = requests.post(_gallery_origin() + "/api/storage",
+                               json={"action": "sign-upload", "puuid": pu, "secret": secret,
+                                     "paths": [path], "bytes": size}, timeout=30)
+            if pr.status_code == 429:
+                raise RuntimeError("upload limit reached: " + (pr.text or "")[:120])
+            pr.raise_for_status()
+            items = (pr.json() or {}).get("items") or []
+            if items and items[0].get("uploadUrl"):
+                up = items[0]["uploadUrl"]; pub = items[0].get("publicUrl") or ""
+                with open(local, "rb") as f:
+                    ur = requests.put(up, data=f, headers={"Content-Type": ctype}, timeout=(10, 3600))
+                if ur.status_code in (200, 201):
+                    return pub or ("%s/storage/v1/object/public/%s/%s" % (_sb_base(), _sb_bucket(), path))
+                raise RuntimeError("signed PUT %s: %s" % (ur.status_code, (ur.text or "")[:160]))
+        except Exception as e:
+            log(f"signed upload failed ({e}) — trying legacy…")
+    # 레거시 폴백: config 에 service_key 가 있을 때만 (구 배포 호환). 없으면 실패.
+    k = (sb_cfg().get("service_key") or "").strip()
+    if not k:
+        raise RuntimeError("no signed route and no service_key — deploy netlify/functions/storage.js "
+                           "and set SUPABASE_SERVICE_KEY in Netlify env")
     with open(local, "rb") as f:
-        r = requests.post("%s/storage/v1/object/%s/%s" % (base, bk, path), data=f,
+        r = requests.post("%s/storage/v1/object/%s/%s" % (_sb_base(), _sb_bucket(), path), data=f,
                           headers={"apikey": k, "Authorization": "Bearer " + k,
                                    "Content-Type": ctype, "x-upsert": "true"}, timeout=(10, 3600))
     if r.status_code not in (200, 201):
         raise RuntimeError("storage %s: %s" % (r.status_code, r.text[:200]))
-    return "%s/storage/v1/object/public/%s/%s" % (base, bk, path)
+    return "%s/storage/v1/object/public/%s/%s" % (_sb_base(), _sb_bucket(), path)
 def sb_insert_match(row):
-    import requests
-    try:
-        sv = (row.get("saver") or "").strip()
-        if sv:
-            row.setdefault("owner_puuid", sv.lower())
-            claim_identity(sv)                      # 이 기기 = 이 이름 (이름 같으면 no-op)
-    except Exception: pass
-    r = requests.post(_sb_base() + "/rest/v1/matches",
-                      headers={**_sb_h(write=True), "Prefer": "resolution=merge-duplicates,return=minimal"},
-                      data=json.dumps(row, ensure_ascii=False).encode("utf-8"), timeout=60)
-    if r.status_code not in (200, 201, 204):
-        raise RuntimeError("insert %s: %s" % (r.status_code, r.text[:200]))
+    """경기 행 등록. service_key 직접 insert 대신 RPC.
+       기기 신원이 있으면 upload_match(소유 등록), 없거나 실패하면 upload_match_anon(폴백)."""
+    sv = (row.get("saver") or "").strip()
+    if sv:
+        row.setdefault("owner_puuid", sv.lower())   # (서버가 owner 를 다시 지정하지만 참고용으로 유지)
+        try: claim_identity(sv)                      # 이 기기 = 이 이름 (멱등)
+        except Exception: pass
+    pu, secret = _my_ident()
+    if pu:
+        try:
+            _sb_rpc("upload_match", {"p_puuid": pu, "p_secret": secret, "p_row": row}, timeout=60)
+            return
+        except Exception as e:
+            log(f"upload_match failed ({e}) — trying anon…")
+    _sb_rpc("upload_match_anon", {"p_row": row}, timeout=60)
 def _sb_get(path):
     import requests
     r = requests.get(_sb_base() + "/rest/v1/" + path, headers=_sb_h(), timeout=30)
@@ -1247,7 +1334,7 @@ def _identity_load():
 def _identity_save(st):
     try:
         os.makedirs(DATA_DIR, exist_ok=True)
-        json.dump(st, open(_ID_FILE, "w", encoding="utf-8"), ensure_ascii=False)
+        _atomic_write_json(_ID_FILE, st)
     except Exception: pass
 def device_secret():
     st = _identity_load()
@@ -1282,6 +1369,20 @@ def issue_login_code():
     code = secrets.token_hex(16)
     _sb_rpc("issue_login_code", {"p_secret": device_secret(), "p_code": code}, timeout=10)
     return code
+
+def upload_selftest():
+    """서명 라우트(/api/storage)가 살아있는지 확인. 콘솔 상태 표시용."""
+    import requests
+    try:
+        r = requests.post(_gallery_origin() + "/api/storage", json={"action": "ping"}, timeout=10)
+        if r.status_code == 200 and (r.json() or {}).get("ok"):
+            log("Cloud upload self-test: OK ✓  (signed route /api/storage is live)")
+            return True
+    except Exception:
+        pass
+    log("⚠ signed route /api/storage 없음 → netlify/functions/storage.js + netlify.toml 배포, "
+        "Netlify env(SUPABASE_SERVICE_KEY) 설정 필요. (설정 전엔 로컬 보관/재시도)")
+    return False
 
 def sb_get_comments(mid):
     return _sb_get("comments?match_id=eq.%s&select=id,author,body,created&order=created.asc" % mid).json()
@@ -1936,7 +2037,8 @@ def _enc_is_software():
     _encoder_args()   # _ENC_IS_SW 확정
     return _ENC_IS_SW
 def _encoder_args():
-    """인코더 자동 선택. NVENC는 '실제로 인코딩 되는지'까지 테스트 — 목록엔 있어도 런타임 실패면 libx264로."""
+    """인코더 자동 선택. HW 인코더(NVENC/AMF/QSV)는 '실제로 인코딩 되는지'까지 테스트 —
+       목록엔 있어도 런타임 실패면 다음 후보로, 최종적으로 libx264(소프트웨어)."""
     global _ENC_CACHE, _ENC_IS_SW
     if _ENC_CACHE is not None: return _ENC_CACHE
     pref = (CFG.get("encoder") or "auto").lower()
@@ -1946,46 +2048,54 @@ def _encoder_args():
         have = _run([FFMPEG, "-hide_banner", "-encoders"],
                               capture_output=True, text=True, timeout=15).stdout or ""
     except Exception: pass
-    def _nvenc_ok():
-        # 256x256 같은 초소형은 NVENC가 거부할 수 있어 720p로 테스트. 실패하면 진짜 에러를 보여줌.
+    def _hw_ok(codec):
+        # 초소형 해상도는 HW 인코더가 거부할 수 있어 720p로 테스트. 실패하면 진짜 에러를 보여줌.
         try:
             r = _run([FFMPEG, "-hide_banner", "-loglevel", "error",
                                 "-f", "lavfi", "-i", "color=c=black:s=1280x720:r=30:d=1",
-                                "-c:v", "h264_nvenc", "-pix_fmt", "yuv420p", "-f", "null", "-"],
+                                "-c:v", codec, "-pix_fmt", "yuv420p", "-f", "null", "-"],
                                capture_output=True, text=True, timeout=30)
             if r.returncode != 0:
                 errs = [l for l in (r.stderr or "").splitlines() if l.strip()]
-                if errs: log("  NVENC error: " + "  /  ".join(errs[-2:]))
+                if errs: log(f"  {codec} error: " + "  /  ".join(errs[-2:]))
                 return False
             return True
         except Exception as e:
-            log(f"  NVENC test exception: {e}")
+            log(f"  {codec} test exception: {e}")
             return False
-    if pref == "nvenc":
-        use_nvenc = True
-    elif pref in ("x264", "libx264", "software", "cpu"):
-        use_nvenc = False
-    else:  # auto — 실제 인코딩 테스트
-        use_nvenc = ("h264_nvenc" in have) and _nvenc_ok()
-        if ("h264_nvenc" in have) and not use_nvenc:
-            log("  NVENC is listed but failed actual encoding → switching to software (libx264)")
     # 키프레임 간격 ~2초 — 시크(특히 분할 보기 다중 영상 동시 시크) 속도를 위해 GOP 고정.
-    # 기본은 GOP가 ~250프레임(8초)이라 시크 시 최대 8초어치를 디코드해야 해 버벅인다.
     try: _gop = max(15, int(round(2 * float(CFG.get("fps", FPS) or FPS))))
     except Exception: _gop = 60
-    if use_nvenc:
-        _ENC_IS_SW = False
-        _ENC_CACHE = ["-c:v", "h264_nvenc", "-preset", "p5", "-cq", "22",
-                      "-g", str(_gop)]; name = "NVENC (NVIDIA 하드웨어)"
-    else:
-        _ENC_IS_SW = True
+    def _nvenc(): return ["-c:v", "h264_nvenc", "-preset", "p5", "-cq", "22", "-g", str(_gop)]
+    def _amf():   return ["-c:v", "h264_amf", "-quality", "balanced", "-rc", "cqp",
+                          "-qp_i", "22", "-qp_p", "22", "-g", str(_gop)]
+    def _qsv():   return ["-c:v", "h264_qsv", "-preset", "fast", "-global_quality", "23", "-g", str(_gop)]
+    def _sw():
         preset = (CFG.get("preset") or "auto").lower()
         if preset in ("auto", ""): preset = "superfast"   # 소프트웨어는 게임 끊김 방지 위해 가벼운 프리셋
-        _ENC_CACHE = ["-c:v", "libx264", "-preset", preset, "-crf", "25",
-                      "-g", str(_gop), "-keyint_min", str(max(1, _gop // 2))]; name = f"libx264 (소프트웨어, {preset})"
+        return (["-c:v", "libx264", "-preset", preset, "-crf", "25",
+                 "-g", str(_gop), "-keyint_min", str(max(1, _gop // 2))], f"libx264 (소프트웨어, {preset})")
+    if pref in ("x264", "libx264", "software", "cpu"):
+        _ENC_CACHE, name = _sw(); _ENC_IS_SW = True
+    elif pref == "nvenc":
+        _ENC_CACHE, name, _ENC_IS_SW = _nvenc(), "NVENC (NVIDIA 하드웨어)", False
+    elif pref in ("amf", "amd"):
+        _ENC_CACHE, name, _ENC_IS_SW = _amf(), "AMF (AMD 하드웨어)", False
+    elif pref in ("qsv", "intel"):
+        _ENC_CACHE, name, _ENC_IS_SW = _qsv(), "QSV (Intel 하드웨어)", False
+    else:  # auto — 실제 인코딩 테스트로 NVENC → AMF → QSV → libx264
+        if ("h264_nvenc" in have) and _hw_ok("h264_nvenc"):
+            _ENC_CACHE, name, _ENC_IS_SW = _nvenc(), "NVENC (NVIDIA 하드웨어)", False
+        elif ("h264_amf" in have) and _hw_ok("h264_amf"):
+            _ENC_CACHE, name, _ENC_IS_SW = _amf(), "AMF (AMD 하드웨어)", False
+        elif ("h264_qsv" in have) and _hw_ok("h264_qsv"):
+            _ENC_CACHE, name, _ENC_IS_SW = _qsv(), "QSV (Intel 하드웨어)", False
+        else:
+            if any(c in have for c in ("h264_nvenc", "h264_amf", "h264_qsv")):
+                log("  HW 인코더가 목록엔 있으나 실제 인코딩 실패 → 소프트웨어(libx264)로 전환")
+            _ENC_CACHE, name = _sw(); _ENC_IS_SW = True
     log(f"Encoder: {name}")
     return _ENC_CACHE
-
 def _target_height(src_h=0):
     """소프트웨어 인코딩이면 부하를 줄이려 다운스케일할 목표 높이. None이면 원본 유지."""
     _encoder_args()  # _ENC_IS_SW 확정
@@ -2454,7 +2564,7 @@ def _load_pending():
         try: return json.load(open(PENDING_PATH, encoding="utf-8"))
         except Exception: return []
     return []
-def _save_pending(q): json.dump(q, open(PENDING_PATH, "w", encoding="utf-8"))
+def _save_pending(q): _atomic_write_json(PENDING_PATH, q)
 def _post(video, rep):
     sv = CFG.get("server", {}) or {}; url = (sv.get("url", "") or "").rstrip("/") + "/upload"; key = sv.get("api_key", "")
     files = {"video": ("game.mp4", open(video, "rb"), "video/mp4")}
@@ -3018,7 +3128,7 @@ def run_gui(cfg, url):
     def do_reanalyze():
         set_log(True); threading.Thread(target=lambda: reanalyze_all(), daemon=True).start()
     def _save_cfg():
-        try: json.dump(cfg, open(CONFIG_PATH,"w",encoding="utf-8"), ensure_ascii=False, indent=2)
+        try: _atomic_write_json(CONFIG_PATH, cfg, indent=2)
         except Exception as e: log(f"Failed to save settings: {e}")
 
     def _scale_short(v): return {"auto":"Auto","source":"Source","1080":"1080p","720":"720p","480":"480p"}.get(str(v),"Auto")
@@ -3425,6 +3535,8 @@ def main():
     _cst = cloud_state()
     if _cst == "cloud":
         log(f"☁ Cloud ON — saving and sharing via Supabase({_sb_base()}).")
+        try: threading.Thread(target=upload_selftest, daemon=True).start()   # 서명 라우트(/api/storage) 상태 비동기 확인
+        except Exception: pass
     elif _cst == "readonly":
         log("⚠ Cloud read-only — supabase.service_key in config.json is empty. Fill it and restart to enable uploads.")
     else:
