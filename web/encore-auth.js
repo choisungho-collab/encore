@@ -132,10 +132,14 @@
     var rm = bar.querySelectorAll('.search, .live');
     for (var i = 0; i < rm.length; i++) rm[i].remove();
     if (!bar.querySelector('.sp')) bar.appendChild(E('span', { 'class': 'sp' }));
-    render(bar, null);                       // 우선 로그아웃 칩(깜빡임 최소화)
+    var cached = EAuth.session();
+    var cm = (cached && cached.puuid) ? cached : null;
+    render(bar, cm);                         // 캐시된 세션으로 즉시 렌더 (whoami 왕복 대기·깜빡임 없음)
+    window.__eauth_me = cm;
     var me = null;
-    try { me = await EAuth.initAuth(); } catch (e) {}
-    render(bar, me);
+    try { me = await EAuth.initAuth(); } catch (e) {}      // 배경에서 검증/갱신 + #code 소비
+    var sig = function (x) { return (x && x.puuid) ? (x.puuid + '|' + (x.name || '') + '|' + (x.icon || '')) : ''; };
+    if (sig(me) !== sig(cm)) render(bar, me);              // 신원이 실제로 바뀐 경우에만 다시 렌더
     window.__eauth_me = me || null;
     try { document.dispatchEvent(new CustomEvent('eauth:ready', { detail: me })); } catch (e) {}
   }
