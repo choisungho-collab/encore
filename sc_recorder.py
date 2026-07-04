@@ -766,7 +766,7 @@ def extract_analysis(rep_path):
             "drop_first": (mmss(pl["drop_first_fr"]) if pl["drop_first_fr"] is not None else None), "drop_secs": _dsec,
             "prod_max_gap": (round(max([(tf[i]-tf[i-1])/FPS_GAME for i in range(1,len(tf))] or [0])) if (tf:=sorted(pl["train_frames"])) else 0),
             "prod_active": (round(100*len(set(int(x/FPS_GAME//60) for x in tf))/max(1,(max(set(int(x/FPS_GAME//60) for x in tf))-min(set(int(x/FPS_GAME//60) for x in tf))+1))) if tf else 0),
-            "cmd_mix": dict(pl["cmd_mix"]),
+            "cmd_mix": dict(pl["cmd_mix"]), "combat_fine": pl["combat_fine"],
             "max_supply": min(cum, 200), "total_supply": cum, "supply200": t200, "prod": prodn, "resource_series": resource_series,
             "up_timed": _ut, "worker_ms": _wms, "worker_ko": WORKER_KO.get(rl, "일꾼"),
             "atk_lv": atk_lv, "arm_lv": arm_lv, "supply_bld": sup_bld, "supply_cap": sup_cap, "supply_ko": sup_ko,
@@ -841,9 +841,19 @@ def compute_highlights(a):
                 if all(abs(sec - s2) >= 40 for _, s2 in keep): keep.append((sc, sec))
                 if len(keep) >= 3: break
             kmax = keep[0][0] if keep else 0
+            def _battle_who(sec):
+                # 교전 순간(±1빈 평활)에 개인 교전 명령이 가장 많은 선수 = 그 싸움의 주역
+                k = int(sec / cf_step); bnm, bv = None, -1
+                for _p in players:
+                    _cfp = _p.get("combat_fine") or []
+                    if not _cfp: continue
+                    _v = sum(_cfp[j] for j in range(k-1, k+2) if 0 <= j < len(_cfp))
+                    if _v > bv: bv, bnm = _v, _p.get("name")
+                return bnm
             for sc, sec in sorted(keep, key=lambda x: x[1]):
                 out.append({"sec": sec, "t": _ts(sec),
-                            "label": ("최대 교전" if sc == kmax else "주요 교전"), "kind": "battle"})
+                            "label": ("최대 교전" if sc == kmax else "주요 교전"),
+                            "who": _battle_who(sec), "kind": "battle"})
 
     # 게임체인저 테크 — 임팩트 유닛 첫 등장 (프레임 기반, 이미 정밀)
     firsts = {}
