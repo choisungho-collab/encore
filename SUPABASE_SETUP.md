@@ -1,64 +1,123 @@
-# Supabase 클라우드 세팅 (R2 없이, Supabase 하나로)
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""캡처 진단 — 각 방식이 실제로 왜 안 되는지 에러를 그대로 보여줌.
+스타크래프트를 켠 상태(평소 안 되는 그 모드, 전체화면)에서 실행하세요."""
+import sys, os, subprocess, time, shutil
 
-> 영상·썸네일·.rep 는 **Supabase Storage**, 메타+분석+댓글+좋아요는 **Supabase Postgres**.
-> 한 곳에서 다 끝. 업데이트(새 폴더에 압축 해제)해도 **클라우드라서 자료가 안 날아감.**
+if sys.platform == "win32":
+    try: os.system("chcp 65001 >nul 2>&1")
+    except Exception: pass
+    for _s in (sys.stdout, sys.stderr):
+        try: _s.reconfigure(encoding="utf-8", errors="replace")
+        except Exception: pass
 
-준비물: Supabase 프로젝트 하나(이미 `VEAT` 있음). Cloudflare R2 / CLI / Netlify **필요 없음.**
+HERE = os.path.dirname(os.path.abspath(__file__))
+FFMPEG = os.path.join(HERE, "ffmpeg.exe")
+if not os.path.isfile(FFMPEG):
+    FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
 
----
+def line(): print("=" * 64)
+line(); print(" 캡처 진단 — 스타를 켠 상태(전체화면)에서 실행하세요"); line()
+print("FFMPEG:", FFMPEG)
 
-## 1. DB 테이블 만들기  (1분)
-1. Supabase 대시보드 → 프로젝트 **VEAT** 열기
-2. 좌측 **SQL Editor** → `supabase/schema.sql` 내용 전체 복사해서 붙여넣기 → **Run**
-   → `matches`, `comments` 테이블 + 좋아요/조회수 함수 + 읽기 권한(RLS) 생성됨.
+# ---------- 인코더 ----------
+try:
+    enc = subprocess.run([FFMPEG, "-hide_banner", "-encoders"], capture_output=True, text=True, timeout=25).stdout or ""
+    print("인코더:  NVENC =", ("h264_nvenc" in enc), " | libx264 =", ("libx264" in enc),
+          " | AMF =", ("h264_amf" in enc), " | QSV =", ("h264_qsv" in enc))
+except Exception as e:
+    print("인코더 확인 실패:", e)
 
-## 2. 영상 저장소(버킷) 만들기  (30초)
-1. 좌측 **Storage** → **New bucket**
-2. 이름: **`media`**  → **Public bucket** 켜기(공개) → Create
-   - 공개로 해야 갤러리에서 영상이 바로 재생/다운로드됩니다.
+# ---------- 열린 창 제목 (스타 창 찾기) ----------
+sc_titles = []
+try:
+    import ctypes
+    user32 = ctypes.windll.user32
+    titles = []
+    def _cb(hwnd, lparam):
+        if user32.IsWindowVisible(hwnd):
+            n = user32.GetWindowTextLengthW(hwnd)
+            if n:
+                b = ctypes.create_unicode_buffer(n + 1)
+                user32.GetWindowTextW(hwnd, b, n + 1)
+                if b.value.strip(): titles.append(b.value)
+        return True
+    PROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+    user32.EnumWindows(PROC(_cb), 0)
+    sc_titles = [t for t in titles if any(k in t.lower() for k in ("star", "brood", "craft", "스타"))]
+    print("\n[열린 창] 스타 관련 창:", sc_titles if sc_titles else "(못 찾음)")
+    print("[열린 창] 전체(앞 15개):", titles[:15])
+except Exception as e:
+    print("창 목록 실패:", e)
 
-## 3. 키 3개 복사  (30초)
-좌측 **Project Settings → API** 에서:
-- **Project URL**     (예: `https://wjnmrdewdhxfbqsheeiv.supabase.co`)
-- **anon public** 키   (공개되어도 되는 읽기용 키)
-- **service_role** 키  (비공개 — 영상 업로드/경기 등록용. 절대 공개 X)
+# ---------- ffmpeg 기반 캡처 (stderr 그대로 출력) ----------
+def test_ff(label, inargs):
+    print("\n--- [%s] 3초 테스트 ---" % label)
+    out = os.path.join(HERE, "diag_%s.mp4" % label.replace(" ", "_"))
+    cmd = [FFMPEG, "-y", "-t", "3"] + inargs + ["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", out]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        size = os.path.getsize(out) if os.path.isfile(out) else 0
+        verdict = "✅ 캡처됨!" if size > 60000 else "❌ 비어있음(검은화면/실패)"
+        print("  종료코드 %s | 파일 %d bytes  %s" % (r.returncode, size, verdict))
+        msg = (r.stderr or "").strip()
+        if msg:
+            print("  ffmpeg 메시지:")
+            for l in msg.splitlines()[-6:]:
+                print("     " + l)
+    except Exception as e:
+        print("  실행 실패:", e)
+    finally:
+        try: os.remove(out)
+        except OSError: pass
 
-## 4. config.json 채우기
-exe(또는 sc_recorder.py) 옆 `config.json` 의 `supabase` 블록:
-```json
-{
-  "username": "Mongjungguy",
-  "supabase": {
-    "url": "https://<프로젝트>.supabase.co",
-    "anon_key": "eyJ... (anon public)",
-    "service_key": "eyJ... (service_role)",
-    "bucket": "media"
-  }
-}
-```
-- 이 블록을 채우면 **자동으로 클라우드 모드**로 켜집니다(비우면 기존처럼 로컬).
-- 갤러리가 Supabase 에서 읽고, 게임이 끝나면 영상+분석이 Supabase 로 올라갑니다.
+for idx in (0, 1):
+    test_ff("ddagrab 모니터%d" % idx, ["-filter_complex", "ddagrab=output_idx=%d:framerate=30,hwdownload,format=bgra" % idx])
+test_ff("gdigrab", ["-f", "gdigrab", "-framerate", "30", "-i", "desktop"])
 
-## 5. 잘 됐는지 확인
-프로그램 실행 → 갤러리 열림 → 한 판 하고 끝나면 상태창 로그에
-`☁ Supabase 등록: ...` 이 뜨면 성공. 새로고침하면 갤러리에 카드가 보입니다.
+# ---------- WGC (windows-capture) ----------
+print("\n--- [WGC] 모니터/창별 프레임 수신 테스트 ---")
+try:
+    from windows_capture import WindowsCapture
+    def wgc_count(seconds=3, **kw):
+        cnt = {"n": 0, "err": None, "dims": None}
+        try:
+            cap = WindowsCapture(cursor_capture=None, draw_border=None, **kw)
+        except Exception as e:
+            return ("시작실패: " + repr(e)), cnt
+        @cap.event
+        def on_frame_arrived(frame, capture_control):
+            cnt["n"] += 1
+            if cnt["dims"] is None:
+                try: cnt["dims"] = (frame.width, frame.height, tuple(frame.frame_buffer.shape))
+                except Exception as e: cnt["err"] = repr(e)
+        @cap.event
+        def on_closed():
+            pass
+        try:
+            ctrl = cap.start_free_threaded()
+        except Exception as e:
+            return ("start_free_threaded 실패: " + repr(e)), cnt
+        time.sleep(seconds)
+        try: ctrl.stop()
+        except Exception: pass
+        return "ok", cnt
 
-빠른 점검(터미널, 키는 본인 것으로):
-```bash
-curl "https://<프로젝트>.supabase.co/rest/v1/matches?select=id&limit=1" \
-  -H "apikey: <anon_key>" -H "Authorization: Bearer <anon_key>"
-```
-→ `[]` 또는 `[{"id":...}]` 가 오면 DB 연결 정상.
+    for mi in (1, 0, 2):
+        st, cnt = wgc_count(3, monitor_index=mi, window_name=None)
+        print("  monitor_index=%d → 상태:%s | 프레임:%d | dims:%s | 콜백예외:%s"
+              % (mi, st, cnt["n"], cnt["dims"], cnt["err"]))
+    if sc_titles:
+        for t in sc_titles[:2]:
+            st, cnt = wgc_count(3, monitor_index=None, window_name=t)
+            print("  window_name=%r → 상태:%s | 프레임:%d | dims:%s" % (t, st, cnt["n"], cnt["dims"]))
+except Exception:
+    import traceback
+    print("WGC 테스트 자체 실패:")
+    traceback.print_exc()
 
----
-
-### 보안 메모 (중요)
-- 지금 방식은 **service_role 키를 각 PC config 에 넣는 방식**이라, 본인/믿는 크루끼리 쓰기엔 충분하지만
-  키가 있으면 DB 전체에 접근 가능합니다. **config.json 을 남한테 공유하거나 공개 깃허브에 올리지 마세요.**
-- 크루 여러 명에게 배포할 땐 service 키를 숨기는 **Edge Function 방식**(`CLOUD_SETUP.md`)이 더 안전합니다.
-  원하면 그 방식으로도 만들어 드릴게요.
-
-### 영상 용량
-- 14분 게임 ≈ 1.8GB. Supabase Pro Storage 기본 100GB → 50~55판 정도.
-- 다 채우면 오래된 영상은 Storage 에서 지우고(메타/분석은 남김) 관리하거나, 용량 더 큰 플랜으로.
-- "특별한 판만 올리고 싶다" 같은 옵션도 추가 가능.
+print("\n"); line()
+print(" 진단 끝 — 이 창 전체를 캡처해서 보내주세요 (스크롤 위/아래 다)")
+line()
+try: input("\n엔터를 누르면 종료...")
+except Exception: pass
