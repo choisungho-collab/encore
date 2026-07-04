@@ -86,3 +86,74 @@ function skelCards(n){var h='';for(var i=0;i<(n||8);i++){h+='<div class="card sk
 
 /* ── 랭킹 리더보드 스켈레톤 (stats용) ── */
 function skelHall(){var row='<div class="skel-row" style="padding:9px 0"><span class="skel-ic" style="width:14px;height:14px"></span><span class="skel-ic"></span><span class="skel-line f1"></span><span class="skel-line" style="width:34px"></span></div>';var c='<div class="hcard skel"><div class="skel-line" style="width:44%;height:13px;margin:2px 0 16px"></div>'+row+row+row+row+row+'</div>';return '<div class="hall"><div class="hall-h"><span class="skel-line" style="width:120px;height:18px;display:inline-block"></span></div><div class="hgrid">'+c+c+c+c+'</div></div>';}
+
+/* ── 페이지 프리페치: 내비 전환 체감 지연 제거 (전 페이지 공용) ──
+   · 링크에 마우스 올리거나 터치 시작하면 즉시 그 HTML을 미리 받아둠(의도 감지)
+   · idle에는 주요 내비 페이지를 미리 받아둠 (데이터 절약 모드/2G면 생략)
+   프리페치된 HTML은 캐시에 있어, 클릭 시 네트워크 왕복 없이 즉시 전환됨.
+   (공유 JS/CSS/폰트는 첫 로드 때 이미 캐시되므로 추가 다운로드는 HTML 하나뿐) */
+(function () {
+  try {
+    var done = {};
+    function prefetch(u) {
+      if (!u || done[u]) return; done[u] = 1;
+      try { var l = document.createElement('link'); l.rel = 'prefetch'; l.as = 'document'; l.href = u; document.head.appendChild(l); } catch (e) {}
+    }
+    function target(a) {
+      try {
+        var href = a.getAttribute('href'); if (!href) return null;
+        var u = new URL(href, location.href);
+        if (u.origin !== location.origin) return null;
+        if (!/\.html($|\?|#)/.test(u.pathname)) return null;
+        if (u.pathname === location.pathname) return null;
+        return u.pathname.split('/').pop() + u.search;
+      } catch (e) { return null; }
+    }
+    var onIntent = function (e) {
+      var a = e.target && e.target.closest && e.target.closest('a[href]'); if (!a) return;
+      var t = target(a); if (t) prefetch(t);
+    };
+    document.addEventListener('pointerover', onIntent, { passive: true });
+    document.addEventListener('touchstart', onIntent, { passive: true });
+    var c = navigator.connection || {};
+    if (!c.saveData && !/2g/.test(c.effectiveType || '')) {
+      var idle = window.requestIdleCallback || function (cb) { return setTimeout(cb, 1200); };
+      idle(function () {
+        ['index.html', 'board.html', 'stats.html', 'manual.html', 'download.html', 'about.html']
+          .forEach(function (u) { if (!location.pathname.endsWith(u)) prefetch(u); });
+      }, { timeout: 3000 });
+    }
+  } catch (e) {}
+})();
+
+
+/* ── 공용 헤더 (전 페이지 단일 소스) ────────────────────────────────
+   각 페이지의 .bar-in 내용을 표준 헤더로 덮어쓴다. 현재 페이지는 경로로
+   판별해 .on 표시. HTML의 기존 헤더 마크업은 폴백(동일해서 덮어도 화면
+   변화 없음). 앞으로 헤더/내비 수정은 이 파일 하나만 고치면 된다. */
+(function () {
+  var NAV = [
+    ['index.html', '아카이브'], ['stats.html', '랭킹'], ['board.html', '자유게시판'],
+    ['about.html', '만든이'], ['manual.html', '매뉴얼'], ['download.html', '다운로드']
+  ];
+  var BRAND = `<div class="brand"><svg class="lgmk" viewBox="0 0 32 32" fill="currentColor"><path d="M16.00 16.40 L16.00 3.80 L19.12 12.11 Z" fill="#F2F6FB"/> <path d="M16.00 16.40 L19.12 12.11 L27.98 12.51 Z" fill="#9AA5B6"/> <path d="M16.00 16.40 L27.98 12.51 L21.04 18.04 Z" fill="#6E7889"/> <path d="M16.00 16.40 L21.04 18.04 L23.41 26.59 Z" fill="#4A5364"/> <path d="M16.00 16.40 L23.41 26.59 L16.00 21.70 Z" fill="#4A5364"/> <path d="M16.00 16.40 L16.00 21.70 L8.59 26.59 Z" fill="#6E7889"/> <path d="M16.00 16.40 L8.59 26.59 L10.96 18.04 Z" fill="#9AA5B6"/> <path d="M16.00 16.40 L10.96 18.04 L4.02 12.51 Z" fill="#F2F6FB"/> <path d="M16.00 16.40 L4.02 12.51 L12.88 12.11 Z" fill="#F2F6FB"/> <path d="M16.00 16.40 L12.88 12.11 L16.00 3.80 Z" fill="#F2F6FB"/> <path d="M16.00 3.80 L19.12 12.11 L27.98 12.51 L21.04 18.04 L23.41 26.59 L16.00 21.70 L8.59 26.59 L10.96 18.04 L4.02 12.51 L12.88 12.11 Z" fill="none" stroke="#3A4354" stroke-width=".55" stroke-linejoin="round" opacity=".85"/></svg><b>ENCORE</b></div>`;
+  function here() { var p = (location.pathname.split('/').pop() || '').toLowerCase(); return p || 'index.html'; }
+  function links() { var h = here(); return NAV.map(function (n) { return '<a' + (n[0] === h ? ' class="on"' : '') + ' href="' + n[0] + '">' + n[1] + '</a>'; }).join(''); }
+  function mountHeader() {
+    var bin = document.querySelector('.bar .bar-in') || document.querySelector('.bar-in');
+    if (!bin) return;
+    var L = links();
+    bin.innerHTML =
+      '<button class="navtog" type="button" aria-label="메뉴"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>' +
+      '<nav class="mnav" id="mnav">' + L + '</nav>' +
+      BRAND +
+      '<nav class="nav">' + L + '</nav>' +
+      '<span class="sp"></span>';
+    var tog = bin.querySelector('.navtog'), mn = bin.querySelector('#mnav');
+    if (tog && mn) {
+      tog.addEventListener('click', function (e) { e.stopPropagation(); mn.classList.toggle('open'); });
+      document.addEventListener('click', function (e) { if (mn.classList.contains('open') && !bin.contains(e.target)) mn.classList.remove('open'); });
+    }
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mountHeader); else mountHeader();
+})();
