@@ -155,7 +155,7 @@ import queue as _queue
 from collections import deque as _deque
 GUI_Q = _queue.Queue(maxsize=4000)
 LOG_BUF = _deque(maxlen=400)   # 로그창이 닫혀 있어도 최근 로그를 항상 보관(열면 즉시 채움)
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.6.0"
 REC_STATE = {"recording": False, "encoder": "", "ready": False}
 LAST_ERR = {"msg": "", "t": 0.0}
 UP_DONE = {"t": 0.0, "shown": 0.0}
@@ -261,6 +261,9 @@ def load_or_make_config():
             "capture": "auto",   # auto | wgc | ddagrab | gdigrab   (wgc=OBS식, 전체화면도 잡힘)
             "upload_compress": "auto",   # auto | off  (업로드 전 재인코딩 — 해상도 유지, 용량 30~60% 절감)
             "game_detect": "auto",   # auto | off  (WGC 화면 인식으로 게임 시작 감지 — 상태 표시용)
+            "game_audio_only": "auto",   # auto(=게임 소리만, Win10 2004+) | system  (system=스피커 전체 녹음)
+            "keep_games": 20,   # 로컬 원본 영상을 최근 N판만 보관(오래된 것부터 정리, 클라우드/리플레이는 유지). 0=계속 보관
+            "keep_gb": 30,      # 로컬 원본 영상 총량 상한(GB) — 초과분은 오래된 것부터 정리. 0=상한 없음
             "local_video_keep_days": "0",   # 0=계속 보관 | 7 | 14 | 30  (업로드 완료된 로컬 영상을 N일 뒤 자동 삭제 — 클라우드 보관본·리플레이(.rep)·썸네일은 유지)
             "held_clip_keep_days": 2,   # 리플레이 매칭 안 된 clip_*.mp4 를 N일 뒤 자동 폐기 (0=폐기 안 함)
             "port": free_port(8000),
@@ -1225,14 +1228,17 @@ def _my_ident():
         pu = None
     return pu, device_secret()
 
-def sb_upload(local, path, ctype):
+def sb_upload(local, path, ctype, track=False):
     """서명 프록시(/api/storage)로 1회용 URL 받아 Storage 에 PUT → 공개 URL.
-       service_key 불필요. 실패 시(구 배포 등) 레거시 직접 업로드로 폴백."""
+       service_key 불필요. 실패 시(구 배포 등) 레거시 직접 업로드로 폴백.
+       track=True 면 전송 바이트로 진행률(%)을 GUI 헤더에 표시(대용량 영상 업로드용)."""
     import requests, os
     pu, secret = _my_ident()
     size = 0
     try: size = os.path.getsize(local)
     except Exception: pass
+    _do_track = bool(track and size > 4 * 1048576)   # 4MB 초과일 때만 진행률(썸네일 등 소형 제외)
+    if _do_track: _pipe_pct(0.0)
     if pu:   # 표준 경로: 서명 업로드
         try:
             pr = requests.post(_gallery_origin() + "/api/storage",
@@ -1245,7 +1251,9 @@ def sb_upload(local, path, ctype):
             if items and items[0].get("uploadUrl"):
                 up = items[0]["uploadUrl"]; pub = items[0].get("publicUrl") or ""
                 with open(local, "rb") as f:
-                    ur = requests.put(up, data=f, headers={"Content-Type": ctype}, timeout=(10, 3600))
+                    body = _ProgressReader(f, size, _pipe_pct) if _do_track else f
+                    ur = requests.put(up, data=body, headers={"Content-Type": ctype}, timeout=(10, 3600))
+                if _do_track: _pipe_pct(1.0)
                 if ur.status_code in (200, 201):
                     return pub or ("%s/storage/v1/object/public/%s/%s" % (_sb_base(), _sb_bucket(), path))
                 raise RuntimeError("signed PUT %s: %s" % (ur.status_code, (ur.text or "")[:160]))
@@ -1257,9 +1265,11 @@ def sb_upload(local, path, ctype):
         raise RuntimeError("no signed route and no service_key — deploy netlify/functions/storage.js "
                            "and set SUPABASE_SERVICE_KEY in Netlify env")
     with open(local, "rb") as f:
-        r = requests.post("%s/storage/v1/object/%s/%s" % (_sb_base(), _sb_bucket(), path), data=f,
+        body = _ProgressReader(f, size, _pipe_pct) if _do_track else f
+        r = requests.post("%s/storage/v1/object/%s/%s" % (_sb_base(), _sb_bucket(), path), data=body,
                           headers={"apikey": k, "Authorization": "Bearer " + k,
                                    "Content-Type": ctype, "x-upsert": "true"}, timeout=(10, 3600))
+    if _do_track: _pipe_pct(1.0)
     if r.status_code not in (200, 201):
         raise RuntimeError("storage %s: %s" % (r.status_code, r.text[:200]))
     return "%s/storage/v1/object/public/%s/%s" % (_sb_base(), _sb_bucket(), path)
@@ -1342,6 +1352,32 @@ def device_secret():
     if not st.get("device_secret"):
         st["device_secret"] = secrets.token_hex(24); _identity_save(st)
     return st["device_secret"]
+
+# ── (개선) WGC 테두리 끄기 지원 여부를 기억 ──────────────────────────────
+#  이 OS/디스플레이가 캡처 테두리 끄기(draw_border=False)를 지원하지 않으면
+#  매 판마다 '실패 → 재시도' 를 반복하며 로그를 도배하고 시작도 느려진다.
+#  한 번 확인하면 파일에 저장해, 이후엔 실패하는 시도를 건너뛴다.
+#  (윈도우 업그레이드 후 테두리를 다시 끄고 싶으면 data/wgc_state.json 삭제)
+_WGC_STATE_FILE = os.path.join(DATA_DIR, "wgc_state.json")
+_WGC_BORDER = {"off_ok": None, "loaded": False}   # off_ok: True=지원, False=미지원, None=미확인
+def _wgc_border_load():
+    if _WGC_BORDER["loaded"]: return
+    _WGC_BORDER["loaded"] = True
+    try:
+        v = (json.load(open(_WGC_STATE_FILE, encoding="utf-8")) or {}).get("border_off_supported")
+        if v in (True, False): _WGC_BORDER["off_ok"] = v
+    except Exception: pass
+def _wgc_border_save():
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        _atomic_write_json(_WGC_STATE_FILE, {"border_off_supported": _WGC_BORDER["off_ok"]})
+    except Exception: pass
+
+# ── (개선) 클라우드 계정 연결(claim_identity) 스키마 오류를 세션 1회만 알림 ──
+#  DB에 claim_identity 함수가 중복 정의되어 있으면(PGRST203) 매 업로드마다
+#  같은 오류가 뜬다. 세션당 한 번만 안내하고 이후엔 조용히 익명 업로드로 진행.
+_ID_CLAIM = {"schema_broken": False}
+
 def _sb_rpc(fn, body, timeout=15):
     import requests
     r = requests.post(_sb_base() + "/rest/v1/rpc/" + fn, headers=_sb_h(),
@@ -1350,26 +1386,101 @@ def _sb_rpc(fn, body, timeout=15):
         raise RuntimeError("rpc %s %s: %s" % (fn, r.status_code, (r.text or "")[:150]))
     try: return r.json()
     except Exception: return None
-def claim_identity(name):
-    """이 기기를 name 계정에 바인딩. 같은 이름이면 no-op. 실패해도 업로드에 영향 없음."""
+def claim_identity(name, quiet=False):
+    """이 기기를 name 계정에 바인딩(서버 등록) → 로그인/소유표시의 전제.
+    서버 함수(claim_identity)의 파라미터명/개수가 배포마다 다를 수 있어, 여러 시그니처를
+    순서대로 시도해 자동으로 맞춘다. 성공하면 puuid 반환, 실패하면 None.
+    같은 이름이면 no-op. 실패해도 업로드(익명)에는 영향 없음."""
     nm = (name or "").strip()
-    if not nm or not sb_enabled(): return
+    if not nm or not sb_enabled(): return None
     st = _identity_load()
-    if st.get("name") == nm and st.get("puuid"): return
-    try:
-        r = _sb_rpc("claim_identity", {"p_name": nm, "p_secret": device_secret()})
-        pu = (r or {}).get("puuid") or nm.lower()
-        st.update({"name": nm, "puuid": pu}); _identity_save(st)
-        log(f"Identity → {nm} ({pu})")
-    except Exception as e:
-        log(f"identity claim skipped: {e}")
+    if st.get("last_name") != nm:                      # 로그인 코드 발급 때 쓰려고 이름 기억
+        st["last_name"] = nm; _identity_save(st); st = _identity_load()
+    if st.get("name") == nm and st.get("puuid"):
+        return st.get("puuid")
+    if _ID_CLAIM["schema_broken"]:
+        return None                                    # 이번 세션에서 이미 DB 오버로드 문제 확인 → 조용히 skip
+    sec = device_secret()
+    # 아바타 아이콘 인덱스(기본 0). 사용자가 고른 값이 있으면 그걸 쓴다.
+    try: _ic = int(st.get("icon") or 0)
+    except Exception: _ic = 0
+    # 서버 claim_identity 오버로드:  (p_name,p_secret,p_icon)  와  (p_name,p_secret)  가 공존.
+    # p_icon 에 DEFAULT 가 있어 2-arg 로 부르면 둘 다 매칭 → PGRST203(모호).
+    # → p_icon 을 함께 보내 3-arg 하나만 매칭시키면 모호성이 사라진다(=로그인 성공, DB 수정 불필요).
+    # (다른 배포 호환을 위해 2-arg·대체 파라미터명도 뒤에 후보로 둔다.)
+    shapes = [
+        {"p_name": nm, "p_secret": sec, "p_icon": _ic},   # ★ 핵심: 3-arg 확정 매칭
+        {"p_name": nm, "p_secret": sec},                   # 2-arg 만 있는 배포
+        {"name": nm, "secret": sec, "icon": _ic},
+        {"name": nm, "secret": sec},
+    ]
+    last_err = None; overload = False
+    for body in shapes:
+        try:
+            r = _sb_rpc("claim_identity", body)
+            pu = (r.get("puuid") if isinstance(r, dict) else None) or nm.lower()
+            st.update({"name": nm, "puuid": pu}); _identity_save(st)
+            if not quiet: log(f"Identity linked → {nm} ({pu})")
+            return pu
+        except Exception as e:
+            msg = str(e); last_err = msg
+            if ("PGRST202" in msg) or (" 404:" in msg) or ("Could not find" in msg):
+                continue                               # 이 시그니처의 함수 없음 → 다음 후보
+            if ("PGRST203" in msg) or ("function overloading" in msg) or (" 300:" in msg):
+                overload = True; continue              # 오버로드 모호 → 더 구체적 후보로 재시도
+            break                                      # 권한/네트워크 등은 재시도 무의미
+    # 모든 후보 실패
+    if overload:
+        _ID_CLAIM["schema_broken"] = True
+        if not quiet:
+            log("⚠ 로그인 연결 실패: 클라우드 DB에 claim_identity 함수가 중복 정의돼 있습니다(PGRST203, "
+                "오버로드 충돌). 경기 업로드는 익명으로 계속 정상 저장됩니다. Supabase에서 중복 함수를 "
+                "하나만 남기면 즉시 로그인됩니다 — 함께 드린 fix_login.sql 참고. (이 안내는 반복되지 않습니다)")
+    elif not quiet:
+        log(f"identity claim skipped: {last_err}")
+    return None
+
 def issue_login_code():
-    """갤러리 자동 로그인용 1회 코드. 아직 판을 안 찍어 바인딩이 없으면 None."""
+    """갤러리 자동 로그인용 1회 코드. 바인딩이 없으면 사용자명/마지막 게임 이름으로 즉석 연결을 시도한다."""
+    if not sb_enabled(): return None
     st = _identity_load()
-    if not st.get("puuid") or not sb_enabled(): return None
+    if not st.get("puuid"):
+        nm = (CFG.get("username") or st.get("last_name") or "").strip()
+        if nm:
+            claim_identity(nm)                         # 지금 바로 서버 등록 시도
+            st = _identity_load()
+    if not st.get("puuid"): return None
     code = secrets.token_hex(16)
     _sb_rpc("issue_login_code", {"p_secret": device_secret(), "p_code": code}, timeout=10)
     return code
+
+def prebind_identity():
+    """스타 실행 시(또는 시작 시) 내 스타 아이디로 미리 로그인 바인딩을 시도 —
+    설계: '스타 실행 → 아이디 확보 → Archive 클릭 시 자동 로그인'을 준비 단계에서 끝내둔다.
+    이름은 config username → 마지막 기억 이름 → 최신 오토세이브 리플레이의 저장자(saver) 순으로 확보.
+    이미 바인딩됐거나 클라우드 OFF면 아무 것도 안 하고, 실패해도 무해."""
+    try:
+        if not sb_enabled(): return None
+        st = _identity_load()
+        if st.get("puuid"): return st.get("puuid")        # 이미 로그인 가능 상태
+        nm = (CFG.get("username") or st.get("last_name") or "").strip()
+        if not nm:                                        # 최신 리플레이에서 내 이름 추출
+            rd = CFG.get("replay_autosave_dir") or detect_replay_dir()
+            reps = []
+            if rd and os.path.isdir(rd):
+                for rp in glob.glob(os.path.join(rd, "**", "*.rep"), recursive=True):
+                    try: reps.append((os.path.getmtime(rp), rp))
+                    except OSError: pass
+            reps.sort(reverse=True)
+            for _mt, rp in reps[:6]:
+                try:
+                    m = parse_rep(rp) if SCREP else {}
+                    if m.get("saver"): nm = str(m["saver"]).strip(); break
+                except Exception: pass
+        if nm:
+            return claim_identity(nm)
+    except Exception: pass
+    return None
 
 def upload_selftest():
     """서명 라우트(/api/storage)가 살아있는지 확인. 콘솔 상태 표시용."""
@@ -1415,8 +1526,10 @@ def sb_player_games(name):
     rows = sb_get_matches(limit=300, offset=0)
     return [r for r in rows if any((p.get("name") == name) for p in (r.get("players") or []))]
 
-def sync_existing_to_cloud(log_fn=None):
-    """로컬(SQLite)에 쌓인 기존 경기들을 Supabase 로 업로드. 이미 올라간 건 건너뜀."""
+def sync_existing_to_cloud(log_fn=None, auto=False):
+    """로컬(SQLite)에 쌓인 기존 경기들을 Supabase 로 업로드. 이미 올라간 건 건너뜀.
+    auto=True(자동 재시도 루프): 5회 초과 실패한 판은 건너뛰고, 실패 시 시도횟수를 누적한다.
+    수동 호출(auto=False)은 상한을 무시하고 전부 시도하며, 성공하면 그 판의 실패 기록을 지운다."""
     lg = log_fn or log
     if not sb_writable():
         if sb_cfg().get("url") and sb_cfg().get("anon_key"):
@@ -1430,12 +1543,15 @@ def sync_existing_to_cloud(log_fn=None):
     try: rows = c.execute("SELECT * FROM matches ORDER BY id ASC").fetchall()
     finally: c.close()
     lg(f"Found {len(rows)} existing games — starting upload to Supabase…")
+    fails = _upfail_load(); _fdirty = False
     done = skipped = failed = 0
     for r in rows:
         d = _row(r); mid = d.get("id")
         if not mid: continue
         v = d.get("video") or ""
         if v.startswith("http"): skipped += 1; continue           # 이미 클라우드 URL
+        if auto and int(fails.get(str(mid), 0)) >= _UPLOAD_MAX_ATTEMPTS:
+            skipped += 1; continue                                 # 자동 재시도: 5회 초과 → 포기
         try:
             if sb_get_match(mid): skipped += 1; continue           # 이미 등록됨
         except Exception: pass
@@ -1478,10 +1594,201 @@ def sync_existing_to_cloud(log_fn=None):
                 "np": d.get("np") or len(d.get("players") or []), "players": d.get("players") or [],
                 "won": (bool(d["won"]) if d.get("won") is not None else None), "analysis": analysis})
             done += 1; lg(f"    ✓ done: {d.get('map') or mid}")
+            if str(mid) in fails: fails.pop(str(mid), None); _fdirty = True   # 성공 → 실패기록 삭제
         except Exception as e:
-            failed += 1; lg(f"    ✗ failed({mid}): {e}")
+            failed += 1
+            if auto:
+                fails[str(mid)] = int(fails.get(str(mid), 0)) + 1; _fdirty = True
+                _att = fails[str(mid)]
+                lg(f"    ✗ failed({mid}) [{_att}/{_UPLOAD_MAX_ATTEMPTS}]: {e}"
+                   + ("  → giving up (manual Upload will still retry)" if _att >= _UPLOAD_MAX_ATTEMPTS else ""))
+            else:
+                lg(f"    ✗ failed({mid}): {e}")
+    if _fdirty: _upfail_save(fails)
     lg(f"Existing-game upload done — completed {done} · skipped {skipped} · failed {failed}")
     return (done, skipped, failed)
+
+# ── (신뢰성) 업로드 실패 자동 재시도 ─────────────────────────────────────────
+_UPLOAD_MAX_ATTEMPTS = 5                                   # 자동 재시도 상한(초과 시 포기 — 손상본 무한 반복 방지)
+_UPFAIL_PATH = os.path.join(DATA_DIR, "upload_attempts.json")
+def _upfail_load():
+    try:
+        d = json.load(open(_UPFAIL_PATH, encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+def _upfail_save(d):
+    try: _atomic_write_json(_UPFAIL_PATH, d)
+    except Exception: pass
+
+def _pending_upload_count(exclude_capped=False):
+    """클라우드에 아직 없고 '로컬 영상 파일이 실제로 있는' 판 수 = 재업로드 대상.
+    파일이 사라진 판은 제외. exclude_capped=True 면 5회 초과로 포기한 판도 제외 →
+    자동 재시도 루프가 (올릴 게 없거나 전부 포기 상태면) 조용히 쉬게 한다."""
+    try:
+        c = db()
+        try: rows = c.execute("SELECT * FROM matches WHERE video NOT LIKE 'http%'").fetchall()
+        finally: c.close()
+    except Exception:
+        return 0
+    fails = _upfail_load() if exclude_capped else {}
+    n = 0
+    for r in rows:
+        try:
+            d = _row(r); v = d.get("video") or ""; gid = str(d.get("id") or "")
+            if v and not v.startswith("http") and os.path.isfile(os.path.join(UPLOAD_DIR, v)):
+                if exclude_capped and int(fails.get(gid, 0)) >= _UPLOAD_MAX_ATTEMPTS:
+                    continue
+                n += 1
+        except Exception:
+            pass
+    return n
+
+def _auto_resync_loop():
+    """(기본 Supabase 모드 전용) 업로드 못 된 로컬 판을 주기적으로 재업로드.
+    네트워크 끊김/업로드 제한이 풀리면 자동으로 갤러리에 올라간다.
+    5회 초과로 실패한 판은 포기(수동 '업로드' 버튼은 상한 무시). 올릴 게 없으면 조용히 넘어간다."""
+    first = True
+    while True:
+        time.sleep(150 if first else 1800)        # 첫 점검 2.5분 후, 이후 30분마다
+        first = False
+        try:
+            if not sb_writable():
+                continue
+            if _pending_upload_count(exclude_capped=True) <= 0:
+                continue                          # 올릴 게 없음/전부 포기 → 조용히 skip(멱등)
+            log("\u21bb Retrying cloud upload for games saved locally\u2026")
+            sync_existing_to_cloud(auto=True)
+        except Exception:
+            continue
+
+# ── (신뢰성) 디스크 자동 확보 + 부족 경고 ────────────────────────────────────
+def _reclaim_disk_if_low(trigger_gb=3.0, target_gb=6.0):
+    """디스크 여유가 trigger_gb 미만이면 '이미 클라우드에 올라간' 판의 로컬 영상(mp4)을
+    오래된 것부터 지워 target_gb 이상 확보. 리플레이(.rep)·썸네일·프리뷰는 남긴다(재분석·UI용).
+    클라우드에 사본이 없는 판은 절대 지우지 않는다. 반환: 삭제한 파일 수."""
+    try:
+        free = _disk_free_gb()
+        if free is None or free >= trigger_gb:
+            return 0
+        if not sb_writable():
+            return 0                              # 클라우드 OFF → 안전히 지울 기준(업로드된 사본)이 없음
+        try:
+            vids = {str(m.get("id")) for m in sb_get_matches(limit=100000, cols="id,video") if m.get("video")}
+        except Exception:
+            return 0
+        if not vids or not os.path.isdir(UPLOAD_DIR):
+            return 0
+        cands = []
+        for gid in os.listdir(UPLOAD_DIR):
+            if gid not in vids:                   # 클라우드에 영상이 있는 판만 대상
+                continue
+            d = os.path.join(UPLOAD_DIR, gid)
+            if not os.path.isdir(d):
+                continue
+            for fn in os.listdir(d):
+                if not fn.lower().endswith((".mp4", ".mkv", ".webm")):
+                    continue
+                if fn == "preview.mp4":
+                    continue
+                fp = os.path.join(d, fn)
+                try: cands.append((os.path.getmtime(fp), os.path.getsize(fp), fp))
+                except OSError: pass
+        cands.sort()                              # 오래된 것부터
+        freed = 0; n = 0
+        for _mt, sz, fp in cands:
+            fr = _disk_free_gb()
+            if fr is not None and fr >= target_gb:
+                break
+            try: os.remove(fp); freed += sz; n += 1
+            except OSError: pass
+        if n:
+            log(f"\U0001f9f9 Reclaimed disk: deleted {n} old local video(s) already in the cloud "
+                f"({freed/1073741824:.1f}GB). Cloud copies and replays are kept.")
+        return n
+    except Exception:
+        return 0
+
+def _disk_watch_loop():
+    """30초마다 디스크 여유 점검: 부족하면 (1) 업로드된 오래된 영상 자동 회수,
+    (2) REC_STATE['disk_low'] 에 여유GB 기록 → 상태바에 경고 노출. 정상이면 None."""
+    while True:
+        try:
+            free = _disk_free_gb()
+            if free is not None and free < 3.0:
+                _reclaim_disk_if_low()            # 먼저 확보 시도(업로드된 사본만)
+                free = _disk_free_gb()
+            REC_STATE["disk_low"] = (round(free, 1) if (free is not None and free < 2.0) else None)
+        except Exception:
+            pass
+        time.sleep(30)
+
+# ── (보관 정책) 최근 N판 / 총 N GB 상한 — 오래된 것부터 정리 ────────────────────
+def _busy_now():
+    """녹화 중이거나 업로드/처리 파이프라인이 도는 중이면 True — 정리를 미룬다."""
+    try:
+        if REC_STATE.get("recording"): return True
+        if REC_STATE.get("pipe") in ("processing", "uploading"): return True
+    except Exception: pass
+    return False
+
+def cleanup_recordings(manual=False, log_fn=None):
+    """로컬 원본 영상 보관 정책: '이미 클라우드에 올라간' 판의 로컬 영상(mp4)을
+    최근 keep_games판 + 총 keep_gb GB 까지만 남기고 오래된 것부터 삭제.
+    리플레이(.rep)·썸네일·프리뷰는 유지, 30분 내 파일·미업로드 판은 보존, 녹화/업로드 중이면 건너뜀.
+    (클라우드에 사본이 있으니 로컬 영상 삭제는 안전 — 갤러리에서 계속 볼 수 있음.) 반환: 삭제 파일 수."""
+    lg = log_fn or log
+    if _busy_now():
+        if manual: lg("Cleanup skipped: recording or upload in progress. Try again later.")
+        return 0
+    try: keep_n = int(CFG.get("keep_games", 20) or 0)
+    except Exception: keep_n = 0
+    try: keep_gb = float(CFG.get("keep_gb", 30) or 0)
+    except Exception: keep_gb = 0.0
+    if keep_n <= 0 and keep_gb <= 0:
+        if manual: lg("Cleanup skipped: keep_games=0 and keep_gb=0 (keeping everything).")
+        return 0
+    if not sb_writable():
+        if manual: lg("Cleanup skipped: cloud is off — no safe cloud copy to rely on.")
+        return 0
+    try:
+        vids = {str(m.get("id")) for m in sb_get_matches(limit=100000, cols="id,video") if m.get("video")}
+    except Exception:
+        return 0
+    if not vids or not os.path.isdir(UPLOAD_DIR):
+        return 0
+    now = time.time()
+    files = []   # (mtime, size, path) — 클라우드에 있는 판의 로컬 영상, 30분 지난 것만
+    for gid in os.listdir(UPLOAD_DIR):
+        if gid not in vids: continue
+        d = os.path.join(UPLOAD_DIR, gid)
+        if not os.path.isdir(d): continue
+        for fn in os.listdir(d):
+            if not fn.lower().endswith((".mp4", ".mkv", ".webm")): continue
+            if fn == "preview.mp4": continue
+            fp = os.path.join(d, fn)
+            try:
+                m = os.path.getmtime(fp)
+                if now - m > 1800: files.append((m, os.path.getsize(fp), fp))
+            except OSError: pass
+    files.sort(reverse=True)                              # 최신 먼저
+    drop = list(files[keep_n:]) if keep_n > 0 else []
+    keep = list(files[:keep_n]) if keep_n > 0 else list(files)
+    if keep_gb > 0:                                       # 남긴 것도 총량 초과분은 오래된 것부터(최신 1개는 항상 보존)
+        cap = keep_gb * 1073741824
+        tot = sum(sz for _m, sz, _p in keep)
+        while len(keep) > 1 and tot > cap:
+            m, sz, p = keep.pop(); tot -= sz; drop.append((m, sz, p))
+    removed = 0; freed = 0
+    for _m, sz, p in drop:
+        try: os.remove(p); removed += 1; freed += sz
+        except OSError: pass
+    if removed or manual:
+        lg("Cleanup done: removed %d local video(s), freed %.2f GB. (keep: %s games / %s GB, cloud copies kept)"
+           % (removed, freed / 1073741824,
+              (str(keep_n) if keep_n > 0 else "all"),
+              (("%g" % keep_gb) if keep_gb > 0 else "no")))
+    return removed
 
 
 def _gid_time(gid):
@@ -1651,6 +1958,7 @@ def recover_orphan_clips(log_fn=None):
         return 0
     lg(f"Found {len(cand)} pending videos — matching them with replays…")
     used = set(); recovered = 0
+    _stale_n = 0; _stale_files = 0; _keep_days_log = 2   # (개선) 오래된 클립은 낱개 로그 대신 개수만 요약
     for stamp, (vpath, is_av) in sorted(cand.items()):
         try: tv = datetime.datetime.strptime(stamp, "%Y%m%d_%H%M%S").timestamp()
         except Exception: continue
@@ -1675,7 +1983,7 @@ def recover_orphan_clips(log_fn=None):
                 for _f in glob.glob(os.path.join(REC_DIR, "clip_" + stamp + "*")):
                     try: os.remove(_f); _rm += 1
                     except OSError: pass
-                lg(f"  · discarded stale clip (>{int(_keep_days)}d, no replay): clip_{stamp}" + (f"  [{_rm} file]" if _rm else ""))
+                _stale_n += 1; _stale_files += _rm; _keep_days_log = int(_keep_days)   # 요약용 누적
             else:
                 lg(f"  · held (no matching replay): clip_{stamp}")
             continue
@@ -1686,6 +1994,9 @@ def recover_orphan_clips(log_fn=None):
             recovered += 1
         except Exception as e:
             lg(f"  · recovery failed(clip_{stamp}): {e}")
+    if _stale_n:
+        lg(f"  · discarded {_stale_n} stale clip(s) (>{_keep_days_log}d, no replay)"
+           + (f"  [{_stale_files} files]" if _stale_files else ""))
     if recovered: lg(f"✓ Pending-video recovery done — {recovered} item(s)")
     return recovered
 
@@ -1803,32 +2114,103 @@ def make_clips(video_path, highlights, game_len_sec, out_dir, lead=6.0, maxn=3, 
     return made
 
 _CMP_MIN_MB = 30      # 이보다 작은 파일은 재인코딩 이득이 작아 건너뜀
+def _ffmpeg_progress_run(cmd, total_dur, cb, creationflags=0, timeout=4*3600):
+    """ffmpeg 를 -progress 로 실행하며 out_time 을 파싱해 진행률 콜백(cb: 0.0~1.0).
+    total_dur(초)를 알면 %를 계산. 반환: ffmpeg 종료코드(성공 0)."""
+    try:
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                             text=True, bufsize=1, creationflags=creationflags)
+    except Exception:
+        return 1
+    t0 = time.time()
+    try:
+        for line in p.stdout:                       # key=value 라인 스트림
+            line = (line or "").strip()
+            if line.startswith("out_time_us=") or line.startswith("out_time_ms="):
+                try:
+                    sec = int(line.split("=", 1)[1]) / 1_000_000.0   # ffmpeg 는 둘 다 마이크로초 단위
+                    if total_dur and total_dur > 0: cb(sec / total_dur)
+                except Exception: pass
+            elif line == "progress=end":
+                try: cb(1.0)
+                except Exception: pass
+            if timeout and (time.time() - t0) > timeout:
+                try: p.kill()
+                except Exception: pass
+                break
+    except Exception:
+        pass
+    try: return p.wait(timeout=30)
+    except Exception:
+        try: p.kill()
+        except Exception: pass
+        return 1
+
+class _ProgressReader:
+    """업로드 진행률 추적용 파일 래퍼. requests 가 read() 로 스트리밍할 때 보낸 바이트를 세어 콜백.
+    __len__/seek/tell 을 노출해 Content-Length 와 재시도(seek) 를 정상 지원한다."""
+    def __init__(self, f, total, cb):
+        self._f = f; self._total = int(total or 0); self._cb = cb; self._sent = 0
+    def read(self, n=-1):
+        b = self._f.read(n)
+        if b:
+            self._sent += len(b)
+            if self._total:
+                try: self._cb(self._sent / self._total)
+                except Exception: pass
+        return b
+    def __len__(self): return self._total
+    def tell(self): return self._f.tell()
+    def seek(self, *a):
+        r = self._f.seek(*a)
+        try: self._sent = self._f.tell()
+        except Exception: pass
+        return r
+    def __iter__(self):
+        return iter(lambda: self.read(262144), b"")
+
+def _compress_encoder():
+    """업로드 전 압축용 '하드웨어' 인코더 인자 선택.
+    하드웨어(NVENC/AMF/QSV)가 없으면 (None, None) → 압축을 건너뛴다.
+    (x264 등 소프트웨어 압축은 게임 종료~업로드 사이 지연이 커서 사용하지 않는다.)"""
+    base = _encoder_args()
+    if "h264_nvenc" in base:
+        # NVENC 는 라이브 녹화와 동시 2세션 이상 가능(GTX 900대 이후). p5=빠름·고효율, cq=용량/화질 균형.
+        return (["-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "24", "-b:v", "0"], "NVENC (하드웨어)")
+    if "h264_amf" in base:
+        return (["-c:v", "h264_amf", "-quality", "quality", "-rc", "cqp", "-qp_i", "24", "-qp_p", "24"], "AMF (하드웨어)")
+    if "h264_qsv" in base:
+        return (["-c:v", "h264_qsv", "-preset", "faster", "-global_quality", "24"], "QSV (하드웨어)")
+    return (None, None)
+
 def _compress_for_upload(video_path):
-    """업로드 전 재인코딩 — 게임이 끝난 뒤라 실시간 제약이 없어, 압축 효율 좋은 설정을 쓸 수 있다.
-    해상도(1080p) 유지 · 오디오 재인코딩 없이 복사. NVENC 있으면 p7·CQ23(빠름·게임 무영향),
-    없으면 x264 medium·CRF23(스레드 절반 + 낮은 프로세스 우선순위 — 다음 판 게임에 영향 최소화).
-    결과가 원본의 80% 이하일 때만 교체, 길이가 훼손되면 폐기. 실패해도 업로드는 원본으로 계속."""
+    """업로드 전 재인코딩 — '하드웨어(NVENC/AMF/QSV)'로만 압축한다(x264 등 CPU 압축은 느려서 안 씀).
+    해상도 유지 · 오디오는 복사(재인코딩 X). NVENC 는 라이브 녹화와 동시에도 돌아가므로 판 사이
+    지연이 거의 없다. 하드웨어가 없으면 압축을 건너뛰고 원본을 업로드한다.
+    결과가 원본의 80% 이하일 때만 교체, 길이가 훼손되면 폐기. 진행률은 GUI 헤더에 %로 표시."""
     try:
         if str(CFG.get("upload_compress", "auto")).lower() in ("off", "0", "false", "no"): return
         if not (FFMPEG and video_path and os.path.isfile(video_path)): return
         src_sz = os.path.getsize(video_path)
         if src_sz < _CMP_MIN_MB * 1048576: return
-        base = _encoder_args()
-        # 녹화가 돌고 있으면 GPU(NVENC) 세션 경합을 피하려 CPU로 압축한다(낮은 우선순위·절반 스레드라 게임 영향 최소).
-        if "h264_nvenc" in base and not REC_STATE.get("recording"):
-            venc = ["-c:v", "h264_nvenc", "-preset", "p7", "-cq", "23"]; nm = "NVENC p7"
-        else:
-            venc = ["-c:v", "libx264", "-preset", "medium", "-crf", "23",
-                    "-threads", str(max(1, (os.cpu_count() or 4) // 2))]; nm = "x264 medium"
+        venc, nm = _compress_encoder()
+        if venc is None:
+            # 하드웨어 인코더가 없음 → CPU(x264)로 오래 끄느니 원본 그대로 업로드(지연 최소화).
+            log("  Compression skipped (no hardware encoder found) — uploading the original as-is.")
+            return
         tmp = video_path + ".cmp.mp4"
+        _dur = _ffprobe_dur(video_path) or 0
         log(f"Compressing for upload ({nm}) — {src_sz/1048576:.0f}MB…")
-        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | (0x00004000 if os.name == "nt" else 0)  # BELOW_NORMAL 우선순위
-        r = _run([FFMPEG, "-y", "-loglevel", "error", "-i", video_path, *venc,
-                  "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", tmp],
-                 timeout=4*3600, creationflags=flags)
-        ok = (r.returncode == 0 and os.path.isfile(tmp) and os.path.getsize(tmp) > 40000)
+        _pipe_pct(0.0)                                   # 헤더에 0%부터 표시
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | (0x00004000 if os.name == "nt" else 0)  # BELOW_NORMAL 우선순위(게임 우선)
+        cmd = [FFMPEG, "-y", "-loglevel", "error", "-progress", "pipe:1", "-nostats",
+               "-i", video_path, *venc, "-pix_fmt", "yuv420p", "-c:a", "copy",
+               "-movflags", "+faststart", tmp]
+        rc = _ffmpeg_progress_run(cmd, _dur, _pipe_pct, creationflags=flags, timeout=4*3600)
+        _pipe_pct(1.0)
+        ok = (rc == 0 and os.path.isfile(tmp) and os.path.getsize(tmp) > 40000)
         if ok:
-            d0 = _ffprobe_dur(video_path) or 0; d1 = _ffprobe_dur(tmp) or 0
+            d0 = _dur; d1 = _ffprobe_dur(tmp) or 0
             if d0 and abs(d0 - d1) > 2.5: ok = False        # 길이 훼손 방지
         if ok and os.path.getsize(tmp) <= src_sz * 0.8:
             new_sz = os.path.getsize(tmp); os.replace(tmp, video_path)
@@ -1836,9 +2218,17 @@ def _compress_for_upload(video_path):
         else:
             try: os.remove(tmp)
             except OSError: pass
-            log("  Compression skipped (little gain) — uploading the original")
+            if rc != 0:
+                # 하드웨어 세션이 순간적으로 꽉 찼거나 실패 → CPU로 대체하지 않고 원본 업로드.
+                log("  Compression skipped (hardware encoder busy/failed) — uploading the original as-is.")
+            else:
+                log("  Compression skipped (little gain) — uploading the original")
     except Exception as e:
         log(f"  Compression failed → uploading the original: {e}")
+    finally:
+        try: REC_STATE["pipe_pct"] = None   # 이후 분석/썸네일 구간에서 100% 잔상이 남지 않도록
+        except Exception: pass
+
 
 def ingest(video_path, rep_path, uploader=None, t0=None, rep_mtime=None):
     if not video_path or not os.path.isfile(video_path) or os.path.getsize(video_path) < 10000:
@@ -1929,7 +2319,7 @@ def ingest(video_path, rep_path, uploader=None, t0=None, rep_mtime=None):
             except Exception as _e:
                 log(f"  preview skip: {_e}")
             _pipe("uploading")
-            video_url = sb_upload(video_path, f"videos/{gid}.mp4", "video/mp4")
+            video_url = sb_upload(video_path, f"videos/{gid}.mp4", "video/mp4", track=True)
             thumb_url = sb_upload(tmp_thumb, f"thumbs/{gid}.jpg", "image/jpeg") if has_thumb else None
             replay_url = sb_upload(rdst, f"replays/{gid}.rep", "application/octet-stream") if rdst else None
             players = meta.get("players") or []; saver = meta.get("saver"); winner = meta.get("winner")
@@ -2129,6 +2519,133 @@ def _scale_vf(src_h=0):
     expr = f"scale=-2:'min({th},ih)':flags=fast_bilinear"
     return ["-vf", expr], "," + expr
 
+def _sc_game_pid(name):
+    """StarCraft 프로세스의 PID (없으면 None). 게임 소리만 캡처(프로세스 루프백)에 사용."""
+    n = (name or "").lower()
+    for p in psutil.process_iter(["name"]):
+        try:
+            if (p.info["name"] or "").lower() == n: return p.pid
+        except (psutil.NoSuchProcess, psutil.AccessDenied): pass
+    return None
+
+def _capture_process_audio(pid, box):
+    """Win10(2004+) 프로세스 루프백 API로 특정 PID(및 자식 트리) 오디오만 box['path'] WAV에 녹음.
+    성공 시 box['ok']=True 로 두고 box['stop'] 까지 녹음. 실패하면 예외를 던져
+    호출부가 시스템 사운드(디바이스 루프백)로 폴백하게 한다.
+    (게임 소리만 남기고 디스코드·음악·알림음은 제외됨.)"""
+    import ctypes, wave, time as _t
+    import ctypes.wintypes as wt
+    from ctypes import (POINTER, byref, c_void_p, c_uint32, c_int32, c_uint64,
+                        Structure, HRESULT, c_wchar_p, c_byte, c_uint16, c_ulong, cast, WINFUNCTYPE, sizeof)
+
+    ole32 = ctypes.windll.ole32
+    mmd = ctypes.windll.mmdevapi
+    ole32.CoInitializeEx(None, 0)   # MTA
+    try:
+        class GUID(Structure):
+            _fields_ = [("a", c_uint32), ("b", c_uint16), ("c", c_uint16), ("d", c_byte * 8)]
+        def G(sg):
+            g = GUID(); ole32.CLSIDFromString(c_wchar_p(sg), byref(g)); return g
+        IID_AC  = G("{1CB9AD4C-DBFA-4c32-B178-C2F568A703B2}")   # IAudioClient
+        IID_CAP = G("{C8ADBD64-E71E-48a0-A4DE-185C395CD317}")   # IAudioCaptureClient
+
+        def call(p, idx, rest, argt, *a):   # vtable 인덱스로 COM 호출
+            vt = cast(p, POINTER(c_void_p))[0]
+            fn = cast(vt, POINTER(c_void_p))[idx]
+            return WINFUNCTYPE(rest, c_void_p, *argt)(fn)(p, *a)
+
+        class PROC_LB(Structure):
+            _fields_ = [("pid", wt.DWORD), ("mode", c_int32)]
+        class ACTP(Structure):
+            _fields_ = [("atype", c_int32), ("plb", PROC_LB)]
+        class BLOB(Structure):
+            _fields_ = [("cb", c_uint32), ("p", c_void_p)]
+        class PROPV(Structure):
+            _fields_ = [("vt", c_uint16), ("r1", c_uint16), ("r2", c_uint16), ("r3", c_uint16),
+                        ("blob", BLOB), ("pad", c_byte * 8)]
+        class WFX(Structure):
+            _fields_ = [("tag", c_uint16), ("ch", c_uint16), ("sps", c_uint32),
+                        ("abps", c_uint32), ("ba", c_uint16), ("bps", c_uint16), ("cb", c_uint16)]
+
+        # 완료 핸들러 (IActivateAudioInterfaceCompletionHandler): QI/AddRef/Release/ActivateCompleted
+        done = {"f": False}
+        QIp = WINFUNCTYPE(HRESULT, c_void_p, POINTER(GUID), POINTER(c_void_p))
+        ULp = WINFUNCTYPE(c_ulong, c_void_p)
+        ACp = WINFUNCTYPE(HRESULT, c_void_p, c_void_p)
+        def _qi(this, riid, ppv): ppv[0] = this; return 0
+        def _au(this): return 1
+        def _re(this): return 1
+        def _ac(this, op): done["f"] = True; return 0
+        _f = (QIp(_qi), ULp(_au), ULp(_re), ACp(_ac))   # 참조 유지
+        VT = (c_void_p * 4)(cast(_f[0], c_void_p), cast(_f[1], c_void_p), cast(_f[2], c_void_p), cast(_f[3], c_void_p))
+        class HOBJ(Structure):
+            _fields_ = [("vtbl", c_void_p)]
+        hobj = HOBJ(); hobj.vtbl = cast(byref(VT), c_void_p)
+
+        ap = ACTP(); ap.atype = 1   # PROCESS_LOOPBACK
+        ap.plb.pid = pid; ap.plb.mode = 0   # INCLUDE_TARGET_PROCESS_TREE
+        pv = PROPV(); pv.vt = 65   # VT_BLOB
+        pv.blob.cb = sizeof(ACTP); pv.blob.p = cast(byref(ap), c_void_p)
+
+        op = c_void_p()
+        hr = mmd.ActivateAudioInterfaceAsync(c_wchar_p("VAD\\Process_Loopback"),
+                                             byref(IID_AC), byref(pv), cast(byref(hobj), c_void_p), byref(op))
+        if hr != 0: raise RuntimeError("Activate 0x%X" % (hr & 0xffffffff))
+        for _ in range(600):
+            if done["f"]: break
+            _t.sleep(0.005)
+        if not done["f"]: raise RuntimeError("activation timeout")
+
+        hres = HRESULT(); iface = c_void_p()
+        call(op, 3, HRESULT, [POINTER(HRESULT), POINTER(c_void_p)], byref(hres), byref(iface))   # GetActivateResult
+        if (hres.value & 0xffffffff) != 0 or not iface.value: raise RuntimeError("GetActivateResult 0x%X" % (hres.value & 0xffffffff))
+        acl = iface
+
+        SPS = 48000
+        fmt = WFX(1, 2, SPS, SPS * 4, 4, 16, 0)   # PCM 48k 2ch 16bit
+        hr = call(acl, 3, HRESULT,
+                  [c_int32, c_uint32, c_uint64, c_uint64, c_void_p, c_void_p],
+                  0, 0x00020000, c_uint64(3000000), c_uint64(0), cast(byref(fmt), c_void_p), None)   # Initialize(SHARED, LOOPBACK)
+        if hr != 0: raise RuntimeError("Initialize 0x%X" % (hr & 0xffffffff))
+
+        cap = c_void_p()
+        hr = call(acl, 14, HRESULT, [POINTER(GUID), POINTER(c_void_p)], byref(IID_CAP), byref(cap))   # GetService
+        if hr != 0 or not cap.value: raise RuntimeError("GetService 0x%X" % (hr & 0xffffffff))
+        hr = call(acl, 10, HRESULT, [])   # Start
+        if hr != 0: raise RuntimeError("Start 0x%X" % (hr & 0xffffffff))
+
+        wf = wave.open(box["path"], "wb"); wf.setnchannels(2); wf.setsampwidth(2); wf.setframerate(SPS)
+        box["t0"] = _t.time(); box["ok"] = True
+        log("  \u266a Audio (game only) started \u2014 StarCraft \u00b7 48000Hz 2ch")
+        BPF = 4
+        try:
+            while not box["stop"].is_set():
+                pkt = c_uint32(0); call(cap, 5, HRESULT, [POINTER(c_uint32)], byref(pkt))   # GetNextPacketSize
+                if pkt.value == 0:
+                    _t.sleep(0.008); continue
+                while pkt.value > 0:
+                    pdata = c_void_p(); nfr = c_uint32(); fl = c_uint32()
+                    hr = call(cap, 3, HRESULT,
+                              [POINTER(c_void_p), POINTER(c_uint32), POINTER(c_uint32), POINTER(c_uint64), POINTER(c_uint64)],
+                              byref(pdata), byref(nfr), byref(fl), None, None)   # GetBuffer
+                    if hr != 0: break
+                    n = nfr.value
+                    if n:
+                        if fl.value & 0x2:   # SILENT
+                            wf.writeframes(b"\x00" * (n * BPF))
+                        elif pdata.value:
+                            wf.writeframes(bytes((c_byte * (n * BPF)).from_address(pdata.value)))
+                    call(cap, 4, HRESULT, [c_uint32], nfr)   # ReleaseBuffer
+                    pkt = c_uint32(0); call(cap, 5, HRESULT, [POINTER(c_uint32)], byref(pkt))
+        finally:
+            try: call(acl, 11, HRESULT, [])   # Stop
+            except Exception: pass
+            try: wf.close()
+            except Exception: pass
+    finally:
+        try: ole32.CoUninitialize()
+        except Exception: pass
+
 class Recorder:
     # ddagrab = Desktop Duplication API. 윈10/11에선 '전체화면(독점)'도 잡힙니다.
     # gdigrab = 옛날 GDI 방식. 전체화면 독점에선 검은 화면이라 보조용.
@@ -2191,13 +2708,29 @@ class Recorder:
         return self._alive()
 
     def _start_audio(self):
-        """시스템 사운드(게임 소리)를 WASAPI 루프백으로 WAV에 병렬 녹음.
-        Windows 내장 기능이라 Stereo Mix·가상케이블 없이 어떤 PC에서도 동작.
-        실패하면 무음으로 진행(영상 녹화는 영향 없음)."""
+        """게임 소리를 WAV에 병렬 녹음. 우선 프로세스 루프백(StarCraft 소리만, Win10 2004+)을 시도하고,
+        안 되면 WASAPI 시스템 루프백(기본 출력장치 전체)으로 자동 폴백한다.
+        Windows 내장 기능이라 Stereo Mix·가상케이블 없이 동작. 실패해도 무음으로 진행(영상엔 영향 없음).
+        game_audio_only=off(또는 system) 로 두면 처음부터 시스템 사운드로 녹음."""
         self._stop_audio(discard=True); self._vt0 = None
         self.audio_path = os.path.join(REC_DIR, f"audio_{datetime.datetime.now():%Y%m%d_%H%M%S}.wav")
-        box = {"stop": threading.Event(), "t0": None, "thread": None, "ok": False, "path": self.audio_path}
+        _gameonly = str(CFG.get("game_audio_only", "auto")).lower() not in ("off", "0", "false", "no", "system")
+        _pid = None
+        if _gameonly:
+            try: _pid = _sc_game_pid(CFG.get("starcraft_process") or "StarCraft.exe")
+            except Exception: _pid = None
+        box = {"stop": threading.Event(), "t0": None, "thread": None, "ok": False, "path": self.audio_path, "pid": _pid}
         def worker():
+            if box.get("pid"):
+                try:
+                    _capture_process_audio(box["pid"], box); return   # 게임 소리만 캡처 성공 → 끝까지 녹음
+                except Exception as e:
+                    log(f"  (audio) game-only capture failed \u2192 using system sound ({e})")
+                    box["ok"] = False; box["t0"] = None
+                    try:
+                        if os.path.isfile(box["path"]): os.remove(box["path"])
+                    except Exception: pass
+                    # ↓ 시스템 사운드(디바이스 루프백)로 폴백
             try:
                 import pyaudiowpatch as pa, wave
             except Exception as e:
@@ -2360,18 +2893,29 @@ class Recorder:
                 except Exception: pass
 
         # 녹화 중 노란 테두리 제거: draw_border=False (Win11 빌드 22000+에서 IsBorderRequired 지원).
-        # 구형 OS에서 그 설정으로 시작이 안 되면 기본값(테두리 표시)으로 폴백 — WGC 백엔드 자체는 유지.
+        # (개선) 이 OS가 테두리 끄기를 지원하는지 한 번만 확인해 기억한다. 미지원이면 이후 판부터는
+        #        실패하는 시도를 건너뛰어 '실패→재시도' 로그 도배를 없애고 녹화 시작도 더 빨라진다.
+        _wgc_border_load()
+        if _WGC_BORDER["off_ok"] is False:
+            _try_borders = (None,)            # 미지원 확정 → 곧장 기본값(테두리 표시)으로만 시도
+        else:
+            _try_borders = (False, None)      # 지원 or 미확인 → 테두리 끄기부터 시도
         cap = control = None
-        for _border in (False, None):
+        for _border in _try_borders:
             try:
                 cap = _wgc_make(_border); control = cap.start_free_threaded()
-                if _border is None:
-                    log("  WGC: this OS can't disable the capture border → starting with defaults (a border may show)")
+                if _border is False and _WGC_BORDER["off_ok"] is not True:
+                    _WGC_BORDER["off_ok"] = True; _wgc_border_save()      # 테두리 끄기 지원 확정
                 break
             except Exception as e:
                 control = None
                 if _border is False:
-                    log(f"  WGC failed to start with border off ({e}) → retrying with defaults")
+                    _first = (_WGC_BORDER["off_ok"] is None)
+                    _WGC_BORDER["off_ok"] = False; _wgc_border_save()     # 미지원 확정 → 다음부턴 건너뜀
+                    if _first:
+                        log("  WGC: 이 OS/디스플레이는 캡처 테두리를 끌 수 없어 기본값으로 녹화합니다"
+                            " (얇은 테두리가 보일 수 있음 — 정상). 이후 판부터는 바로 기본값으로 시작합니다.")
+                    # 재시도(None)는 조용히 진행 — 매 판 반복되던 로그 없음
                 else:
                     log(f"  WGC failed to start: {e}"); return False
         if control is None:
@@ -2421,6 +2965,10 @@ class Recorder:
         if self._recording(): return True
         _game_det_reset()                       # 새 캡처 세션 — 이전 세션의 인게임 판정 제거
         _free=_disk_free_gb()
+        if _free is not None and _free < 2.0:
+            try: _reclaim_disk_if_low()          # 부족하면 이미 업로드된 오래된 영상 회수 후 재측정
+            except Exception: pass
+            _free=_disk_free_gb()
         if _free is not None and _free < 0.5:
             if time.time()-getattr(self,"_dwarn",0) > 300:
                 self._dwarn=time.time(); log(f"⚠ 디스크 여유 {_free:.1f}GB — 공간이 부족해 녹화를 건너뜁니다(0.5GB 미만)")
@@ -2706,7 +3254,13 @@ def _ffmpeg_tail(n=2):
 
 def _pipe(stage):
     """백그라운드 파이프라인 단계(processing/uploading/None) → GUI 헤더 표시용."""
-    try: REC_STATE["pipe"] = stage
+    try:
+        REC_STATE["pipe"] = stage
+        REC_STATE["pipe_pct"] = None      # 새 단계 시작 시 진행률 초기화(측정되면 아래 _pipe_pct 로 채움)
+    except Exception: pass
+def _pipe_pct(frac):
+    """현재 파이프라인 단계의 진행률(0.0~1.0). GUI 헤더에 %로 표시."""
+    try: REC_STATE["pipe_pct"] = max(0.0, min(1.0, float(frac)))
     except Exception: pass
 
 def _merge_audio(vid, wav, at0, vt0):
@@ -2740,12 +3294,15 @@ def _merge_audio(vid, wav, at0, vt0):
     except Exception as e:
         log(f"  (audio) merge failed → video only: {e}"); return vid
 
-def _status_line(rec_on, ready, pipe, ingame, rec_el, game_el):
-    """GUI 헤더(제목, 서브텍스트) 결정 — Ready → Recording → Processing → Uploading 파이프라인 표시."""
+def _status_line(rec_on, ready, pipe, ingame, rec_el, game_el, pct=None):
+    """GUI 헤더(제목, 서브텍스트) 결정 — Ready → Recording → Processing → Uploading 파이프라인 표시.
+    pct(0.0~1.0)가 있으면 제목에 'Uploading 73%'처럼 %만 깔끔하게 붙인다(별도 진행바 없음)."""
+    _pp = f" {int(pct*100)}%" if isinstance(pct, (int, float)) else ""
     if pipe == "uploading":
-        return ("Uploading", "sending the last game to the archive" + (" · standby recording on" if rec_on else ""))
+        return (f"Uploading{_pp}", "sending the last game to the archive" + (" · standby recording on" if rec_on else ""))
     if pipe == "processing":
-        return ("Processing", "trimming · analyzing the last game" + (" · standby recording on" if rec_on else ""))
+        _what = "compressing (hardware)" if isinstance(pct, (int, float)) else "trimming · analyzing"
+        return (f"Processing{_pp}", _what + " the last game" + (" · standby recording on" if rec_on else ""))
     if rec_on:
         if ingame is True:
             e = int(max(0, game_el)); return ("Recording", f"{e//60:d}:{e%60:02d} in game")
@@ -2906,6 +3463,9 @@ def recorder_loop(cfg):
             run = sc_running(proc)
             if run and not was:
                 log("StarCraft detected."); known = list_reps(autosave); active = rec.start()
+                # 설계: 스타 실행 시 내 아이디로 미리 로그인 바인딩 → Archive 클릭 시 즉시 자동 로그인
+                try: threading.Thread(target=prebind_identity, daemon=True).start()
+                except Exception: pass
             if run:
                 if not rec._recording():
                     if active:
@@ -3117,9 +3677,16 @@ def run_gui(cfg, url):
         def _go():
             u = url
             try:
-                c = issue_login_code()               # 아직 판 없으면 None → 그냥 열기
-                if c: u = url + "/#code=" + c        # 웹(encore-auth.js)이 소비 → 자동 로그인
-                else: log("Opening gallery without login — this PC isn't linked to an account yet (upload one game and it links automatically)")
+                c = issue_login_code()               # 바인딩 없으면 내부에서 즉석 연결 시도
+                if c:
+                    u = url + "/#code=" + c           # 웹(encore-auth.js)이 소비 → 자동 로그인
+                    log("Opening gallery — auto-login ready.")
+                elif _ID_CLAIM.get("schema_broken"):
+                    log("⚠ 로그인 불가: 클라우드 DB의 claim_identity 중복(PGRST203). fix_login.sql 실행 후 다시 시도하세요. 우선 갤러리는 그냥 엽니다.")
+                elif not (CFG.get("username") or (_identity_load() or {}).get("last_name")):
+                    log("로그인 없이 갤러리를 엽니다 — 아직 계정 이름을 모릅니다. 게임을 1판 저장하거나 config.json 의 username 을 채우면 자동 로그인됩니다.")
+                else:
+                    log("로그인 없이 갤러리를 엽니다 — 연결에 실패했습니다. 콘솔의 [Login check] 를 확인하세요(python sc_recorder.py --status).")
             except Exception as e:
                 log(f"login code skipped: {e}")
             try: open_app(u)
@@ -3138,6 +3705,8 @@ def run_gui(cfg, url):
         set_log(True); threading.Thread(target=lambda: sync_existing_to_cloud(), daemon=True).start()
     def do_reanalyze():
         set_log(True); threading.Thread(target=lambda: reanalyze_all(), daemon=True).start()
+    def do_clean():
+        set_log(True); threading.Thread(target=lambda: cleanup_recordings(manual=True), daemon=True).start()
     def _save_cfg():
         try: _atomic_write_json(CONFIG_PATH, cfg, indent=2)
         except Exception as e: log(f"Failed to save settings: {e}")
@@ -3298,10 +3867,21 @@ def run_gui(cfg, url):
     opt_row("Encoder", ENC_OPTS, "encoder")
     opt_row("Capture", CAP_OPTS, "capture")
     opt_row("Monitor", MON_OPTS, "output_idx")
-    KEEP_OPTS=[("계속 보관","0"),("30일 후 정리","30"),("14일 후 정리","14"),("7일 후 정리","7")]
-    opt_row("보관", KEEP_OPTS, "local_video_keep_days")
+    KEEP_OPTS=[("최근 20판","20"),("최근 10판","10"),("최근 50판","50"),("전부 보관","0")]
+    opt_row("보관", KEEP_OPTS, "keep_games")
     tk.Label(optwrap, text="Records at 1080p by default. 'Auto' uses full quality on GPU, drops to 720p on CPU to avoid stutter.",
-             bg=PANEL, fg=DIM, font=(LAT,8), wraplength=W-48, justify="left").pack(anchor="w", padx=14, pady=(5,9))
+             bg=PANEL, fg=DIM, font=(LAT,8), wraplength=W-48, justify="left").pack(anchor="w", padx=14, pady=(5,4))
+    # 로컬 원본 정리(업로드된 판만) + 디스크 여유 표시
+    crow=tk.Frame(optwrap, bg=PANEL); crow.pack(fill="x", padx=14, pady=(0,9))
+    mkbtn(crow, "지금 정리", do_clean).pack(side="left")
+    _dsklbl=tk.Label(crow, text="", bg=PANEL, fg=DIM, font=(LAT,8))
+    _dsklbl.pack(side="left", padx=10)
+    def _refresh_disk():
+        try:
+            _fr=_disk_free_gb()
+            _dsklbl.config(text=(f"여유 공간: {_fr:.0f} GB" if _fr is not None else ""))
+        except Exception: pass
+    _refresh_disk()
     if _sbe:
         tk.Frame(optwrap, bg=LINE, height=1).pack(fill="x", padx=14, pady=(0,8))
         mrow=tk.Frame(optwrap, bg=PANEL); mrow.pack(fill="x", padx=14, pady=(0,11))
@@ -3349,7 +3929,10 @@ def run_gui(cfg, url):
     def set_settings(open_):
         if open_ and st["log"]: set_log(False)
         st["settings"]=open_
-        if open_: optwrap.pack(fill="x", padx=12, pady=(2,2))
+        if open_:
+            optwrap.pack(fill="x", padx=12, pady=(2,2))
+            try: _refresh_disk()          # 설정 열 때 디스크 여유 최신화
+            except Exception: pass
         else: optwrap.pack_forget()
         _chip_on(open_)
         _resize()
@@ -3385,6 +3968,8 @@ def run_gui(cfg, url):
         except Exception as e: log(f"Skipped recovering pending clips: {e}")
         try: rebuild_db_from_recordings()
         except Exception as e: log(f"Skipped folder recovery: {e}")
+        try: threading.Thread(target=prebind_identity, daemon=True).start()  # 시작 시 로그인 미리 준비
+        except Exception: pass
         recorder_loop(cfg)
     threading.Thread(target=_prep_and_run, daemon=True).start()
 
@@ -3422,9 +4007,12 @@ def run_gui(cfg, url):
         _gs=REC_STATE.get("game_since")
         _ttl,sub=_status_line(rec, bool(REC_STATE.get("ready")), REC_STATE.get("pipe"), REC_STATE.get("ingame"),
                               (time.time()-st["rec_start"]) if rec else 0.0,
-                              (time.time()-_gs) if _gs else 0.0)
+                              (time.time()-_gs) if _gs else 0.0, REC_STATE.get("pipe_pct"))
+        _dl=REC_STATE.get("disk_low")
+        if _dl is not None:                      # 디스크 부족 — 눈에 띄게 경고(녹화 멈추기 전에 알림)
+            sub = f"\u26a0 디스크 여유 {_dl:.1f}GB — 공간을 비워주세요 (녹화가 중단될 수 있음)"
         cv.itemconfig(wid, text=_ttl, fill=INK)
-        cv.itemconfig(sid, text=sub)
+        cv.itemconfig(sid, text=sub, fill=(AMB if _dl is not None else INK2))
         if UP_DONE.get("t",0) > UP_DONE.get("shown",0):
             UP_DONE["shown"]=UP_DONE["t"]; show_toast()
         if LAST_ERR.get("msg") and (time.time()-LAST_ERR.get("t",0) < 8):
@@ -3450,6 +4038,54 @@ def run_gui(cfg, url):
     except Exception as ex: log(f"GUI window closed: {ex}")
 
 
+
+def _login_diagnose():
+    """로그인이 되는지 실제로 검증한다: 기기 바인딩 시도 → 로그인 코드 발급 시도까지.
+    무엇이 막고 있는지 정확한 원인과 조치를 출력한다. (--status 에서 호출)"""
+    print("-" * 50)
+    print("  [Login / account link check]")
+    if not sb_enabled():
+        print("    Cloud OFF — supabase.url/anon_key 가 비어 있어 로그인 대상이 없습니다.")
+        print("    → config.json 의 supabase 를 채우면 로그인 기능이 켜집니다.")
+        return
+    st = _identity_load()
+    if st.get("puuid"):
+        print(f"    device bound : ✓ {st.get('name') or st.get('last_name') or '?'} ({st.get('puuid')})")
+    else:
+        nm = (CFG.get("username") or st.get("last_name") or "").strip()
+        if not nm:
+            print("    device bound : ✗ (아직 이름을 모름)")
+            print("    → 스타에서 게임을 1판 저장하거나, config.json 의 \"username\" 을 채운 뒤 다시 실행하세요.")
+            return
+        print(f"    device bound : ✗ → '{nm}' 로 지금 연결 시도…")
+        pu = claim_identity(nm)                     # 실제로 서버 등록 시도
+        if pu:
+            print(f"    ✓ 방금 연결됨 → {pu}")
+            st = _identity_load()
+        elif _ID_CLAIM.get("schema_broken"):
+            print("    ✗ 실패: 클라우드 DB에 claim_identity 함수가 중복(오버로드 충돌, PGRST203).")
+            print("      ▶ 조치: Supabase SQL 편집기에서 fix_login.sql 실행 → 중복 함수 제거 → 즉시 로그인됨.")
+            print("      (경기 업로드는 그동안에도 익명으로 정상 저장됩니다.)")
+            return
+        else:
+            print("    ✗ 연결 실패 (위 로그의 사유 확인). 네트워크/키를 점검하세요.")
+            return
+    # 여기까지 오면 바인딩 성공 → 로그인 코드(1회용) 발급이 실제로 되는지 확인
+    try:
+        code = issue_login_code()
+        if code:
+            print("    login code   : ✓ 발급 성공 (갤러리 '열기' 시 자동 로그인됩니다)")
+            print("\n  → 로그인 정상 작동합니다. ✅")
+        else:
+            print("    login code   : ✗ 발급 안 됨 (바인딩은 됐으나 코드 발급 실패)")
+            print("      ▶ 서버에 issue_login_code 함수/권한이 있는지 확인하세요 (schema.sql).")
+    except Exception as e:
+        msg = str(e)
+        print(f"    login code   : ✗ 오류 — {msg[:160]}")
+        if ("PGRST202" in msg) or (" 404:" in msg):
+            print("      ▶ 서버에 issue_login_code 함수가 없습니다 → schema.sql 을 최신으로 배포하세요.")
+        elif ("PGRST203" in msg) or (" 300:" in msg):
+            print("      ▶ issue_login_code 도 중복 정의(오버로드 충돌) → fix_login.sql 참고.")
 
 def _print_status():
     s = sb_cfg(); st = cloud_state()
@@ -3496,6 +4132,8 @@ def _print_status():
                 print("    (the key may be wrong or the table may not exist. Make sure you ran schema.sql)")
         except Exception as e:
             print(f"  ✗ Connection test error: {e}")
+    try: _login_diagnose()                              # 로그인 실제 검증
+    except Exception as e: print(f"  (login check error: {e})")
     print("=" * 50)
 
 def main():
@@ -3505,6 +4143,8 @@ def main():
         while True:
             time.sleep(24*3600)               # 하루 한 번(상주 시) — 시작 직후 복구(recover_orphan_clips)와 충돌/중복등록 방지 위해 먼저 대기
             try: cleanup_storage_orphans()
+            except Exception: pass
+            try: cleanup_recordings()          # 보관 정책: 최근 N판/총 N GB만 유지(업로드된 판만)
             except Exception: pass
             try: cleanup_local_videos()
             except Exception: pass
@@ -3544,6 +4184,15 @@ def main():
     except Exception: pass
     mode = cfg.get("mode", "all")
     use_gui = (mode == "all" and sys.platform == "win32" and cfg.get("ui", "window") != "console")
+    # (신뢰성) 디스크 여유 감시 — 부족 시 업로드된 오래된 영상 자동 회수 + 상태바 경고
+    try: threading.Thread(target=_disk_watch_loop, daemon=True).start()
+    except Exception: pass
+    # (신뢰성) 기본 Supabase 모드: 업로드 실패한 로컬 판을 주기적으로 자동 재업로드
+    #  (recorder 모드/클라우드 함수 모드는 기존 _flush_pending 이 재시도를 담당하므로 제외)
+    try:
+        if mode != "recorder" and not bool((cfg.get("cloud") or {}).get("function_url")):
+            threading.Thread(target=_auto_resync_loop, daemon=True).start()
+    except Exception: pass
     print("=" * 56); print(f"  StarCraft auto recorder/archive — mode: {mode}"); print("=" * 56)
     _cst = cloud_state()
     if _cst == "cloud":
