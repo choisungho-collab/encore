@@ -24,8 +24,12 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          pip install --only-binary=:all: numpy "windows-capture==2.0.0"
           pip install -r requirements.txt
           pip install pyinstaller
+          echo "=== installed packages ==="
+          pip show windows-capture numpy pyinstaller
+          python -c "import windows_capture, numpy; print('import OK:', numpy.__version__)"
 
       - name: Build single EXE
         run: >
@@ -36,7 +40,6 @@ jobs:
           --hidden-import psutil --hidden-import requests --hidden-import tkinter
           --hidden-import pyaudiowpatch
           --hidden-import numpy --hidden-import windows_capture
-          --collect-all windows_capture
           --exclude-module boto3 --exclude-module botocore
           --exclude-module flask --exclude-module werkzeug --exclude-module jinja2
           --exclude-module waitress
