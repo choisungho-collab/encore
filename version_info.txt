@@ -1,13 +1,24 @@
-@echo off
-chcp 65001 >nul 2>&1
-cd /d "%~dp0"
-set "PYEXE="
-where py >nul 2>&1 && set "PYEXE=py"
-if not defined PYEXE (
-  where python >nul 2>&1 && set "PYEXE=python"
+# PyInstaller 버전 리소스 — sc_recorder.exe 속성(제품명/버전/제작자)
+# 버전 올릴 때 sc_recorder.py의 APP_VERSION과 함께 갱신할 것.
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(1, 0, 0, 0),
+    prodvers=(1, 0, 0, 0),
+    mask=0x3f, flags=0x0, OS=0x40004, fileType=0x1, subtype=0x0, date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo([
+      StringTable('040904B0', [
+        StringStruct('CompanyName', 'ENCORE'),
+        StringStruct('FileDescription', 'ENCORE Recorder - StarCraft team game auto recorder'),
+        StringStruct('FileVersion', '1.0.0'),
+        StringStruct('InternalName', 'sc_recorder'),
+        StringStruct('LegalCopyright', '(c) 2026 ENCORE (choisungho)'),
+        StringStruct('OriginalFilename', 'sc_recorder.exe'),
+        StringStruct('ProductName', 'ENCORE Recorder'),
+        StringStruct('ProductVersion', '1.0.0')
+      ])
+    ]),
+    VarFileInfo([VarStruct('Translation', [1033, 1200])])
+  ]
 )
-if not defined PYEXE (
-  echo Python 3 not found. Install from https://www.python.org/downloads/
-  pause & exit /b
-)
-%PYEXE% "%~dp0diagnose.py"
