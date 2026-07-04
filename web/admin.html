@@ -1,347 +1,294 @@
-<!doctype html>
-<html lang="ko">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="robots" content="noindex,nofollow">
-<title>운영 콘솔 — myPENTA</title>
-<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Sora:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20d%3D%22M16.00%2016.40%20L16.00%203.80%20L19.12%2012.11%20Z%22%20fill%3D%22%23F2F6FB%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M16.00%2016.40%20L19.12%2012.11%20L27.98%2012.51%20Z%22%20fill%3D%22%239AA5B6%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M16.00%2016.40%20L27.98%2012.51%20L21.04%2018.04%20Z%22%20fill%3D%22%236E7889%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M16.00%2016.40%20L21.04%2018.04%20L23.41%2026.59%20Z%22%20fill%3D%22%234A5364%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M16.00%2016.40%20L23.41%2026.59%20L16.00%2021.70%20Z%22%20fill%3D%22%234A5364%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M16.00%2016.40%20L16.00%2021.70%20L8.59%2026.59%20Z%22%20fill%3D%22%236E7889%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M16.00%2016.40%20L8.59%2026.59%20L10.96%2018.04%20Z%22%20fill%3D%22%239AA5B6%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M16.00%2016.40%20L10.96%2018.04%20L4.02%2012.51%20Z%22%20fill%3D%22%23F2F6FB%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M16.00%2016.40%20L4.02%2012.51%20L12.88%2012.11%20Z%22%20fill%3D%22%23F2F6FB%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M16.00%2016.40%20L12.88%2012.11%20L16.00%203.80%20Z%22%20fill%3D%22%23F2F6FB%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M16.00%203.80%20L19.12%2012.11%20L27.98%2012.51%20L21.04%2018.04%20L23.41%2026.59%20L16.00%2021.70%20L8.59%2026.59%20L10.96%2018.04%20L4.02%2012.51%20L12.88%2012.11%20Z%22%20fill%3D%22none%22%20stroke%3D%22%233A4354%22%20stroke-width%3D%22.55%22%20stroke-linejoin%3D%22round%22%20opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E"><meta name="viewport" content="width=device-width,initial-scale=1"><title>관리자 콘솔 · ENCORE</title><meta property="og:type" content="website"><meta property="og:site_name" content="ENCORE"><meta property="og:title" content="관리자 콘솔 · ENCORE"><meta property="og:description" content="스타크래프트 팀 물량전 아카이브, ENCORE."><meta property="og:image" content="https://encorestar.netlify.app/og.png"><meta name="twitter:card" content="summary_large_image"><link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.css"><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet"><style>:root{--bg:#0C0D10;--surface:#131519;--surface2:#181B21;--well:#0E0F13;--ink:#ECEEF2;--ink2:#C5C9D0;--dim:#9AA0AA;--faint:#7A8496;--line:#1F232B;--line2:#2C313B;--acc:#5E6878;--acc-ink:#D7DFEA;--acc-soft:rgba(199,210,225,.10);--acc-line:rgba(199,210,225,.32);--r1:9px;--r2:13px;--r3:17px;--fd:'Pretendard Variable','Pretendard','Apple SD Gothic Neo',system-ui,sans-serif;--fh:'Pretendard Variable','Pretendard',system-ui,sans-serif;--fm:'IBM Plex Mono',ui-monospace,monospace}*{box-sizing:border-box}html,body{margin:0}body{background:var(--bg);color:var(--ink);font-family:var(--fd);font-size:15px;line-height:1.55;word-break:keep-all;overflow-wrap:break-word;-webkit-font-smoothing:antialiased;letter-spacing:.005em}a{color:inherit;text-decoration:none}svg{display:block}::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:var(--line2);border-radius:6px;border:3px solid var(--bg)}.wrap{max-width:1180px;margin:0 auto;padding:0 28px 120px}.bar{position:sticky;top:0;z-index:50;background:var(--bg);border-bottom:1px solid var(--line)}.bar.scrolled{box-shadow:0 6px 22px rgba(0,0,0,.4)}.bar-in{max-width:1180px;margin:0 auto;padding:14px 28px;display:flex;align-items:center;gap:18px}.brand{display:flex;align-items:center;gap:10px}.brand .lgmk{width:20px;height:20px;color:var(--ink)}.brand b{font-family:var(--fh);font-weight:800;font-size:17px;letter-spacing:.2em}.nav{display:flex;gap:2px;margin-left:16px}.nav a{font-family:var(--fd);font-weight:600;font-size:14px;color:var(--dim);padding:8px 14px;border-radius:9px;transition:.15s}.nav a.on{color:var(--ink);background:var(--surface)}.nav a:hover{color:var(--ink)}.bar .sp{flex:1}.live{display:inline-flex;align-items:center;gap:7px;white-space:nowrap;font-family:var(--fd);font-weight:500;font-size:12px;color:var(--ink2);background:var(--surface);border:1px solid var(--line);padding:8px 14px;border-radius:100px}.live .d{position:relative;width:7px;height:7px;border-radius:50%;background:var(--acc-ink);box-shadow:0 0 7px rgba(214,224,238,.55)}
+.live .d::after{content:"";position:absolute;inset:-4px;border-radius:50%;border:1.5px solid var(--acc);animation:livePulse 2.2s ease-out infinite}
+@keyframes livePulse{0%{transform:scale(.5);opacity:.75}70%{opacity:0}100%{transform:scale(1.9);opacity:0}}.ftr{margin-top:74px;padding-top:30px;border-top:1px solid var(--line)}.ftr-brand{display:flex;align-items:center;gap:9px;margin-bottom:13px}.ftr-brand .lgmk{width:18px;height:18px;color:var(--ink)}.ftr-brand b{font-family:var(--fh);font-weight:800;font-size:15px;letter-spacing:.18em}.ftr p{margin:5px 0;font-size:13px;line-height:1.6;color:var(--dim)}.ftr-by{font-family:var(--fd);font-size:13px;color:var(--dim);margin-top:13px}.ftr-by b{color:var(--ink2);font-weight:700}.ftr-by .hdl{font-family:var(--fm);font-size:12px;color:var(--faint)}@media(max-width:760px){.nav{display:none}.live{display:none}}.ahero{padding:58px 0 6px}.aey{font-family:var(--fm);font-size:11px;letter-spacing:.24em;color:var(--acc-ink);margin-bottom:16px}.atitle{font-family:var(--fh);font-weight:800;font-size:clamp(38px,6vw,62px);letter-spacing:-.03em;margin:0;line-height:1.04;color:#F7F4EE}.alead{font-family:var(--fh);font-weight:700;font-size:clamp(18px,2.4vw,23px);line-height:1.7;color:var(--ink2);margin:24px 0 0;max-width:840px;letter-spacing:-.01em}.scene{margin:50px 0 0;max-width:920px}.snaps{display:flex;gap:22px;justify-content:center;align-items:flex-start;flex-wrap:wrap;max-width:920px;margin:50px auto 0}.snap{flex:0 1 290px;max-width:330px}.snap .scap{justify-content:center;text-align:center}.snap .scap::before{display:none}.scene .pic{position:relative;width:100%;border-radius:4px;border:8px solid #E9E2D0;background:#E9E2D0;box-shadow:0 14px 38px rgba(0,0,0,.55),0 2px 5px rgba(0,0,0,.4);overflow:hidden}.scene .pic img{display:block;width:100%;height:auto;filter:saturate(.86) sepia(.12) contrast(1.06) brightness(.95)}
+.scene .pic>svg{display:block;width:100%;height:auto;filter:saturate(.68) sepia(.27) contrast(1.07) brightness(.93)}
+.scene .pic::before{content:"";position:absolute;inset:0;pointer-events:none;opacity:.42;mix-blend-mode:overlay;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>")}
+.scene .pic::after{content:"";position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse 125% 105% at 50% 42%,rgba(40,26,8,0) 48%,rgba(34,20,6,.55) 100%)}.scap{font-family:var(--fm);font-size:12px;color:var(--faint);margin:13px 0 0;letter-spacing:.02em;display:flex;align-items:center;gap:9px}.scap::before{content:'';width:16px;height:1px;background:var(--line2);flex-shrink:0}.story{max-width:840px;margin:42px 0 0}.story p{font-size:17px;line-height:1.92;color:var(--ink2);margin:0 0 22px}.story .em{font-family:var(--fh);font-weight:700;font-size:clamp(19px,2.6vw,24px);line-height:1.65;color:var(--ink);letter-spacing:-.01em;margin-bottom:26px}.story b{color:var(--acc-ink);font-weight:700}.thanks{max-width:840px;margin:58px 0 0;background:var(--surface);border:1px solid var(--line);border-radius:17px;padding:32px 30px}.tlabel{font-family:var(--fm);font-size:11px;letter-spacing:.24em;color:var(--acc-ink);margin-bottom:16px}.thanks p{font-size:16px;line-height:2;color:var(--ink2);margin:0}.thanks .dim{color:var(--faint);font-size:14.5px}.sign{max-width:840px;margin:36px 0 0;display:flex;align-items:center;gap:15px}.sign .sbar{width:32px;height:32px;color:var(--ink);opacity:.9;flex-shrink:0}.sby{font-family:var(--fd);font-weight:700;font-size:15px;color:var(--ink2)}.sby .hdl{font-family:var(--fm);font-weight:500;font-size:13px;color:var(--faint);margin-left:4px}.syr{font-family:var(--fm);font-size:11.5px;color:var(--faint);margin-top:4px}.navtog{display:none;align-items:center;background:none;border:0;color:var(--ink,#e8eaed);cursor:pointer;padding:4px}.navtog svg{width:25px;height:25px}.mnav{display:none}@media(max-width:760px){.nav{display:none!important}.navtog{display:inline-flex}.bar-in{position:relative}.mnav{display:none;position:absolute;top:100%;left:0;right:0;flex-direction:column;background:var(--surface,#16181d);border-bottom:1px solid var(--line,#23262d);padding:8px;gap:2px;box-shadow:0 14px 30px rgba(0,0,0,.45)}.mnav.open{display:flex}.mnav a{font-family:var(--fd);font-weight:600;font-size:15px;color:var(--ink2,#cfd3da);padding:13px 16px;border-radius:9px;text-decoration:none}.mnav a:active{background:var(--well,#1c1f25)}}</style>  <link rel="stylesheet" href="encore-theme.css">
 <style>
-:root{
- --bg:#080A0E;--surface:#0F131A;--surface2:#161B23;--hover:#1C2530;--well:#0B0E13;
- --ink:#ECE7DD;--ink2:#C2BBAD;--dim:#867F71;--faint:#6B6355;
- --gold:#DEC79C;--gold-ink:#EFDDBC;--gold-soft:rgba(222,199,156,.11);--gold-line:rgba(222,199,156,.32);
- --line:#1B2129;--line2:#242C37;--red:#E08585;--red-line:#5a2b33;
- --fg:'Space Grotesk',sans-serif;--fd:'Sora',sans-serif;--fm:'IBM Plex Mono',ui-monospace,monospace;
+.meload,.meguard{text-align:center;padding:70px 20px;color:var(--dim)}
+.bar .eauth-login,.bar .eauth-acct{display:none}
+/* 로그인 폼 */
+.admlogin{max-width:390px;margin:56px auto 40px;text-align:center}
+.admlogin .phav{width:60px;height:60px;border-radius:17px;margin:0 auto 16px;background:var(--acc-soft);border:1px solid var(--acc-line);display:grid;place-items:center;color:var(--acc-ink)}
+.admlogin .phav svg{width:29px;height:29px}
+.admlogin h2{font-family:var(--fh);font-weight:800;font-size:23px;color:var(--ink);margin:0 0 8px}
+.admlsub{font-size:13.5px;color:var(--dim);margin:0 0 4px}
+.admlf{display:flex;flex-direction:column;gap:8px;margin-top:20px;text-align:left}
+.admlf label{font-size:12px;color:var(--dim);font-weight:600;margin-top:6px}
+.admlf input{background:var(--well);border:1px solid var(--line2);border-radius:9px;color:var(--ink);font-family:var(--fd);font-size:15px;padding:11px 14px;outline:none}
+.admlf input:focus{border-color:var(--acc-line)}
+.admlbtn{margin-top:12px;background:var(--acc);color:#fff;font-family:var(--fd);font-weight:700;font-size:15px;padding:12px;border-radius:9px;border:1px solid var(--acc);cursor:pointer}
+.admlbtn:hover{background:#6E7989}.admlbtn:disabled{opacity:.6;cursor:default}
+.admlerr{color:var(--loss);font-size:13px;min-height:18px;margin-top:8px;text-align:center}
+.admlerr.ok{color:var(--acc-ink)}
+/* 콘솔 */
+.admhero{padding:40px 0 8px}
+.admey{font-family:var(--fm);font-size:11px;letter-spacing:.3em;color:var(--acc-ink);margin-bottom:12px}
+.admtitle{font-family:var(--fh);font-weight:800;font-size:clamp(28px,4vw,38px);letter-spacing:-.02em;margin:0;line-height:1.1}
+.admsub{color:var(--dim);font-size:14px;margin-top:10px}.admsub b{color:var(--ink2);font-family:var(--fm)}
+.admbar{position:sticky;top:62px;z-index:20;display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:var(--r2);padding:11px 14px;margin:24px 0 14px;box-shadow:0 8px 24px rgba(0,0,0,.35)}
+.admq{flex:1 1 200px;min-width:0;background:var(--well);border:1px solid var(--line2);border-radius:9px;color:var(--ink);font-family:var(--fd);font-size:14px;padding:9px 13px;outline:none}
+.admq:focus{border-color:var(--acc-line)}
+.admq::placeholder{color:var(--faint)}
+.admcnt{font-family:var(--fm);font-size:12px;color:var(--dim);white-space:nowrap}
+.admsel{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--ink2);cursor:pointer;user-select:none;white-space:nowrap}
+.admbtn{font-family:var(--fd);font-weight:700;font-size:13px;border-radius:9px;padding:9px 15px;cursor:pointer;border:1px solid var(--line2);background:var(--well);color:var(--ink2);white-space:nowrap}
+.admbtn:hover{border-color:var(--acc-line)}
+.admbtn.danger{color:var(--loss);border-color:rgba(255,106,92,.34);background:rgba(255,106,92,.07)}
+.admbtn.danger:hover{background:rgba(255,106,92,.15)}
+.admbtn:disabled{opacity:.45;cursor:default}
+.admst{font-size:12.5px;color:var(--dim);min-height:18px;margin:0 2px 10px;font-family:var(--fm)}
+.admst.err{color:var(--loss)}.admst.ok{color:var(--acc-ink)}
+.admlist{display:flex;flex-direction:column;gap:9px}
+.admrow{display:flex;align-items:center;gap:14px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r2);padding:10px 14px;transition:border-color .15s}
+.admrow:hover{border-color:var(--line2)}
+.admrow.sel{border-color:var(--acc-line);background:linear-gradient(0deg,var(--acc-soft),var(--acc-soft)),var(--surface)}
+.admck{width:17px;height:17px;accent-color:var(--acc);flex:0 0 auto;cursor:pointer}
+.admth{flex:0 0 auto;width:86px;height:48px;border-radius:9px;background:linear-gradient(135deg,#1a2740,#0c0f15);background-size:cover;background-position:center;border:1px solid var(--line2)}
+.admmain{flex:1 1 auto;min-width:0}
+.admmap{font-family:var(--fh);font-weight:700;font-size:14.5px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.admmap .mu{font-family:var(--fm);font-weight:600;font-size:11px;color:var(--acc-ink);background:var(--acc-soft);border:1px solid var(--acc-line);border-radius:6px;padding:1px 7px;margin-left:8px;vertical-align:1px}
+.admby{font-size:12px;color:var(--dim);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.admby b{color:var(--ink2);font-weight:600}
+.admmeta{flex:0 0 auto;text-align:right;font-family:var(--fm);font-size:11.5px;color:var(--faint);line-height:1.7;white-space:nowrap}
+.admacts{flex:0 0 auto;display:flex;gap:7px}
+.admgo{font-size:12px;font-weight:600;color:var(--ink2);border:1px solid var(--line2);border-radius:9px;padding:7px 12px;background:var(--well);text-decoration:none}
+.admgo:hover{border-color:var(--acc-line)}
+.admdel{font-size:12px;font-weight:700;color:var(--loss);border:1px solid rgba(255,106,92,.32);border-radius:9px;padding:7px 12px;background:rgba(255,106,92,.07);cursor:pointer}
+.admdel:hover{background:rgba(255,106,92,.15)}.admdel:disabled{opacity:.5;cursor:default}
+.admempty{text-align:center;padding:56px 20px;color:var(--dim);background:var(--surface);border:1px dashed var(--line2);border-radius:var(--r2)}
+@media(max-width:720px){
+  .admbar{top:56px}
+  .admrow{flex-wrap:wrap;gap:10px}
+  .admth{width:72px;height:40px}
+  .admmain{flex:1 1 120px}
+  .admmeta{display:none}
+  .admacts{margin-left:auto}
 }
-*{margin:0;padding:0;box-sizing:border-box}
-body{background:var(--bg);color:var(--ink);font-family:var(--fd);font-size:14.5px;line-height:1.6;word-break:keep-all;-webkit-font-smoothing:antialiased}
-a{color:inherit;text-decoration:none}
-header{display:flex;align-items:center;justify-content:space-between;padding:16px 26px;border-bottom:1px solid var(--line)}
-.brand{font-family:var(--fg);font-weight:600;font-size:19px;letter-spacing:.15em;color:var(--gold)}
-.brand span{color:var(--ink2);letter-spacing:.24em;font-size:12px;margin-left:10px}
-.hbtn{font-size:12.5px;color:var(--dim);border:1px solid var(--line2);padding:6px 12px;border-radius:8px;background:none;cursor:pointer;font-family:var(--fd)}
-.hbtn:hover{color:var(--ink);border-color:var(--gold-line)}
-main{max-width:1060px;margin:0 auto;padding:26px 22px 90px}
-
-/* ── 토큰 게이트 ── */
-#gate{max-width:400px;margin:12vh auto 0;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:30px 28px}
-#gate h1{font-family:var(--fg);font-size:18px;color:var(--gold-ink);margin-bottom:6px}
-#gate p{color:var(--dim);font-size:13px;margin-bottom:18px}
-#gate input{width:100%;background:var(--well);border:1px solid var(--line2);border-radius:9px;color:var(--ink);font-family:var(--fm);font-size:13.5px;padding:11px 13px;outline:0}
-#gate input:focus{border-color:var(--gold-line)}
-#gate button{width:100%;margin-top:12px;background:var(--gold-soft);border:1px solid var(--gold-line);color:var(--gold-ink);font-family:var(--fd);font-weight:600;font-size:14px;padding:11px;border-radius:9px;cursor:pointer}
-#gate .err{color:var(--red);font-size:12.5px;margin-top:10px;display:none}
-
-/* ── 대시보드 카드 ── */
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:30px}
-.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
-.card .k{font-size:11.5px;color:var(--faint);letter-spacing:.08em;text-transform:uppercase;font-family:var(--fg)}
-.card .v{font-family:var(--fm);font-size:24px;color:var(--gold-ink);margin-top:5px;font-variant-numeric:tabular-nums}
-.card .s{font-size:11.5px;color:var(--dim);margin-top:2px}
-
-/* ── 섹션 ── */
-section{margin-bottom:38px}
-h2{font-family:var(--fg);font-size:15px;letter-spacing:.06em;color:var(--ink2);margin-bottom:12px;display:flex;align-items:center;gap:10px}
-h2 .cnt{font-family:var(--fm);font-size:12px;color:var(--faint)}
-.bar{display:flex;gap:9px;margin-bottom:12px;flex-wrap:wrap}
-.bar input{flex:1;min-width:200px;background:var(--well);border:1px solid var(--line2);border-radius:9px;color:var(--ink);font-size:13.5px;padding:9px 13px;outline:0;font-family:var(--fd)}
-.bar input:focus{border-color:var(--gold-line)}
-.btn{background:var(--surface2);border:1px solid var(--line2);color:var(--ink2);font-family:var(--fd);font-weight:600;font-size:13px;padding:9px 15px;border-radius:9px;cursor:pointer;transition:.13s}
-.btn:hover{color:var(--ink);border-color:var(--gold-line)}
-.btn.gold{background:var(--gold-soft);border-color:var(--gold-line);color:var(--gold-ink)}
-.btn.danger:hover{color:var(--red);border-color:var(--red-line)}
-.btn:disabled{opacity:.45;cursor:default}
-
-table{width:100%;border-collapse:collapse;background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden;display:block;overflow-x:auto}
-thead th{font-family:var(--fg);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);text-align:left;padding:11px 13px;border-bottom:1px solid var(--line);white-space:nowrap}
-tbody td{padding:10px 13px;border-bottom:1px solid var(--line);font-size:13px;color:var(--ink2);white-space:nowrap;vertical-align:middle}
-tbody tr:last-child td{border-bottom:0}
-tbody tr:hover td{background:var(--hover)}
-td.mono{font-family:var(--fm);font-size:12px;color:var(--dim)}
-.tag{display:inline-block;font-size:11px;padding:2px 8px;border-radius:6px;border:1px solid var(--line2);color:var(--dim)}
-.tag.own{border-color:var(--gold-line);color:var(--gold-ink);background:var(--gold-soft)}
-td.upl{white-space:normal;max-width:380px}
-td.upl .tag{margin:2px 4px 2px 0}
-.povn{font-family:var(--fm);font-size:11px;color:var(--gold-ink);margin-left:4px}
-tr.sub td{background:var(--well);border-bottom:1px solid var(--line);font-size:12.5px}
-tr.sub:hover td{background:var(--well)}
-td.act{white-space:nowrap}
-.rowbtn{font-size:12px;padding:4px 10px;border-radius:7px;border:1px solid var(--line2);background:none;color:var(--dim);cursor:pointer;font-family:var(--fd)}
-.rowbtn:hover{color:var(--ink);border-color:var(--gold-line)}
-.rowbtn.del:hover{color:var(--red);border-color:var(--red-line)}
-.note{font-size:12.5px;color:var(--dim);margin-top:10px}
-.note b{color:var(--gold-ink);font-family:var(--fm);font-weight:500}
-#toast{position:fixed;left:50%;bottom:30px;transform:translateX(-50%);background:#131922;border:1px solid var(--gold-line);color:var(--ink);padding:10px 17px;border-radius:9px;font-size:12.5px;opacity:0;transition:.22s;pointer-events:none}
-#toast.on{opacity:1}
-.spin{display:inline-block;width:12px;height:12px;border:2px solid var(--line2);border-top-color:var(--gold);border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px}
-@keyframes sp{to{transform:rotate(360deg)}}
-@media(prefers-reduced-motion:reduce){.spin{animation:none}}
+</style><style id="enc-hdr-v2">
+/* ENCORE 좌상단 고정 + 서브메뉴 = 우측 드롭다운 카드 (모바일 개선) */
+@media(max-width:760px){
+  .bar-in>.brand{order:-1}                 /* 브랜드를 최좌측으로 */
+  .bar-in>.eauth-login,.bar-in>.eauth-acct{order:1}
+  .bar-in>.navtog{order:2;margin-left:6px} /* 햄버거를 우측 끝으로 */
+  /* 전폭 상단 드롭다운 → 우측 앵커 카드 */
+  #mnav.mnav{left:auto;right:8px;width:min(258px,80vw);border:1px solid var(--line,#23262d);border-radius:13px;margin-top:8px;padding:7px;overflow:hidden;box-shadow:0 20px 46px rgba(0,0,0,.55);background:var(--surface,#16181d)}
+  #mnav.mnav a{border-radius:9px}
+}
 </style>
-</head>
-<body>
-<header>
-  <div class="brand">myPENTA<span>운영 콘솔</span></div>
-  <div style="display:flex;gap:9px;align-items:center">
-    <a class="hbtn" id="gohome" href="index.html" style="display:none">← 아카이브로</a>
-    <button class="hbtn" id="logout" style="display:none">로그아웃</button>
-  </div>
-</header>
-
-<main>
-  <!-- 토큰 게이트 -->
-  <div id="gate">
-    <h1>운영자 로그인</h1>
-    <p>Netlify 환경변수 <code style="font-family:var(--fm)">ADMIN_ID / ADMIN_PW</code> 로 로그인합니다. 세션은 12시간 뒤 만료됩니다.</p>
-    <input id="aid" type="text" placeholder="아이디" autocomplete="username" style="margin-bottom:9px">
-    <input id="apw" type="password" placeholder="비밀번호" autocomplete="current-password">
-    <button id="enter">로그인</button>
-    <div class="err" id="gerr">아이디 또는 비밀번호가 올바르지 않습니다.</div>
-  </div>
-
-  <!-- 본체 -->
-  <div id="app" style="display:none">
-    <div class="cards" id="cards"></div>
-
-    <section>
-      <h2>매치 관리 <span class="cnt" id="mcnt"></span></h2>
-      <div class="bar">
-        <input id="q" placeholder="업로더 이름 또는 matchId 검색 — 신고 처리용">
-        <button class="btn" id="search">검색</button>
-        <button class="btn" id="more">더 보기</button>
-      </div>
-      <table>
-        <thead><tr><th>업로드</th><th>업로더 (POV)</th><th>제목</th><th>길이</th><th>크기</th><th></th></tr></thead>
-        <tbody id="mrows"></tbody>
-      </table>
-      <div class="note">삭제는 DB 행과 스토리지 파일(영상+썸네일)을 함께 제거합니다. 되돌릴 수 없습니다.</div>
-    </section>
-
-    <section>
-      <h2>고아 파일 <span class="cnt" id="ocnt"></span></h2>
-      <div class="bar">
-        <button class="btn gold" id="scan">스캔 시작</button>
-        <button class="btn danger" id="clean" disabled>고아 파일 전체 정리</button>
-      </div>
-      <div class="note" id="osum">매치가 참조하지 않는 스토리지 파일(과거 삭제 잔여물)을 찾습니다. 스캔은 파일 수에 따라 수십 초 걸릴 수 있습니다.</div>
-      <table style="margin-top:12px;display:none" id="otab">
-        <thead><tr><th>경로</th><th>크기</th><th>생성</th></tr></thead>
-        <tbody id="orows"></tbody>
-      </table>
-    </section>
-  </div>
-</main>
-<div id="toast"></div>
-
+</head><body><div class="bar"><div class="bar-in"><button class="navtog" aria-label="메뉴" onclick="var m=document.getElementById('mnav');if(m)m.classList.toggle('open')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button><nav class="mnav" id="mnav"><a href="index.html">아카이브</a><a href="stats.html">랭킹</a><a href="board.html">자유게시판</a><a href="about.html">만든이</a><a href="manual.html">매뉴얼</a><a href="download.html">다운로드</a></nav><a class="brand" href="index.html"><svg class="lgmk" viewBox="0 0 32 32" fill="currentColor"><path d="M16.00 16.40 L16.00 3.80 L19.12 12.11 Z" fill="#F2F6FB"/>
+  <path d="M16.00 16.40 L19.12 12.11 L27.98 12.51 Z" fill="#9AA5B6"/>
+  <path d="M16.00 16.40 L27.98 12.51 L21.04 18.04 Z" fill="#6E7889"/>
+  <path d="M16.00 16.40 L21.04 18.04 L23.41 26.59 Z" fill="#4A5364"/>
+  <path d="M16.00 16.40 L23.41 26.59 L16.00 21.70 Z" fill="#4A5364"/>
+  <path d="M16.00 16.40 L16.00 21.70 L8.59 26.59 Z" fill="#6E7889"/>
+  <path d="M16.00 16.40 L8.59 26.59 L10.96 18.04 Z" fill="#9AA5B6"/>
+  <path d="M16.00 16.40 L10.96 18.04 L4.02 12.51 Z" fill="#F2F6FB"/>
+  <path d="M16.00 16.40 L4.02 12.51 L12.88 12.11 Z" fill="#F2F6FB"/>
+  <path d="M16.00 16.40 L12.88 12.11 L16.00 3.80 Z" fill="#F2F6FB"/>
+  <path d="M16.00 3.80 L19.12 12.11 L27.98 12.51 L21.04 18.04 L23.41 26.59 L16.00 21.70 L8.59 26.59 L10.96 18.04 L4.02 12.51 L12.88 12.11 Z" fill="none" stroke="#3A4354" stroke-width=".55" stroke-linejoin="round" opacity=".85"/></svg><b>ENCORE</b></a><nav class="nav"><a href="index.html">아카이브</a><a href="stats.html">랭킹</a><a href="board.html">자유게시판</a><a href="about.html">만든이</a><a href="manual.html">매뉴얼</a><a href="download.html">다운로드</a></nav><span class="sp"></span></div></div><div class="wrap"><main id="view" data-page="admin"><div id="admRoot" style="padding:0 0 64px"><div class="meload">불러오는 중…</div></div></main><footer class="ftr"><div class="ftr-l"><div class="ftr-brand"><svg class="lgmk" viewBox="0 0 32 32" fill="currentColor"><path d="M16.00 16.40 L16.00 3.80 L19.12 12.11 Z" fill="#F2F6FB"/>
+  <path d="M16.00 16.40 L19.12 12.11 L27.98 12.51 Z" fill="#9AA5B6"/>
+  <path d="M16.00 16.40 L27.98 12.51 L21.04 18.04 Z" fill="#6E7889"/>
+  <path d="M16.00 16.40 L21.04 18.04 L23.41 26.59 Z" fill="#4A5364"/>
+  <path d="M16.00 16.40 L23.41 26.59 L16.00 21.70 Z" fill="#4A5364"/>
+  <path d="M16.00 16.40 L16.00 21.70 L8.59 26.59 Z" fill="#6E7889"/>
+  <path d="M16.00 16.40 L8.59 26.59 L10.96 18.04 Z" fill="#9AA5B6"/>
+  <path d="M16.00 16.40 L10.96 18.04 L4.02 12.51 Z" fill="#F2F6FB"/>
+  <path d="M16.00 16.40 L4.02 12.51 L12.88 12.11 Z" fill="#F2F6FB"/>
+  <path d="M16.00 16.40 L12.88 12.11 L16.00 3.80 Z" fill="#F2F6FB"/>
+  <path d="M16.00 3.80 L19.12 12.11 L27.98 12.51 L21.04 18.04 L23.41 26.59 L16.00 21.70 L8.59 26.59 L10.96 18.04 L4.02 12.51 L12.88 12.11 Z" fill="none" stroke="#3A4354" stroke-width=".55" stroke-linejoin="round" opacity=".85"/></svg><b>ENCORE</b></div><p>스무 살의 우리에게 — 다시, 브루드워.</p><p class="ftr-by">만든이 <b>최성호</b> · <span class="hdl">veatbox</span></p></div><div class="ftr-legal"><nav class="ftr-legal-links"><a href="terms.html">이용약관</a><a href="privacy.html">개인정보처리방침</a></nav><p class="ftr-disc">ENCORE는 Blizzard Entertainment, Inc.가 제작·승인하거나 보증하지 않은 팬 제작 서비스입니다. StarCraft® 및 StarCraft®: Remastered는 미국 및 기타 국가에서 Blizzard Entertainment, Inc.의 상표 또는 등록상표입니다.</p></div></footer></div><script src="encore-common.js"></script>
+<script src="encore-auth.js"></script>
 <script>
 (function(){
-  'use strict';
-  var TKEY='penta_admin_session';
-  var $=function(id){return document.getElementById(id);};
-  var esc=function(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});};
-  var fmtB=function(b){b=+b||0;if(b>=1073741824)return (b/1073741824).toFixed(2)+' GB';if(b>=1048576)return Math.round(b/1048576)+' MB';return Math.round(b/1024)+' KB';};
-  var fmtT=function(s){if(!s)return '—';var d=new Date(s);if(isNaN(d))return String(s).slice(0,16);var p=function(n){return (n<10?'0':'')+n;};return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes());};
-  var _tt=null;
-  function toast(m){var t=$('toast');t.textContent=m;t.classList.add('on');clearTimeout(_tt);_tt=setTimeout(function(){t.classList.remove('on');},2600);}
+  var R = document.getElementById('admRoot');
+  var ALL = [];
+  var SEL = {};
+  var Q = '';
+  var TOKEN = null;
+  var AKEY = 'encore_admin';   // 관리자 전용 세션 — 레코더(encore_session)와 분리
 
-  function token(){
-    try{
-      var v=localStorage.getItem(TKEY)||'';
-      var exp=parseInt(v.split('.')[0],10);
-      if(!v||!isFinite(exp)||Date.now()>exp){ if(v)localStorage.removeItem(TKEY); return ''; }
-      return v;
-    }catch(_){return '';}
-  }
-  function setToken(v){ try{ if(v)localStorage.setItem(TKEY,v); else localStorage.removeItem(TKEY); }catch(_){} }
+  function aget(){ try{ return JSON.parse(localStorage.getItem(AKEY)||'null'); }catch(e){ return null; } }
+  function aset(v){ try{ if(v) localStorage.setItem(AKEY, JSON.stringify(v)); else localStorage.removeItem(AKEY); }catch(e){} }
 
-  async function api(action, payload){
-    var r=await fetch('/api/admin',{method:'POST',
-      headers:{'Content-Type':'application/json','X-Admin-Token':token()},
-      body:JSON.stringify(Object.assign({action:action},payload||{}))});
-    if(r.status===401){ setToken(''); show(false); throw new Error('토큰이 올바르지 않습니다'); }
-    var j=await r.json().catch(function(){return {};});
-    if(!r.ok) throw new Error(j.error||('HTTP '+r.status));
-    return j;
-  }
+  function shield(){ return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.6-3 8.4-7 10-4-1.6-7-5.4-7-10V6l7-3z"/><path d="M9.4 12.2l1.9 1.9 3.4-3.8"/></svg>'; }
 
-  function show(inApp){
-    $('gate').style.display=inApp?'none':'block';
-    $('app').style.display=inApp?'block':'none';
-    $('logout').style.display=inApp?'inline-block':'none';
-    $('gohome').style.display=inApp?'inline-block':'none';
-  }
-
-  // ── 대시보드 ──
-  async function loadStats(){
-    var s=await api('stats');
-    var cards=[
-      ['총 매치', s.matches, ''],
-      ['영상 용량', fmtB(s.videoBytes), s.videoRows+'개 행 합산'],
-      ['최근 7일 업로드', s.uploads7d, ''],
-      ['유저(identities)', s.identities, ''],
-      ['활성 세션', s.sessions, '']
-    ];
-    $('cards').innerHTML=cards.map(function(c){
-      return '<div class="card"><div class="k">'+esc(c[0])+'</div><div class="v">'+esc(c[1])+'</div>'+(c[2]?'<div class="s">'+esc(c[2])+'</div>':'')+'</div>';
-    }).join('');
-  }
-
-  // ── 매치 관리 (match_id 그룹 = 같은 게임의 멀티 POV) ──
-  var curQ='', curCursor=null, GROUPS={};
-  function povChip(pv){
-    var cls=pv.owner?'tag own':'tag';
-    return '<span class="'+cls+'" title="'+(pv.owner?'소유자 업로드':'익명 업로드')+'">'+esc(pv.uploader||'—')+' · '+fmtB(pv.bytes)+'</span>';
-  }
-  function groupHtml(g){
-    var chips=g.povs.map(povChip).join(' ');
-    var multi=g.povs.length>1;
-    var first=g.povs[0]||{};
-    return '<tr class="grp" data-mid="'+esc(g.match_id)+'">'
-      +'<td class="mono">'+esc(fmtT(g.uploaded))+'</td>'
-      +'<td class="upl">'+chips+(multi?' <span class="povn">'+g.povs.length+'명</span>':'')+'</td>'
-      +'<td>'+esc(g.title||'')+'</td>'
-      +'<td class="mono">'+esc(g.length||'')+'</td>'
-      +'<td class="mono">'+fmtB(g.totalBytes)+'</td>'
-      +'<td class="act">'
-        +'<a class="rowbtn" target="_blank" href="match.html?id='+encodeURIComponent(g.match_id)+(first.id?'&pov='+encodeURIComponent(first.id):'')+'">보기</a> '
-        +(multi?'<button class="rowbtn" data-expand="'+esc(g.match_id)+'">시점별</button> ':'')
-        +'<button class="rowbtn del" data-delmid="'+esc(g.match_id)+'" data-n="'+g.povs.length+'">'+(multi?'전체삭제':'삭제')+'</button>'
-      +'</td></tr>';
-  }
-  async function loadMatches(append){
-    var p={limit:60};
-    if(curQ)p.q=curQ;
-    if(append&&curCursor)p.before=curCursor;
-    var j=await api('matches',p);
-    var groups=j.groups||[];
-    curCursor=j.cursor;
-    groups.forEach(function(g){GROUPS[g.match_id]=g;});
-    var html=groups.map(groupHtml).join('');
-    if(append)$('mrows').insertAdjacentHTML('beforeend',html); else { GROUPS={}; groups.forEach(function(g){GROUPS[g.match_id]=g;}); $('mrows').innerHTML=html||'<tr><td colspan="6" style="color:var(--faint)">결과 없음</td></tr>'; }
-    $('mcnt').textContent=$('mrows').querySelectorAll('tr.grp').length+'게임 표시';
-    $('more').disabled=!j.hasMore;
-  }
-  $('search').addEventListener('click',function(){curQ=$('q').value.trim();curCursor=null;loadMatches(false).catch(function(e){toast(String(e.message||e));});});
-  $('q').addEventListener('keydown',function(e){if(e.key==='Enter')$('search').click();});
-  $('more').addEventListener('click',function(){loadMatches(true).catch(function(e){toast(String(e.message||e));});});
-
-  function sel(v){return (window.CSS&&CSS.escape?CSS.escape(v):v);}
-  $('mrows').addEventListener('click',async function(e){
-    var t=e.target;
-    // 시점별 펼치기
-    var ex=t.closest?t.closest('button[data-expand]'):null;
-    if(ex){
-      var mid=ex.getAttribute('data-expand'), g=GROUPS[mid];
-      var exist=$('mrows').querySelector('tr.sub[data-for="'+sel(mid)+'"]');
-      if(exist){ // 토글로 접기
-        var all=$('mrows').querySelectorAll('tr.sub[data-for="'+sel(mid)+'"]'); all.forEach(function(n){n.remove();}); ex.textContent='시점별'; return;
-      }
-      ex.textContent='접기';
-      var host=ex.closest('tr'); var frag='';
-      (g.povs||[]).forEach(function(pv){
-        frag+='<tr class="sub" data-for="'+esc(mid)+'"><td></td>'
-          +'<td class="upl">'+povChip(pv)+'</td>'
-          +'<td colspan="2" class="mono" style="color:var(--faint)">'+esc(pv.id)+'</td>'
-          +'<td class="mono">'+fmtB(pv.bytes)+'</td>'
-          +'<td class="act"><a class="rowbtn" target="_blank" href="match.html?id='+encodeURIComponent(mid)+'&pov='+encodeURIComponent(pv.id)+'">보기</a> '
-          +'<button class="rowbtn del" data-delid="'+esc(pv.id)+'" data-name="'+esc(pv.uploader||'')+'">이 시점 삭제</button></td></tr>';
+  /* ── 로그인 폼 ── */
+  function renderLogin(msg, cls){
+    R.innerHTML =
+      '<div class="admlogin"><div class="phav">'+shield()+'</div>'
+      + '<h2>관리자 로그인</h2>'
+      + '<p class="admlsub">ENCORE 관리자 아이디와 비밀번호를 입력하세요.</p>'
+      + '<div class="admlf">'
+      +   '<label for="adu">아이디</label>'
+      +   '<input id="adu" type="text" autocomplete="username" autocapitalize="off" spellcheck="false">'
+      +   '<label for="adp">비밀번호</label>'
+      +   '<input id="adp" type="password" autocomplete="current-password">'
+      +   '<button id="adlbtn" class="admlbtn" type="button">로그인</button>'
+      +   '<div class="admlerr'+(cls?' '+cls:'')+'" id="adlerr">'+(msg||'')+'</div>'
+      + '</div></div>';
+    var u=document.getElementById('adu'), p=document.getElementById('adp'), b=document.getElementById('adlbtn'), e=document.getElementById('adlerr');
+    function submit(){
+      var uu=(u.value||'').trim(), pp=p.value||'';
+      if(!uu||!pp){ e.className='admlerr'; e.textContent='아이디와 비밀번호를 입력하세요.'; return; }
+      b.disabled=true; b.textContent='확인 중…'; e.className='admlerr'; e.textContent='';
+      EAuth.sbRpc('admin_login', {p_user:uu, p_pw:pp}).then(function(r){
+        if(r && r.token){
+          aset({token:r.token, username:r.username}); TOKEN=r.token;
+          renderShell({name:r.username}); loadMatches();
+        }else{
+          b.disabled=false; b.textContent='로그인';
+          e.className='admlerr'; e.textContent='아이디 또는 비밀번호가 올바르지 않습니다.';
+          p.value=''; p.focus();
+        }
+      }).catch(function(){
+        b.disabled=false; b.textContent='로그인';
+        e.className='admlerr'; e.textContent='로그인 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.';
       });
-      host.insertAdjacentHTML('afterend',frag);
-      return;
     }
-    // 게임 전체 삭제
-    var bm=t.closest?t.closest('button[data-delmid]'):null;
-    if(bm){
-      var mid2=bm.getAttribute('data-delmid'), n=bm.getAttribute('data-n');
-      if(!confirm('이 게임의 모든 시점('+n+'개)을 삭제할까요?\n영상·썸네일 파일까지 함께 지워지며 되돌릴 수 없습니다.'))return;
-      bm.disabled=true;bm.textContent='삭제 중';
-      try{
-        var j=await api('delete-match',{matchId:mid2});
-        $('mrows').querySelectorAll('tr[data-mid="'+sel(mid2)+'"],tr.sub[data-for="'+sel(mid2)+'"]').forEach(function(nd){nd.remove();});
-        delete GROUPS[mid2];
-        toast('삭제 완료 ('+((j.removedRows||0))+'개 행, 파일 '+((j.removedFiles||[]).length)+'개)');
-        loadStats().catch(function(){});
-        $('mcnt').textContent=$('mrows').querySelectorAll('tr.grp').length+'게임 표시';
-      }catch(err){ toast('삭제 실패: '+String(err.message||err)); bm.disabled=false;bm.textContent='전체삭제'; }
-      return;
-    }
-    // 단일 시점 삭제
-    var bi=t.closest?t.closest('button[data-delid]'):null;
-    if(bi){
-      var id=bi.getAttribute('data-delid');
-      if(!confirm('이 시점 1개만 삭제할까요?\n업로더: '+(bi.getAttribute('data-name')||'—')+'\n되돌릴 수 없습니다.'))return;
-      bi.disabled=true;bi.textContent='삭제 중';
-      try{
-        var j2=await api('delete-match',{id:id});
-        bi.closest('tr').remove();
-        toast('시점 삭제 완료 (파일 '+((j2.removedFiles||[]).length)+'개)');
-        loadStats().catch(function(){});
-      }catch(err){ toast('삭제 실패: '+String(err.message||err)); bi.disabled=false;bi.textContent='이 시점 삭제'; }
-      return;
-    }
-  });
-
-  // ── 고아 파일 ──
-  var orphans=[];
-  $('scan').addEventListener('click',async function(){
-    var b=$('scan');b.disabled=true;b.innerHTML='<span class="spin"></span> 스캔 중';
-    try{
-      var j=await api('orphan-scan');
-      orphans=j.orphans||[];
-      $('ocnt').textContent=orphans.length+'개 / '+fmtB(j.totalBytes);
-      $('osum').innerHTML='스토리지 <b>'+esc(j.scanned)+'</b>개 파일 중 고아 <b>'+esc(orphans.length)+'</b>개, 총 <b>'+esc(fmtB(j.totalBytes))+'</b> 낭비 중.'+(orphans.length?' 아래 목록을 확인하고 정리하세요.':' 깨끗합니다!');
-      $('otab').style.display=orphans.length?'block':'none';
-      $('orows').innerHTML=orphans.slice(0,300).map(function(o){
-        return '<tr><td class="mono">'+esc(o.path)+'</td><td class="mono">'+fmtB(o.size)+'</td><td class="mono">'+esc(fmtT(o.created))+'</td></tr>';
-      }).join('')+(orphans.length>300?'<tr><td colspan="3" style="color:var(--faint)">…외 '+(orphans.length-300)+'개</td></tr>':'');
-      $('clean').disabled=!orphans.length;
-    }catch(err){ toast('스캔 실패: '+String(err.message||err)); }
-    b.disabled=false;b.textContent='스캔 시작';
-  });
-  $('clean').addEventListener('click',async function(){
-    if(!orphans.length)return;
-    if(!confirm('고아 파일 '+orphans.length+'개를 전부 삭제할까요? 매치가 참조하는 파일은 서버에서 한 번 더 걸러 안전하게 건너뜁니다.'))return;
-    var b=$('clean');b.disabled=true;
-    var total=0,skipped=0;
-    try{
-      for(var i=0;i<orphans.length;i+=200){
-        b.textContent='정리 중 '+Math.min(i+200,orphans.length)+'/'+orphans.length;
-        var j=await api('orphan-clean',{paths:orphans.slice(i,i+200).map(function(o){return o.path;})});
-        total+=(j.removed||0);skipped+=(j.skipped||0);
-      }
-      toast('정리 완료: '+total+'개 삭제'+(skipped?', '+skipped+'개 보호됨':''));
-      orphans=[];$('otab').style.display='none';$('ocnt').textContent='';$('osum').textContent='정리 완료. 다시 스캔해 확인할 수 있습니다.';
-    }catch(err){ toast('정리 실패: '+String(err.message||err)); }
-    b.textContent='고아 파일 전체 정리';b.disabled=true;
-  });
-
-  // ── 진입 ──
-  async function boot(){
-    show(true);
-    try{ await loadStats(); await loadMatches(false); }
-    catch(e){ toast(String(e.message||e)); }
+    b.addEventListener('click', submit);
+    u.addEventListener('keydown', function(ev){ if(ev.key==='Enter'){ ev.preventDefault(); p.focus(); } });
+    p.addEventListener('keydown', function(ev){ if(ev.key==='Enter'){ ev.preventDefault(); submit(); } });
+    setTimeout(function(){ u.focus(); }, 30);
   }
-  $('enter').addEventListener('click',async function(){
-    var id=$('aid').value.trim(), pw=$('apw').value;
-    if(!id||!pw)return;
-    var b=$('enter'); b.disabled=true; b.textContent='확인 중\u2026';
-    try{
-      var r=await fetch('/api/admin',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({action:'login',id:id,pw:pw})});
-      var j=await r.json().catch(function(){return {};});
-      if(!r.ok||!j.token) throw new Error(j.error||'login failed');
-      setToken(j.token); $('gerr').style.display='none'; $('apw').value='';
-      boot();
-    }catch(_){ $('gerr').style.display='block'; }
-    b.disabled=false; b.textContent='로그인';
-  });
-  $('apw').addEventListener('keydown',function(e){if(e.key==='Enter')$('enter').click();});
-  $('aid').addEventListener('keydown',function(e){if(e.key==='Enter')$('apw').focus();});
-  $('logout').addEventListener('click',function(){ setToken(''); show(false); $('apw').value=''; });
 
-  if(token()){ boot(); } else { show(false); }
+  async function doLogout(){
+    try{ await EAuth.sbRpc('admin_logout', {p_token:TOKEN}); }catch(e){}
+    aset(null); TOKEN=null; renderLogin('로그아웃되었습니다.', 'ok');
+  }
+
+  function playersOf(m){ var ps=m&&m.players; if(typeof ps==='string'){ try{ps=JSON.parse(ps);}catch(e){ps=[];} } return Array.isArray(ps)?ps:[]; }
+  function hay(m){
+    return [m.id, m.map, m.matchup, m.saver].concat(playersOf(m).map(function(p){return p&&p.name;}))
+      .filter(Boolean).join(' ').toLowerCase();
+  }
+  function filtered(){
+    if(!Q) return ALL;
+    var q = Q.toLowerCase();
+    return ALL.filter(function(m){ return hay(m).indexOf(q) >= 0; });
+  }
+  function selCount(){ var n=0; for(var k in SEL) if(SEL[k]) n++; return n; }
+  function setStatus(msg, cls){
+    var el = document.getElementById('admst'); if(!el) return;
+    el.textContent = msg || ''; el.className = 'admst' + (cls ? ' '+cls : '');
+  }
+
+  function rowHTML(m){
+    var on = !!SEL[m.id];
+    var th = m.thumb ? ' style="background-image:url(\''+esc(m.thumb)+'\')"' : '';
+    var np = m.np ? (m.np + '인') : '';
+    return '<div class="admrow'+(on?' sel':'')+'" data-id="'+esc(m.id)+'">'
+      + '<input type="checkbox" class="admck" data-ck="1"'+(on?' checked':'')+' aria-label="선택">'
+      + '<div class="admth"'+th+'></div>'
+      + '<div class="admmain"><div class="admmap">'+esc(m.map||'—')
+      +   (m.matchup?'<span class="mu">'+esc(m.matchup)+'</span>':'')+'</div>'
+      +   '<div class="admby"><b>'+esc(mapName(m.saver)||'—')+'</b> · '+esc(fdate(m.uploaded))
+      +   (np?' · '+np:'')+(m.length?' · '+esc(m.length):'')+'</div></div>'
+      + '<div class="admmeta">조회 '+(m.views||0)+'<br>추천 '+(m.likes||0)+'</div>'
+      + '<div class="admacts"><a class="admgo" href="match.html?id='+encodeURIComponent(m.id)+'" target="_blank" rel="noopener">보기</a>'
+      + '<button class="admdel" data-del="1" type="button">삭제</button></div></div>';
+  }
+  function renderList(){
+    var list = document.getElementById('admlist'); if(!list) return;
+    var rows = filtered();
+    list.innerHTML = rows.length
+      ? rows.map(rowHTML).join('')
+      : '<div class="admempty">'+(Q ? '검색 결과가 없어요.' : '등록된 경기가 없어요.')+'</div>';
+    var n = selCount();
+    var bulk = document.getElementById('admbulk');
+    if(bulk){ bulk.disabled = !n; bulk.textContent = n ? ('선택 삭제 ('+n+')') : '선택 삭제'; }
+    var cnt = document.getElementById('admcnt');
+    if(cnt) cnt.textContent = Q ? (rows.length+' / '+ALL.length) : String(ALL.length);
+    var all = document.getElementById('admall');
+    if(all){ all.checked = rows.length>0 && rows.every(function(m){return SEL[m.id];}); }
+  }
+
+  function renderShell(who){
+    R.innerHTML =
+      '<div class="admhero"><div class="admey">ADMIN CONSOLE</div>'
+      + '<h1 class="admtitle">관리자 콘솔</h1>'
+      + '<div class="admsub"><b>'+esc(who.name||who.username||'')+'</b> 계정으로 접속 중 · 삭제는 되돌릴 수 없어요. 영상·리플레이 파일은 레코더의 주기 청소가 회수합니다.</div></div>'
+      + '<div class="admbar">'
+      +   '<input id="admq" class="admq" type="search" placeholder="맵 · 매치업 · 플레이어 · 업로더 · ID 검색" autocomplete="off">'
+      +   '<span class="admcnt"><span id="admcnt">0</span>경기</span>'
+      +   '<label class="admsel"><input id="admall" type="checkbox" class="admck"> 전체선택</label>'
+      +   '<button id="admbulk" class="admbtn danger" type="button" disabled>선택 삭제</button>'
+      +   '<button id="admrefresh" class="admbtn" type="button">새로고침</button>'
+      +   '<button id="admlogout" class="admbtn" type="button">로그아웃</button>'
+      + '</div>'
+      + '<div id="admst" class="admst"></div>'
+      + '<div id="admlist" class="admlist"><div class="meload">경기 목록 불러오는 중…</div></div>';
+
+    document.getElementById('admq').addEventListener('input', function(){ Q = this.value.trim(); renderList(); });
+    document.getElementById('admall').addEventListener('change', function(){
+      var on = this.checked;
+      filtered().forEach(function(m){ if(on) SEL[m.id]=true; else delete SEL[m.id]; });
+      renderList();
+    });
+    document.getElementById('admbulk').addEventListener('click', function(){
+      var ids = Object.keys(SEL).filter(function(k){return SEL[k];});
+      if(ids.length) doDelete(ids);
+    });
+    document.getElementById('admrefresh').addEventListener('click', function(){ loadMatches(); });
+    document.getElementById('admlogout').addEventListener('click', function(){ doLogout(); });
+    document.getElementById('admlist').addEventListener('click', function(ev){
+      var row = ev.target.closest('.admrow'); if(!row) return;
+      var id = row.getAttribute('data-id');
+      if(ev.target.closest('[data-del]')){ doDelete([id]); return; }
+      if(ev.target.closest('[data-ck]')){
+        if(ev.target.checked) SEL[id]=true; else delete SEL[id];
+        renderList();
+      }
+    });
+  }
+
+  async function loadMatches(){
+    setStatus('');
+    var list = document.getElementById('admlist');
+    if(list) list.innerHTML = '<div class="meload">경기 목록 불러오는 중…</div>';
+    try{
+      var r = await fetch(SB+'/rest/v1/matches?select=id,map,matchup,length,uploaded,saver,thumb,views,likes,np,players&order=uploaded.desc&limit=1000', {headers:H});
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      ALL = await r.json();
+      SEL = {};
+      renderList();
+    }catch(e){
+      if(list) list.innerHTML = '<div class="admempty">목록을 불러오지 못했습니다. 네트워크 상태를 확인한 뒤 새로고침해 주세요.</div>';
+    }
+  }
+
+  async function doDelete(ids){
+    var label = ids.length===1 ? '이 경기 1건' : ids.length+'건';
+    if(!confirm(label+'을 영구 삭제합니다.\n댓글도 함께 삭제되며 되돌릴 수 없어요. 계속할까요?')) return;
+    var btns = document.querySelectorAll('.admdel,#admbulk');
+    btns.forEach(function(b){ b.disabled = true; });
+    setStatus('삭제 중…');
+    try{
+      var n = await EAuth.sbRpc('admin_delete_matches', { p_token: TOKEN, p_ids: ids });
+      var gone = {}; ids.forEach(function(i){ gone[i]=true; delete SEL[i]; });
+      ALL = ALL.filter(function(m){ return !gone[m.id]; });
+      renderList();
+      setStatus((typeof n==='number'?n:ids.length)+'건 삭제 완료', 'ok');
+    }catch(e){
+      setStatus('삭제 실패 — 관리자 세션이 만료되었을 수 있습니다. 로그아웃 후 다시 로그인해 주세요.', 'err');
+      renderList();
+    }
+  }
+
+  async function boot(){
+    var s = aget();
+    if(!s || !s.token){ renderLogin(''); return; }
+    TOKEN = s.token;
+    var who = null;
+    try{ who = await EAuth.sbRpc('admin_whoami', { p_token: TOKEN }); }catch(e){}
+    if(!who || !who.is_admin){
+      aset(null); TOKEN=null;
+      renderLogin('세션이 만료되었습니다. 다시 로그인해 주세요.');
+      return;
+    }
+    renderShell({name:who.username});
+    loadMatches();
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', boot); else boot();
 })();
 </script>
-</body>
-</html>
+</body></html>

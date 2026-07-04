@@ -1,0 +1,16 @@
+# ENCORE — Netlify 설정
+#  publish: 정적 웹(HTML)이 있는 폴더. encore-web 파일들이 레포 '루트'에 있으면 "." ,
+#           web/ 하위에 있으면 "web" 으로 바꾸세요.
+[build]
+  functions = "netlify/functions"
+  publish = "."
+
+[[redirects]]
+  from = "/api/storage"
+  to = "/.netlify/functions/storage"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin"
+  to = "/.netlify/functions/admin"
+  status = 200
