@@ -262,6 +262,7 @@ def load_or_make_config():
             "upload_compress": "auto",   # auto | off  (업로드 전 재인코딩 — 해상도 유지, 용량 30~60% 절감)
             "game_detect": "auto",   # auto | off  (WGC 화면 인식으로 게임 시작 감지 — 상태 표시용)
             "local_video_keep_days": "0",   # 0=계속 보관 | 7 | 14 | 30  (업로드 완료된 로컬 영상을 N일 뒤 자동 삭제 — 클라우드 보관본·리플레이(.rep)·썸네일은 유지)
+            "held_clip_keep_days": 2,   # 리플레이 매칭 안 된 clip_*.mp4 를 N일 뒤 자동 폐기 (0=폐기 안 함)
             "port": free_port(8000),
             "fps": FPS,
             "poll_seconds": 4,
@@ -1667,7 +1668,17 @@ def recover_orphan_clips(log_fn=None):
             d = abs(mt - tend)
             if bestd is None or d < bestd: best, bestd = rp, d
         if best is None or (lv and bestd is not None and bestd > 180):  # 시각이 3분 넘게 어긋나면 신뢰 불가 → 보류
-            lg(f"  · held (no matching replay): clip_{stamp}"); continue
+            # 2일(설정 가능) 넘게 held = 이 시각대에 리플레이가 존재하지 않는 게 확실 → 폐기(용량·로그 정리)
+            _keep_days = float(CFG.get("held_clip_keep_days", 2) or 2)
+            if _keep_days > 0 and (time.time() - tv) > _keep_days * 86400:
+                _rm = 0
+                for _f in glob.glob(os.path.join(REC_DIR, "clip_" + stamp + "*")):
+                    try: os.remove(_f); _rm += 1
+                    except OSError: pass
+                lg(f"  · discarded stale clip (>{int(_keep_days)}d, no replay): clip_{stamp}" + (f"  [{_rm} file]" if _rm else ""))
+            else:
+                lg(f"  · held (no matching replay): clip_{stamp}")
+            continue
         used.add(best)
         lg(f"  · recovered: clip_{stamp}  ←  {os.path.basename(best)}")
         try:
@@ -3492,11 +3503,13 @@ def main():
     cfg = load_or_make_config(); CFG = cfg; init_db()
     def _maint_loop():
         while True:
+            time.sleep(24*3600)               # 하루 한 번(상주 시) — 시작 직후 복구(recover_orphan_clips)와 충돌/중복등록 방지 위해 먼저 대기
             try: cleanup_storage_orphans()
             except Exception: pass
             try: cleanup_local_videos()
             except Exception: pass
-            time.sleep(24*3600)               # 하루 한 번(상주 시)
+            try: recover_orphan_clips()       # 남은 clip 복구 + 2일 초과 held 자동 폐기 (상주 PC도 매일 정리)
+            except Exception: pass
     threading.Thread(target=_maint_loop, daemon=True).start()
     try: _apply_autostart(cfg)
     except Exception: pass
