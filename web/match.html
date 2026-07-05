@@ -966,6 +966,7 @@ function _regTU(fn){_regE('timeupdate',fn);}
 let _svShow=null,_multiActive=false;
 function hideOverlay(){if(vid){vid.controls=false;vid.classList.remove('vblur');}if(vplay){vplay.style.opacity='0';vplay.style.pointerEvents='none';setTimeout(()=>{if(vplay)vplay.style.display='none';},420);}if(_svShow)_svShow();}
 /* ===== ENCORE 매치 인트로 (재생 전 5·4·3·2·1 + VS 카드) ===== */
+var _POV_PLAYERS=null;  // 실제 POV(시점) 올린 사람들 — 비동기 로드되면 채워짐
 var EINTRO_CSS=`
 .eintro{position:absolute;inset:0;z-index:60;overflow:hidden;display:grid;place-items:center;font-family:'IBM Plex Mono',ui-monospace,monospace;opacity:1;transition:opacity .5s ease;--eacc:#6FE3F2;--eaccGlow:rgba(111,227,242,.55);--eaccSoft:rgba(111,227,242,.22)}
 .eintro.gone{opacity:0;pointer-events:none}
@@ -976,19 +977,18 @@ var EINTRO_CSS=`
 .eintro .evig{position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 0 180px 36px rgba(0,0,0,.72)}
 @keyframes spinR{to{rotate:360deg}}
 .eintro .ehero{position:absolute;left:0;right:0;bottom:12%;z-index:6;text-align:center;padding:0 6vw;pointer-events:none}
-.eintro .eemblem{width:clamp(56px,10vmin,92px);height:clamp(56px,10vmin,92px);margin:0 auto 16px;position:relative;display:grid;place-items:center;animation:eEmb .8s cubic-bezier(.16,.9,.24,1) both}
-.eintro .eemblem::before{content:"";position:absolute;inset:0;border-radius:22%;background:var(--eaccSoft);border:2px solid var(--eacc);box-shadow:0 0 30px var(--eaccGlow),inset 0 0 20px var(--eaccSoft);transform:rotate(45deg)}
-.eintro .eemblem::after{content:"";position:absolute;inset:-11px;border-radius:26%;border:1px dashed var(--eaccGlow);opacity:.55;animation:spinR 12s linear infinite}
-.eintro .eeg{position:relative;z-index:1;font-family:'Pretendard Variable','Pretendard',sans-serif;font-weight:900;font-size:clamp(26px,5vmin,46px);color:#fff;text-shadow:0 0 18px var(--eacc)}
-@keyframes eEmb{0%{opacity:0;transform:scale(.3) rotate(-45deg);filter:blur(10px)}100%{opacity:1;transform:scale(1) rotate(0);filter:blur(0)}}
-.eintro .ehname{font-family:'Pretendard Variable','Pretendard',sans-serif;font-weight:900;font-size:clamp(34px,8.5vmin,88px);line-height:1.03;letter-spacing:-.01em;color:#fff;text-shadow:0 2px 30px rgba(0,0,0,.7),0 0 44px var(--eaccGlow);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;animation:eName .8s .12s cubic-bezier(.16,.9,.24,1) both}
-@keyframes eName{0%{opacity:0;transform:translateY(36px) scale(.95);filter:blur(12px)}100%{opacity:1;transform:translateY(0) scale(1);filter:blur(0)}}
-.eintro .ehname .eshine{background:linear-gradient(100deg,#fff 32%,var(--eacc) 50%,#fff 68%);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;background-size:250% 100%;animation:eShine 3.4s linear infinite}
+.eintro .eroster{display:flex;flex-direction:column;align-items:center;gap:clamp(6px,1.4vmin,14px)}
+.eintro .eplr{display:flex;align-items:center;gap:clamp(9px,1.6vmin,16px);animation:eName .8s cubic-bezier(.16,.9,.24,1) both}
+.eintro .eplr:nth-child(1){animation-delay:.10s}.eintro .eplr:nth-child(2){animation-delay:.20s}.eintro .eplr:nth-child(3){animation-delay:.30s}
+@keyframes eName{0%{opacity:0;transform:translateY(30px) scale(.95);filter:blur(10px)}100%{opacity:1;transform:translateY(0) scale(1);filter:blur(0)}}
+.eintro .ebadge{flex:none;display:grid;place-items:center;width:clamp(30px,5vmin,50px);height:clamp(30px,5vmin,50px);border-radius:26%;font-family:'Pretendard Variable','Pretendard',sans-serif;font-weight:900;font-size:clamp(15px,2.6vmin,26px);color:#fff;background:rgba(10,12,16,.5);border:2px solid var(--pc);box-shadow:0 0 16px var(--pc);text-shadow:0 0 10px var(--pc)}
+.eintro .epn{font-family:'Pretendard Variable','Pretendard',sans-serif;font-weight:900;font-size:clamp(24px,5.4vmin,54px);line-height:1.05;color:#fff;text-shadow:0 2px 24px rgba(0,0,0,.7),0 0 34px var(--eaccGlow);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:70vw}
+.eintro .epr{flex:none;font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:clamp(9px,1.4vmin,13px);letter-spacing:.3em;color:var(--eacc);opacity:.85}
+.eintro .ustar{color:var(--eacc);margin-right:.28em;text-shadow:0 0 12px var(--eacc)}
+.eintro .eplr.u .epn{font-size:clamp(30px,7vmin,74px);text-shadow:0 2px 30px rgba(0,0,0,.75),0 0 46px var(--eaccGlow)}
+.eintro .eplr.u .ebadge{width:clamp(36px,6vmin,60px);height:clamp(36px,6vmin,60px);font-size:clamp(18px,3.1vmin,32px)}
+.eintro .epn .eshine{background:linear-gradient(100deg,#fff 32%,var(--eacc) 50%,#fff 68%);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;background-size:250% 100%;animation:eShine 3.4s linear infinite}
 @keyframes eShine{0%{background-position:180% 0}100%{background-position:-80% 0}}
-.eintro .ehrace{margin-top:14px;display:inline-flex;align-items:center;gap:12px;font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:clamp(12px,1.9vmin,17px);letter-spacing:.42em;color:var(--eacc);animation:eName .8s .22s cubic-bezier(.16,.9,.24,1) both}
-.eintro .ehrace .ehl,.eintro .ehrace .ehr{width:clamp(24px,6vw,66px);height:1px}
-.eintro .ehrace .ehl{background:linear-gradient(90deg,transparent,var(--eacc))}
-.eintro .ehrace .ehr{background:linear-gradient(90deg,var(--eacc),transparent)}
 .eintro .erays{position:absolute;left:50%;top:44%;width:170vmax;height:170vmax;transform:translate(-50%,-50%);z-index:1;pointer-events:none;opacity:.45;background:conic-gradient(from 0deg,transparent 0 7deg,var(--eaccSoft) 8deg 10deg,transparent 11deg 32deg,var(--eaccSoft) 33deg 35deg,transparent 36deg 62deg,var(--eaccSoft) 63deg 65deg,transparent 66deg);-webkit-mask-image:radial-gradient(closest-side,#000 0,transparent 40%);mask-image:radial-gradient(closest-side,#000 0,transparent 40%);animation:spinR 44s linear infinite}
 .eintro .eparts{position:absolute;inset:0;z-index:2;pointer-events:none;overflow:hidden}
 .eintro .eparts i{position:absolute;bottom:-6%;border-radius:50%;background:var(--eacc);box-shadow:0 0 8px var(--eacc);opacity:0;animation-name:eRise;animation-timing-function:linear;animation-iteration-count:infinite}
@@ -1088,7 +1088,8 @@ function encoreIntro(onDone){
   ov.style.setProperty('--eaccSoft','rgba('+rgb[0]+','+rgb[1]+','+rgb[2]+',.22)');
   ov.style.setProperty('--EC',EC);
   var svP=null;(players||[]).forEach(function(p){if(p.name===sv)svP=p;});
-  var svRID=RID((svP||homeArr[0]||{}).race), svEN=RACE_EN[(svP||homeArr[0]||{}).race]||'';
+  var roster=(_POV_PLAYERS&&_POV_PLAYERS.length)?_POV_PLAYERS:((homeArr&&homeArr.length)?homeArr:(svP?[svP]:[]));
+  var rosterHTML=roster.map(function(p){var isU=p.name===sv,rid=RID(p.race),ren=RACE_EN[p.race]||'';return '<div class="eplr'+(isU?' u':'')+'"><span class="ebadge" style="--pc:'+(p.color||acc)+'">'+esc(rid)+'</span><span class="epn">'+(isU?'<span class="ustar">★</span>':'')+'<span class="eshine">'+esc(p.name||'—')+'</span></span><span class="epr">'+esc(ren)+'</span></div>';}).join('');
   var partsHTML='<div class="eparts">';
   for(var _pi=0;_pi<16;_pi++){var _pl=Math.round(Math.random()*100),_pd=(4+Math.random()*5).toFixed(1),_pdl=(Math.random()*5).toFixed(1),_ps=(2+Math.random()*2.5).toFixed(1);partsHTML+='<i style="left:'+_pl+'%;width:'+_ps+'px;height:'+_ps+'px;animation-duration:'+_pd+'s;animation-delay:'+_pdl+'s"></i>';}
   partsHTML+='</div>';
@@ -1099,9 +1100,7 @@ function encoreIntro(onDone){
     +'<svg class="earc" viewBox="0 0 100 100"><circle class="etrk" cx="50" cy="50" r="46"/><circle class="erun" cx="50" cy="50" r="46"/></svg>'
     +'<div class="eshock"></div>'
     +'<div class="enum" data-t="5">5</div>'
-    +'<div class="ehero"><div class="eemblem"><span class="eeg">'+esc(svRID)+'</span></div>'
-    +'<div class="ehname"><span class="eshine">'+esc(sv||'—')+'</span></div>'
-    +'<div class="ehrace"><span class="ehl"></span>'+esc(svEN)+'<span class="ehr"></span></div></div>'
+    +'<div class="ehero"><div class="eroster">'+rosterHTML+'</div></div>'
     +'<div class="eflash"></div><div class="escan"></div><div class="evig"></div>'
     +'<div class="eskip">건너뛰기 ▸</div>';
   host.appendChild(ov);
@@ -1309,6 +1308,7 @@ if(VIDEO){(async()=>{try{
   if(!_all.some(c=>String(c.id)===String(MID)))_all.push({id:MID,video:VIDEO,thumb:__m.thumb,uploader:__m.uploader,saver:meta.saver,players:players,length_sec:__m.length_sec,map:__m.map,group_key:__m.group_key,lead:(__m.analysis&&__m.analysis.meta&&__m.analysis.meta.lead_sec!=null)?String(__m.analysis.meta.lead_sec):null});
   const _mine=clusterMatches(_all).find(g=>g.some(i=>String(_all[i].id)===String(MID)))||[];
   let views=_mine.map(i=>_all[i]).filter(v=>v.video);
+  try{_POV_PLAYERS=views.map(function(v){var ps=_pj(v),sp=ps.find(function(p){return p.name===v.saver;})||{};return {name:v.saver||v.uploader||'시점',race:sp.race,color:sp.color||'#8A93A0',team:sp.team};});}catch(e){}
   if(views.length>1){
     const lab=(v,ix)=>{const ps=_pj(v);const sv=ps.find(p=>p.name===v.saver)||{};const pid="pov"+ix+"_"+String(v.id);v._pid=pid;return{id:pid,gid:String(v.id),name:v.saver||v.uploader||"시점",color:sv.color||"#8A93A0",race:RID(sv.race),rk:(sv.race||''),team:(sv.team!=null?sv.team:9)};};
     const items=views.map((v,ix)=>({v,l:lab(v,ix)})).sort((a,b)=>(a.l.team-b.l.team)||a.l.name.localeCompare(b.l.name));
