@@ -974,32 +974,32 @@ var EINTRO_CSS=`
 .eintro .egrid{position:absolute;inset:0;opacity:.3;background-image:linear-gradient(rgba(120,150,175,.06) 1px,transparent 1px),linear-gradient(90deg,rgba(120,150,175,.06) 1px,transparent 1px);background-size:40px 40px;-webkit-mask-image:radial-gradient(70% 70% at 50% 45%,#000 40%,transparent);mask-image:radial-gradient(70% 70% at 50% 45%,#000 40%,transparent)}
 .eintro .escan{position:absolute;inset:0;pointer-events:none;opacity:.5;background:repeating-linear-gradient(to bottom,transparent 0 2px,rgba(0,0,0,.26) 2px 3px)}
 .eintro .evig{position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 0 180px 36px rgba(0,0,0,.72)}
-.eintro .euploader{position:absolute;top:14px;left:0;right:0;text-align:center;z-index:5;font-size:11px;letter-spacing:.32em;color:#aeb6c2;font-weight:600}
-.eintro .euploader b{color:var(--eacc)}
-.eintro .estar{width:11px;height:11px;vertical-align:-1px;margin-right:6px;fill:var(--eacc);display:inline-block}
-.eintro .evs{position:absolute;z-index:4;left:0;right:0;top:50%;transform:translateY(-50%);display:flex;align-items:center;justify-content:center;gap:min(6vw,60px);padding:0 5vw}
-.eintro .eside{flex:1;max-width:38%;min-width:0}
-.eintro .eside.L{text-align:right;animation:eInL .7s cubic-bezier(.2,.9,.2,1) both}
-.eintro .eside.R{text-align:left;animation:eInR .7s cubic-bezier(.2,.9,.2,1) both}
-@keyframes eInL{0%{opacity:0;transform:translateX(-60px)}100%{opacity:1;transform:translateX(0)}}
-@keyframes eInR{0%{opacity:0;transform:translateX(60px)}100%{opacity:1;transform:translateX(0)}}
-.eintro .ename{font-family:'Pretendard Variable','Pretendard',sans-serif;font-weight:800;font-size:clamp(15px,3.2vmin,30px);color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 2px 20px rgba(0,0,0,.6)}
-.eintro .emeta{margin-top:6px;font-size:11px;letter-spacing:.1em;color:#c8ced8;display:flex;gap:9px;align-items:center}
-.eintro .eside.L .emeta{justify-content:flex-end}
-.eintro .erace{display:inline-flex;align-items:center;gap:6px;font-weight:700}
-.eintro .erdot{width:9px;height:9px;border-radius:2px;display:inline-block;box-shadow:0 0 8px currentColor}
-.eintro .ehome{display:inline-block;margin-top:9px;font-size:9px;letter-spacing:.18em;color:#0b0c0f;background:var(--eacc);border-radius:5px;padding:2px 7px;font-weight:700}
-.eintro .evsmk{flex:none;font-family:'Pretendard Variable','Pretendard',sans-serif;font-weight:900;font-size:clamp(20px,5vmin,46px);color:var(--eacc);text-shadow:0 0 26px var(--eaccGlow);animation:eVs .7s .1s both}
-@keyframes eVs{0%{opacity:0;transform:scale(2.2)}100%{opacity:.95;transform:scale(1)}}
-.eintro.slam .eside.L{animation:eMrgL .42s ease-in both}
-.eintro.slam .eside.R{animation:eMrgR .42s ease-in both}
-.eintro.slam .evsmk{animation:eVsGo .42s ease-in both}
-@keyframes eMrgL{0%{transform:translateX(0);opacity:1}100%{transform:translateX(38%);opacity:0}}
-@keyframes eMrgR{0%{transform:translateX(0);opacity:1}100%{transform:translateX(-38%);opacity:0}}
-@keyframes eVsGo{0%{transform:scale(1);opacity:.95}60%{transform:scale(1.5);opacity:1}100%{transform:scale(2.5);opacity:0}}
-.eintro .efoot{position:absolute;bottom:16px;left:0;right:0;text-align:center;z-index:5;font-size:11px;letter-spacing:.16em;color:#8992a0}
-.eintro .efoot b{color:#cfd6e1}
-.eintro .enum{position:relative;z-index:6;font-weight:700;font-size:clamp(90px,26vmin,260px);line-height:1;color:#fff;will-change:transform,opacity,filter}
+@keyframes spinR{to{rotate:360deg}}
+.eintro .ehero{position:absolute;left:0;right:0;bottom:12%;z-index:6;text-align:center;padding:0 6vw;pointer-events:none}
+.eintro .eemblem{width:clamp(56px,10vmin,92px);height:clamp(56px,10vmin,92px);margin:0 auto 16px;position:relative;display:grid;place-items:center;animation:eEmb .8s cubic-bezier(.16,.9,.24,1) both}
+.eintro .eemblem::before{content:"";position:absolute;inset:0;border-radius:22%;background:var(--eaccSoft);border:2px solid var(--eacc);box-shadow:0 0 30px var(--eaccGlow),inset 0 0 20px var(--eaccSoft);transform:rotate(45deg)}
+.eintro .eemblem::after{content:"";position:absolute;inset:-11px;border-radius:26%;border:1px dashed var(--eaccGlow);opacity:.55;animation:spinR 12s linear infinite}
+.eintro .eeg{position:relative;z-index:1;font-family:'Pretendard Variable','Pretendard',sans-serif;font-weight:900;font-size:clamp(26px,5vmin,46px);color:#fff;text-shadow:0 0 18px var(--eacc)}
+@keyframes eEmb{0%{opacity:0;transform:scale(.3) rotate(-45deg);filter:blur(10px)}100%{opacity:1;transform:scale(1) rotate(0);filter:blur(0)}}
+.eintro .ehname{font-family:'Pretendard Variable','Pretendard',sans-serif;font-weight:900;font-size:clamp(34px,8.5vmin,88px);line-height:1.03;letter-spacing:-.01em;color:#fff;text-shadow:0 2px 30px rgba(0,0,0,.7),0 0 44px var(--eaccGlow);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;animation:eName .8s .12s cubic-bezier(.16,.9,.24,1) both}
+@keyframes eName{0%{opacity:0;transform:translateY(36px) scale(.95);filter:blur(12px)}100%{opacity:1;transform:translateY(0) scale(1);filter:blur(0)}}
+.eintro .ehname .eshine{background:linear-gradient(100deg,#fff 32%,var(--eacc) 50%,#fff 68%);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;background-size:250% 100%;animation:eShine 3.4s linear infinite}
+@keyframes eShine{0%{background-position:180% 0}100%{background-position:-80% 0}}
+.eintro .ehrace{margin-top:14px;display:inline-flex;align-items:center;gap:12px;font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:clamp(12px,1.9vmin,17px);letter-spacing:.42em;color:var(--eacc);animation:eName .8s .22s cubic-bezier(.16,.9,.24,1) both}
+.eintro .ehrace .ehl,.eintro .ehrace .ehr{width:clamp(24px,6vw,66px);height:1px}
+.eintro .ehrace .ehl{background:linear-gradient(90deg,transparent,var(--eacc))}
+.eintro .ehrace .ehr{background:linear-gradient(90deg,var(--eacc),transparent)}
+.eintro .erays{position:absolute;left:50%;top:44%;width:170vmax;height:170vmax;transform:translate(-50%,-50%);z-index:1;pointer-events:none;opacity:.45;background:conic-gradient(from 0deg,transparent 0 7deg,var(--eaccSoft) 8deg 10deg,transparent 11deg 32deg,var(--eaccSoft) 33deg 35deg,transparent 36deg 62deg,var(--eaccSoft) 63deg 65deg,transparent 66deg);-webkit-mask-image:radial-gradient(closest-side,#000 0,transparent 40%);mask-image:radial-gradient(closest-side,#000 0,transparent 40%);animation:spinR 44s linear infinite}
+.eintro .eparts{position:absolute;inset:0;z-index:2;pointer-events:none;overflow:hidden}
+.eintro .eparts i{position:absolute;bottom:-6%;border-radius:50%;background:var(--eacc);box-shadow:0 0 8px var(--eacc);opacity:0;animation-name:eRise;animation-timing-function:linear;animation-iteration-count:infinite}
+@keyframes eRise{0%{opacity:0;transform:translateY(0) scale(.6)}12%{opacity:.85}86%{opacity:.6}100%{opacity:0;transform:translateY(-116vh) scale(1)}}
+.eintro.slam .ehero{animation:eHeroGo .5s cubic-bezier(.2,.8,.2,1) both}
+@keyframes eHeroGo{0%{transform:scale(1);opacity:1}42%{transform:scale(1.1);opacity:1}100%{transform:scale(1.28);opacity:0}}
+.eintro.slam .ebg{animation:eWarp .55s ease-in both}
+@keyframes eWarp{0%{transform:scale(1.08)}100%{transform:scale(1.55)}}
+.eintro.slam .eflash{animation:eBigFlash .5s ease-out both}
+@keyframes eBigFlash{0%{opacity:1;background:radial-gradient(circle at 50% 46%,#fff 0,var(--eaccSoft) 40%,transparent 72%)}100%{opacity:0}}
+.eintro .enum{position:relative;z-index:6;font-weight:700;font-size:clamp(76px,20vmin,200px);line-height:1;color:#fff;will-change:transform,opacity,filter}
 .eintro .enum::before,.eintro .enum::after{content:attr(data-t);position:absolute;inset:0;z-index:-1;opacity:.5;mix-blend-mode:screen}
 .eintro .enum::before{color:#ff4d6d;transform:translateX(-3px)}
 .eintro .enum::after{color:var(--eacc);transform:translateX(3px)}
@@ -1087,15 +1087,22 @@ function encoreIntro(onDone){
   ov.style.setProperty('--eaccGlow','rgba('+rgb[0]+','+rgb[1]+','+rgb[2]+',.55)');
   ov.style.setProperty('--eaccSoft','rgba('+rgb[0]+','+rgb[1]+','+rgb[2]+',.22)');
   ov.style.setProperty('--EC',EC);
+  var svP=null;(players||[]).forEach(function(p){if(p.name===sv)svP=p;});
+  var svRID=RID((svP||homeArr[0]||{}).race), svEN=RACE_EN[(svP||homeArr[0]||{}).race]||'';
+  var partsHTML='<div class="eparts">';
+  for(var _pi=0;_pi<16;_pi++){var _pl=Math.round(Math.random()*100),_pd=(4+Math.random()*5).toFixed(1),_pdl=(Math.random()*5).toFixed(1),_ps=(2+Math.random()*2.5).toFixed(1);partsHTML+='<i style="left:'+_pl+'%;width:'+_ps+'px;height:'+_ps+'px;animation-duration:'+_pd+'s;animation-delay:'+_pdl+'s"></i>';}
+  partsHTML+='</div>';
   ov.innerHTML='<div class="ebg"></div>'
     +'<div class="egrid"></div>'
-    +'<div class="euploader"><svg class="estar" viewBox="0 0 32 32"><path d="M16 3.8 19.12 12.11 27.98 12.51 21.04 18.04 23.41 26.59 16 21.7 8.59 26.59 10.96 18.04 4.02 12.51 12.88 12.11Z"/></svg>UPLOADED BY <b>'+esc(sv||'—')+'</b></div>'
-    +'<div class="evs">'+sideHTML(homeArr,'L')+'<div class="evsmk">VS</div>'+sideHTML(awayArr,'R')+'</div>'
+    +'<div class="erays"></div>'
+    +partsHTML
     +'<svg class="earc" viewBox="0 0 100 100"><circle class="etrk" cx="50" cy="50" r="46"/><circle class="erun" cx="50" cy="50" r="46"/></svg>'
     +'<div class="eshock"></div>'
     +'<div class="enum" data-t="5">5</div>'
+    +'<div class="ehero"><div class="eemblem"><span class="eeg">'+esc(svRID)+'</span></div>'
+    +'<div class="ehname"><span class="eshine">'+esc(sv||'—')+'</span></div>'
+    +'<div class="ehrace"><span class="ehl"></span>'+esc(svEN)+'<span class="ehr"></span></div></div>'
     +'<div class="eflash"></div><div class="escan"></div><div class="evig"></div>'
-    +'<div class="efoot"><b>'+mapN+'</b> · '+len+' · '+muStr+'</div>'
     +'<div class="eskip">건너뛰기 ▸</div>';
   host.appendChild(ov);
   (function(){ // 배경: 종족 우주사진 풀에서 랜덤 → (실패시 다음) → 썸네일 → 어두운 라디얼
@@ -1108,7 +1115,7 @@ function encoreIntro(onDone){
   var num=ov.querySelector('.enum'),run=ov.querySelector('.erun'),shock=ov.querySelector('.eshock'),flash=ov.querySelector('.eflash');
   function rt(el,c){if(!el)return;el.classList.remove(c);void el.offsetWidth;el.classList.add(c);}
   var seq=['5','4','3','2','1','GO'],i=0,timer=null,finished=false;
-  function finish(){if(finished)return;finished=true;if(timer)clearTimeout(timer);ov.classList.add('slam');ov.classList.add('gone');setTimeout(function(){if(ov&&ov.parentNode)ov.parentNode.removeChild(ov);},520);onDone();}
+  function finish(){if(finished)return;finished=true;if(timer)clearTimeout(timer);ov.classList.add('slam');ov.classList.add('gone');setTimeout(function(){if(ov&&ov.parentNode)ov.parentNode.removeChild(ov);},560);onDone();}
   function tick(){
     if(finished)return;
     var t=seq[i],go=(t==='GO');
