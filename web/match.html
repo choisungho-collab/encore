@@ -1126,7 +1126,6 @@ function encoreIntro(onDone){
     if(i>=seq.length){timer=setTimeout(finish,1150);return;}
     timer=setTimeout(tick,go?1300:1000);
   }
-  ov.querySelector('.eskip').addEventListener('click',function(e){e.stopPropagation();finish();});
   ov.addEventListener('click',function(e){e.stopPropagation();finish();});
   tick();
 }
