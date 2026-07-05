@@ -155,7 +155,7 @@ import queue as _queue
 from collections import deque as _deque
 GUI_Q = _queue.Queue(maxsize=4000)
 LOG_BUF = _deque(maxlen=400)   # 로그창이 닫혀 있어도 최근 로그를 항상 보관(열면 즉시 채움)
-APP_VERSION = "1.6.0"
+APP_VERSION = "1.7.0"
 REC_STATE = {"recording": False, "encoder": "", "ready": False}
 LAST_ERR = {"msg": "", "t": 0.0}
 UP_DONE = {"t": 0.0, "shown": 0.0}
@@ -957,6 +957,143 @@ def compute_highlights(a):
     return out
 
 
+# ===================== 코치 리포트 (규칙 기반, extract_analysis 출력 사용) =====================
+_COACH_WORKER = {"P": "프로브", "T": "SCV", "Z": "드론"}
+_WORKER_INV   = {"P": "Probe", "T": "SCV", "Z": "Drone"}
+
+def _coach_pick(analysis, for_name=None):
+    """리포트 대상(me)과 상대(opp) 선택. 1v1이 아니면 opp=None."""
+    ps = [p for p in (analysis.get("players") or []) if p.get("rl") in ("P", "T", "Z")]
+    if not ps: return None, None
+    me = None
+    if for_name:
+        me = next((p for p in ps if (p.get("name") or "").lower() == for_name.lower()), None)
+    if me is None:
+        sv = (analysis.get("meta") or {}).get("saver")
+        if sv: me = next((p for p in ps if (p.get("name") or "").lower() == sv.lower()), None)
+    if me is None: me = ps[0]
+    opps = [p for p in ps if p.get("team") != me.get("team")]
+    return me, (opps[0] if len(opps) == 1 else None)
+
+def _wcount(p):
+    inv = _WORKER_INV.get(p.get("rl"))
+    return next((u.get("n", 0) for u in (p.get("units") or []) if u.get("name") == inv), 0)
+
+def _has_unit(p, name, n=1):
+    return any(u.get("name") == name and u.get("n", 0) >= n for u in (p.get("units") or [])) if p else False
+
+def _coach_matchup_notes(me, opp, mu):
+    """매치업별 조합/테크 점검(레퍼런스 기반). (severity, condition_bool, text)."""
+    big = (me.get("total_supply") or 0) >= 110          # 후반까지 갔는지 대략 판단
+    r = []
+    if mu == "PvZ":
+        r.append((1, big and not (_has_unit(me, "High Templar") or _has_unit(me, "Archon")),
+                  "PvZ 후반인데 하이템플러/아콘이 없어요. 스톰(3x3, 112뎀)은 저그 소형 다수를 녹이는 핵심입니다."))
+        r.append((2, not _has_unit(me, "Corsair") and not _has_unit(me, "Photon Cannon"),
+                  "커세어·캐논 없이 뮤탈/오버로드 정찰을 못 끊었을 수 있어요. FE라면 커세어로 제공권+정찰을 잡으세요."))
+    elif mu == "TvZ":
+        r.append((1, big and not _has_unit(me, "Science Vessel"),
+                  "TvZ 후반 메카닉인데 사이언스 베슬이 없어요. 이라디에이트는 뭉친 뮤탈·디파일러 대응의 필수입니다."))
+        r.append((2, not _has_unit(me, "Vulture"),
+                  "벌처가 안 보여요. 벌처 하라스+마인으로 저그 앞마당/드론을 갉고 맵 컨트롤을 잡는 게 TvZ 기본입니다."))
+    elif mu == "ZvT":
+        r.append((1, big and not _has_unit(me, "Defiler"),
+                  "ZvT 후반인데 디파일러가 없어요. 다크스웜/플레이그 없이는 탱크 라인을 정면으로 못 뚫습니다."))
+        r.append((2, big and (me.get("arm_lv") or 0) < 1,
+                  "지상 방어 업글이 0이에요. ZvT 뮤탈/저글링전에선 +1 카라파이스가 특히 큽니다."))
+    elif mu == "TvP":
+        r.append((2, bool(opp) and _has_unit(opp, "Reaver") and not _has_unit(me, "Goliath"),
+                  "상대가 리버를 쓰는데 골리앗/터렛 대비가 약했어요 — 셔틀을 견제해 리버 드랍을 막으세요."))
+    elif mu == "PvT":
+        r.append((2, big and not (_has_unit(me, "Arbiter") or _has_unit(me, "Carrier")),
+                  "PvT 후반 병력이 지상만이면 탱크 라인을 정면으로 못 넘어요 — 아비터 리콜/스테이시스나 캐리어를 고려하세요."))
+        r.append((2, (me.get("drops") or 0) == 0 and big,
+                  "리버/다크템 드랍이 한 번도 없었어요. 셔틀 견제로 테란 멀티·일꾼을 흔들면 정면 교전 부담이 줄어듭니다."))
+    elif mu == "ZvP":
+        r.append((2, big and not (_has_unit(me, "Defiler") or _has_unit(me, "Lurker")),
+                  "ZvP에서 럴커/디파일러 없이 히드라만으론 스톰에 녹아요 — 스톰 회피 + 럴커 라인을 활용하세요."))
+    return r
+
+def coach_report(analysis, for_name=None):
+    """규칙 기반 코치 리포트. 매치업 인식 + '상대 대비' 비교로 구체적 지적을 생성.
+    입력은 extract_analysis() 출력. 반환 {ok, matchup, result, length, me, opp, lines}."""
+    me, opp = _coach_pick(analysis, for_name)
+    if me is None:
+        return {"ok": False, "lines": ["분석할 플레이어(P/T/Z)를 찾지 못했습니다."]}
+    meta = analysis.get("meta") or {}
+    length = meta.get("length") or "?"; length_sec = _mmss_to_sec(length)
+    rl = me.get("rl"); mu = f"{rl}v{opp.get('rl')}" if opp else f"{rl}v?"
+    won = (meta.get("winner") is not None and me.get("team") == meta.get("winner"))
+    result = ("승리" if won else ("패배" if meta.get("winner") is not None else "결과 미상"))
+    notes = []
+    def N(sev, text): notes.append((sev, text))
+
+    # 생산 공백 / 가동률
+    g = me.get("prod_max_gap") or 0
+    if g >= 40:   N(0, f"생산이 최대 {g}초 끊겼어요 — 이 구간에 유닛/일꾼이 안 나왔습니다. 자원이 남으면 즉시 큐를 채우세요.")
+    elif g >= 25: N(1, f"생산 공백이 최대 {g}초 있었어요. 교전 중에도 생산건물 단축키로 큐를 유지하세요.")
+    pa = me.get("prod_active") or 0
+    if pa and pa < 65: N(1, f"생산 가동률이 {pa}%예요 — 쉬는 생산건물이 많았습니다. 미네랄을 계속 유닛으로 바꾸세요.")
+
+    # 일꾼(상대 대비)
+    if opp:
+        mw, ow = _wcount(me), _wcount(opp)
+        if ow - mw >= 15:   N(0, f"{_COACH_WORKER[rl]}가 상대보다 {ow-mw}기 적어요({mw} vs {ow}). 초반 일꾼 끊김/과도한 병력 투자를 점검하세요.")
+        elif ow - mw >= 8:  N(1, f"{_COACH_WORKER[rl]}가 상대보다 {ow-mw}기 적어요({mw} vs {ow}) — 경제에서 살짝 밀렸습니다.")
+
+    # 확장(상대 대비 + 개수)
+    mth = me.get("townhalls") or []; oth = (opp.get("townhalls") if opp else []) or []
+    if len(mth) >= 2 and len(oth) >= 2:
+        d = _mmss_to_sec(mth[1]["t"]) - _mmss_to_sec(oth[1]["t"])
+        if d >= 90: N(1, f"앞마당(2번째 기지)이 상대보다 {d}초 늦었어요({mth[1]['t']} vs {oth[1]['t']}). 압박이 없었다면 더 빨리 가져가세요.")
+    if opp and (len(oth) - len(mth)) >= 2:
+        N(1, f"기지 수가 상대보다 적어요({len(mth)} vs {len(oth)}) — 멀티 타이밍을 놓쳤습니다.")
+    elif len(mth) <= 1 and length_sec > 8*60:
+        N(1, "8분이 넘도록 앞마당 없이 원베이스였어요. 올인이 아니라면 확장이 필요합니다.")
+
+    # 정찰
+    if (me.get("scouted") or 0) == 0:
+        N(0, "상대 본진을 초반에 정찰하지 못했어요. 상대 빌드를 모르면 맞춤 대응이 불가능합니다.")
+    elif me.get("scout_first") and _mmss_to_sec(me["scout_first"]) > 240:
+        _std = "2오버로드 직후" if rl == "Z" else "첫 파일런/서플 직후"
+        N(1, f"첫 정찰이 {me['scout_first']}로 늦었어요 — {_COACH_WORKER[rl]} 정찰은 {_std}가 표준입니다.")
+
+    # 업그레이드(상대 대비)
+    if opp:
+        mup = (me.get("atk_lv") or 0) + (me.get("arm_lv") or 0)
+        oup = (opp.get("atk_lv") or 0) + (opp.get("arm_lv") or 0)
+        _fmt = f"(공{me.get('atk_lv',0)}방{me.get('arm_lv',0)} vs 상대 공{opp.get('atk_lv',0)}방{opp.get('arm_lv',0)})"
+        if oup - mup >= 2:   N(0, f"공/방 업그레이드가 상대보다 낮아요 {_fmt}. 교전 전 업글이 승패를 가릅니다.")
+        elif oup - mup == 1: N(1, f"공/방이 상대보다 한 단계 낮아요 {_fmt}.")
+
+    # 매치업별 조합/테크
+    for sev, cond, text in _coach_matchup_notes(me, opp, mu):
+        if cond: N(sev, text)
+
+    # 효율(정보성)
+    if me.get("eapm") and me.get("apm") and (me["apm"] - me["eapm"]) > 120:
+        N(2, f"APM {me['apm']} 중 유효 EAPM {me['eapm']} — 연타(중복 명령)가 많아요. 손 속도 대비 실효가 낮았습니다.")
+
+    notes.sort(key=lambda x: x[0])
+    lines = [t for _, t in notes[:7]]
+    if not lines:
+        lines = ["큰 문제는 안 보입니다 — 매크로/정찰/업글 모두 무난했어요. 세부 마이크로와 타이밍을 다듬어 보세요."]
+    return {"ok": True, "matchup": mu, "result": result, "length": length,
+            "me": me.get("name"), "opp": (opp.get("name") if opp else None), "lines": lines}
+
+def _print_coach(r):
+    print("\n" + "=" * 56); print("  ENCORE 코치 리포트"); print("=" * 56)
+    if not r.get("ok"):
+        for l in r.get("lines", []): print("  " + l)
+        print("=" * 56); return
+    vs = f"{r['me']} ({r['matchup']}) vs {r.get('opp') or '?'}"
+    print(f"  {vs}   |   {r['result']}   |   길이 {r['length']}")
+    print("-" * 56)
+    for i, l in enumerate(r["lines"], 1):
+        print(f"  {i}. {l}")
+    print("=" * 56)
+
+
 # ===================== 4. 인게스트 (영상+리플레이 등록) =====================
 def db():
     c = sqlite3.connect(DB_PATH, timeout=15); c.row_factory = sqlite3.Row; return c
@@ -1725,10 +1862,14 @@ def _disk_watch_loop():
 
 # ── (보관 정책) 최근 N판 / 총 N GB 상한 — 오래된 것부터 정리 ────────────────────
 def _busy_now():
-    """녹화 중이거나 업로드/처리 파이프라인이 도는 중이면 True — 정리를 미룬다."""
+    """정리를 미뤄야 하는 '진짜 바쁜' 상태만 True.
+    · 처리/업로드 파이프라인 진행 중 → 파일을 실제로 옮기/올리는 중이라 미룸
+    · 실제 게임 녹화 중(ingame=True) → 게임 방해 최소화를 위해 미룸
+    로비/메뉴 대기 캡처(상시 녹화)는 별도 임시파일이라 '이미 업로드된 오래된 판' 정리와
+    충돌하지 않으므로 바쁨으로 보지 않는다 — 스타가 켜져 있어도 Ready(로비)면 정리가 돈다."""
     try:
-        if REC_STATE.get("recording"): return True
         if REC_STATE.get("pipe") in ("processing", "uploading"): return True
+        if REC_STATE.get("recording") and REC_STATE.get("ingame") is True: return True
     except Exception: pass
     return False
 
@@ -2528,6 +2669,10 @@ def _sc_game_pid(name):
         except (psutil.NoSuchProcess, psutil.AccessDenied): pass
     return None
 
+# 프로세스 루프백(게임 소리만 캡처)이 이 PC/게임에서 안 되면(E_UNEXPECTED 등) 한 번만 확인하고
+# 이후엔 조용히 시스템 사운드로 녹음 — 매 판 실패/로그 도배 방지(세션 단위).
+_PROC_LOOPBACK = {"unsupported": False}
+
 def _capture_process_audio(pid, box):
     """Win10(2004+) 프로세스 루프백 API로 특정 PID(및 자식 트리) 오디오만 box['path'] WAV에 녹음.
     성공 시 box['ok']=True 로 두고 box['stop'] 까지 녹음. 실패하면 예외를 던져
@@ -2716,7 +2861,7 @@ class Recorder:
         self.audio_path = os.path.join(REC_DIR, f"audio_{datetime.datetime.now():%Y%m%d_%H%M%S}.wav")
         _gameonly = str(CFG.get("game_audio_only", "auto")).lower() not in ("off", "0", "false", "no", "system")
         _pid = None
-        if _gameonly:
+        if _gameonly and not _PROC_LOOPBACK["unsupported"]:
             try: _pid = _sc_game_pid(CFG.get("starcraft_process") or "StarCraft.exe")
             except Exception: _pid = None
         box = {"stop": threading.Event(), "t0": None, "thread": None, "ok": False, "path": self.audio_path, "pid": _pid}
@@ -2725,11 +2870,16 @@ class Recorder:
                 try:
                     _capture_process_audio(box["pid"], box); return   # 게임 소리만 캡처 성공 → 끝까지 녹음
                 except Exception as e:
-                    log(f"  (audio) game-only capture failed \u2192 using system sound ({e})")
+                    # 이 PC/게임에선 프로세스 루프백 미지원 → 이후엔 조용히 시스템 사운드로. (오디오는 정상 녹음됨)
                     box["ok"] = False; box["t0"] = None
                     try:
                         if os.path.isfile(box["path"]): os.remove(box["path"])
                     except Exception: pass
+                    if not _PROC_LOOPBACK["unsupported"]:
+                        _PROC_LOOPBACK["unsupported"] = True
+                        _code = getattr(e, "winerror", None)
+                        _hx = f" (0x{(_code & 0xffffffff):08X})" if isinstance(_code, int) else ""
+                        log(f"  \u266a Audio: game-only capture isn't available on this PC{_hx} \u2014 recording system sound instead.")
                     # ↓ 시스템 사운드(디바이스 루프백)로 폴백
             try:
                 import pyaudiowpatch as pa, wave
@@ -4087,6 +4237,175 @@ def _login_diagnose():
         elif ("PGRST203" in msg) or (" 300:" in msg):
             print("      ▶ issue_login_code 도 중복 정의(오버로드 충돌) → fix_login.sql 참고.")
 
+def _audio_diagnose():
+    """게임 소리만 캡처(프로세스 루프백)가 왜 안 되는지 정밀 진단.
+    ① 오디오 렌더 세션을 열거해 StarCraft 가 '캡처 가능한 세션'을 갖는지 확인,
+    ② 프로세스 루프백을 단계별(Activate→GetActivateResult→Initialize→GetService→Start)로 시도해
+       '어느 단계에서 어떤 HRESULT 로' 실패하는지 확인한다. (ctypes 자동 예외를 피하려 raw HRESULT 로 호출)
+    스타를 켜고 '소리가 나는 상태'에서 실행하는 게 가장 정확하다. 결과는 콘솔 + DATA_DIR/audio_diag.txt."""
+    out = []
+    def P(s=""):
+        s = str(s); out.append(s)
+        try: print(s, flush=True)
+        except Exception: pass
+    P("=" * 60); P("  ENCORE — game-only audio diagnostics"); P("=" * 60)
+    if sys.platform != "win32":
+        P("  Windows 전용 진단입니다."); 
+    else:
+        try:
+            import ctypes
+            import ctypes.wintypes as wt
+            from ctypes import (POINTER, byref, c_void_p, c_uint32, c_int32, c_uint64,
+                                Structure, HRESULT, c_wchar_p, c_byte, c_uint16, c_ulong, cast, WINFUNCTYPE, sizeof)
+            try:
+                v = sys.getwindowsversion(); b = getattr(v, "build", 0)
+                P(f"  Windows {v.major}.{v.minor} build {b}  "
+                  + ("(프로세스 루프백 지원 빌드 ✓)" if b >= 19041 else "(빌드 19041 미만 → 프로세스 루프백 미지원 ✗)"))
+            except Exception as e:
+                P(f"  Windows 버전 확인 실패: {e}")
+            procname = CFG.get("starcraft_process") or "StarCraft.exe"
+            sc_pids = []
+            for p in psutil.process_iter(["name", "pid"]):
+                try:
+                    if (p.info["name"] or "").lower() == procname.lower(): sc_pids.append(p.info["pid"])
+                except Exception: pass
+            if sc_pids: P(f"  {procname} 실행 중 — PID {sc_pids}")
+            else: P(f"  ⚠ {procname} 가 실행 중이 아닙니다. 스타를 켜고(소리 나는 상태) 다시 실행하세요.")
+
+            ole32 = ctypes.windll.ole32; ole32.CoInitializeEx(None, 0)
+            def hx(h): return "0x%08X" % (h & 0xffffffff)
+            try:
+                class GUID(Structure): _fields_ = [("a", c_uint32), ("b", c_uint16), ("c", c_uint16), ("d", c_byte * 8)]
+                def G(s):
+                    g = GUID(); ole32.CLSIDFromString(c_wchar_p(s), byref(g)); return g
+                def call(p, idx, argt, *a):                # raw HRESULT 반환(자동 예외 X) — 단계별 확인용
+                    vt = cast(p, POINTER(c_void_p))[0]; fn = cast(vt, POINTER(c_void_p))[idx]
+                    return WINFUNCTYPE(c_int32, c_void_p, *argt)(fn)(p, *a)
+
+                # ── [1] 오디오 렌더 세션 열거 ──
+                P(""); P("  [1] 렌더 세션 열거 (누가 스피커로 소리를 내고 있나)")
+                try:
+                    enum = c_void_p()
+                    hr = ole32.CoCreateInstance(byref(G("{BCDE0395-E52F-467C-8E3D-C4579291692E}")), None, 1,
+                                                byref(G("{A95664D2-9614-4F35-A746-DE8DB63617E6}")), byref(enum))
+                    if hr or not enum.value: raise RuntimeError(f"MMDeviceEnumerator {hx(hr)}")
+                    dev = c_void_p()
+                    hr = call(enum, 4, [c_int32, c_int32, POINTER(c_void_p)], 0, 1, byref(dev))   # GetDefaultAudioEndpoint(eRender,eMultimedia)
+                    if hr or not dev.value: raise RuntimeError(f"GetDefaultAudioEndpoint {hx(hr)}")
+                    asm = c_void_p()
+                    hr = call(dev, 3, [POINTER(GUID), c_int32, c_void_p, POINTER(c_void_p)],
+                              byref(G("{77AA99A0-1BD6-484F-8BC7-2C654C9A9B6F}")), 1, None, byref(asm))   # Activate(IAudioSessionManager2)
+                    if hr or not asm.value: raise RuntimeError(f"IAudioSessionManager2 {hx(hr)}")
+                    se = c_void_p()
+                    hr = call(asm, 5, [POINTER(c_void_p)], byref(se))   # GetSessionEnumerator
+                    if hr or not se.value: raise RuntimeError(f"GetSessionEnumerator {hx(hr)}")
+                    cnt = c_int32(0); call(se, 3, [POINTER(c_int32)], byref(cnt))   # GetCount
+                    P(f"      활성 세션 {cnt.value}개:")
+                    IID_ASC2 = G("{BFB7FF88-7239-4FC9-8FA2-07C950BE9C6D}")
+                    st_nm = {0: "Inactive", 1: "Active", 2: "Expired"}; found = False
+                    for i in range(cnt.value):
+                        ctrl = c_void_p()
+                        if call(se, 4, [c_int32, POINTER(c_void_p)], i, byref(ctrl)) or not ctrl.value: continue
+                        c2 = c_void_p()
+                        if call(ctrl, 0, [POINTER(GUID), POINTER(c_void_p)], byref(IID_ASC2), byref(c2)) or not c2.value: continue
+                        pid = c_uint32(0); call(c2, 14, [POINTER(c_uint32)], byref(pid))   # GetProcessId
+                        stt = c_int32(-1); call(c2, 3, [POINTER(c_int32)], byref(stt))      # GetState
+                        nm = "?"
+                        try: nm = psutil.Process(pid.value).name()
+                        except Exception: pass
+                        mk = ""
+                        if pid.value in sc_pids or nm.lower() == procname.lower(): found = True; mk = "   ← StarCraft ★"
+                        P(f"        pid {pid.value:>6}  {st_nm.get(stt.value, stt.value):8}  {nm}{mk}")
+                    P("")
+                    if found:
+                        P("      ✓ StarCraft 가 캡처 가능한 렌더 세션을 가짐 → 프로세스 루프백이 원리적으론 가능 (Option A 여지)")
+                    elif sc_pids:
+                        P("      ✗ StarCraft PID 의 렌더 세션이 안 보임 → 지금 소리가 안 나거나 캡처 불가 경로.")
+                        P("        (게임에서 실제 소리 나는 동안 다시 실행. 그래도 없으면 Option B 권장.)")
+                except Exception as e:
+                    P(f"      세션 열거 실패: {e}")
+
+                # ── [2] 프로세스 루프백 단계별 ──
+                P(""); P("  [2] 프로세스 루프백 단계별 (어디서 어떤 HRESULT 로 실패하나)")
+                tgt = sc_pids[0] if sc_pids else 0
+                if not tgt:
+                    P("      대상 PID 없음 — 스타를 켜고 다시 실행.")
+                else:
+                    P(f"      target pid {tgt}")
+                    mmd = ctypes.windll.mmdevapi
+                    IID_AC = G("{1CB9AD4C-DBFA-4c32-B178-C2F568A703B2}")
+                    IID_CAP = G("{C8ADBD64-E71E-48a0-A4DE-185C395CD317}")
+                    class BLOB(Structure): _fields_ = [("cb", c_uint32), ("p", c_void_p)]
+                    class PROPV(Structure): _fields_ = [("vt", c_uint16), ("r1", c_uint16), ("r2", c_uint16), ("r3", c_uint16), ("blob", BLOB), ("pad", c_byte * 8)]
+                    class PROC_LB(Structure): _fields_ = [("pid", wt.DWORD), ("mode", c_int32)]
+                    class ACTP(Structure): _fields_ = [("atype", c_int32), ("plb", PROC_LB)]
+                    class WFX(Structure): _fields_ = [("tag", c_uint16), ("ch", c_uint16), ("sps", c_uint32), ("abps", c_uint32), ("ba", c_uint16), ("bps", c_uint16), ("cb", c_uint16)]
+                    QIp = WINFUNCTYPE(HRESULT, c_void_p, POINTER(GUID), POINTER(c_void_p)); ULp = WINFUNCTYPE(c_ulong, c_void_p); ACp = WINFUNCTYPE(HRESULT, c_void_p, c_void_p)
+                    ok_any = False
+                    for mode, ml in ((0, "트리 포함"), (1, "단일 프로세스")):
+                        done = {"f": False}
+                        def _qi(this, riid, ppv): ppv[0] = this; return 0
+                        def _u(this): return 1
+                        def _ac(this, op): done["f"] = True; return 0
+                        _f = (QIp(_qi), ULp(_u), ULp(_u), ACp(_ac))
+                        VT = (c_void_p * 4)(cast(_f[0], c_void_p), cast(_f[1], c_void_p), cast(_f[2], c_void_p), cast(_f[3], c_void_p))
+                        class HOBJ(Structure): _fields_ = [("vtbl", c_void_p)]
+                        hobj = HOBJ(); hobj.vtbl = cast(byref(VT), c_void_p)
+                        ap = ACTP(); ap.atype = 1; ap.plb.pid = tgt; ap.plb.mode = mode
+                        pv = PROPV(); pv.vt = 65; pv.blob.cb = sizeof(ACTP); pv.blob.p = cast(byref(ap), c_void_p)
+                        op = c_void_p()
+                        hr = mmd.ActivateAudioInterfaceAsync(c_wchar_p("VAD\\Process_Loopback"), byref(IID_AC), byref(pv), cast(byref(hobj), c_void_p), byref(op))
+                        P(f"      [{ml}] Activate: {hx(hr)}" + ("" if hr == 0 else "  ✗ ← 여기서 실패"))
+                        if hr != 0: continue
+                        for _ in range(600):
+                            if done["f"]: break
+                            time.sleep(0.005)
+                        if not done["f"]: P("        완료 콜백 타임아웃  ✗ ← 여기서 실패"); continue
+                        hres = c_int32(0); iface = c_void_p()
+                        call(op, 3, [POINTER(c_int32), POINTER(c_void_p)], byref(hres), byref(iface))   # GetActivateResult
+                        P(f"        GetActivateResult: {hx(hres.value)}" + ("" if (hres.value == 0 and iface.value) else "  ✗ ← 여기서 실패"))
+                        if hres.value != 0 or not iface.value: continue
+                        acl = iface
+                        fmt = WFX(1, 2, 48000, 48000 * 4, 4, 16, 0)
+                        hri = call(acl, 3, [c_int32, c_uint32, c_uint64, c_uint64, c_void_p, c_void_p],
+                                   0, 0x00020000, c_uint64(3000000), c_uint64(0), cast(byref(fmt), c_void_p), None)   # Initialize(LOOPBACK)
+                        P(f"        Initialize: {hx(hri)}" + ("" if hri == 0 else "  ✗ ← 여기서 실패"))
+                        if hri != 0: continue
+                        capc = c_void_p()
+                        hrs = call(acl, 14, [POINTER(GUID), POINTER(c_void_p)], byref(IID_CAP), byref(capc))   # GetService
+                        P(f"        GetService: {hx(hrs)}" + ("" if (hrs == 0 and capc.value) else "  ✗ ← 여기서 실패"))
+                        if hrs != 0 or not capc.value: continue
+                        hrst = call(acl, 10, [])   # Start
+                        P(f"        Start: {hx(hrst)}" + ("" if hrst == 0 else "  ✗ ← 여기서 실패"))
+                        if hrst == 0:
+                            ok_any = True
+                            P(f"      ✓✓ [{ml}] 전 단계 성공! → 이 모드로 게임 소리만 캡처가 됩니다 (Option A 채택 가능)")
+                            try: call(acl, 11, [])   # Stop
+                            except Exception: pass
+                            break
+                    P("")
+                    if ok_any:
+                        P("  → 결론: 프로세스 루프백이 됩니다. 실패했던 건 모드/타이밍 문제일 수 있어 Option A로 고칠 수 있습니다.")
+                    else:
+                        P("  → 결론: 두 모드 모두 실패. 위 '여기서 실패' 단계가 원인 지점입니다.")
+                        P("     GetActivateResult 에서 0x8000FFFF(E_UNEXPECTED)면 이 게임/드라이버가 프로세스 루프백을")
+                        P("     근본적으로 거부하는 것이라, 확실히 하려면 Option B(장치 격리)를 권장합니다.")
+            finally:
+                try: ole32.CoUninitialize()
+                except Exception: pass
+        except Exception as e:
+            P(f"  진단 중 예외: {e}")
+    # 결과 파일
+    P(""); P("=" * 60)
+    try:
+        pth = os.path.join(DATA_DIR, "audio_diag.txt")
+        with open(pth, "w", encoding="utf-8") as f: f.write("\n".join(out))
+        P(f"  결과 저장: {pth}")
+        P("  → 이 파일 내용을 그대로 붙여주시면 Option A / B 를 확정해 드립니다.")
+    except Exception as e:
+        P(f"  결과 파일 저장 실패: {e}")
+    P("=" * 60)
+
 def _print_status():
     s = sb_cfg(); st = cloud_state()
     print("\n" + "=" * 50)
@@ -4162,6 +4481,29 @@ def main():
         return
     if "--status" in sys.argv or "--check" in sys.argv:
         _print_status()
+        try: input("\nPress Enter to exit...")
+        except Exception: pass
+        return
+    if "--audio-diag" in sys.argv or "--audio-check" in sys.argv:
+        _audio_diagnose()
+        try: input("\nPress Enter to exit...")
+        except Exception: pass
+        return
+    if "--coach" in sys.argv:
+        try: SCREP = ensure_screp()
+        except Exception: pass
+        _reps = [a for a in sys.argv[1:] if not a.startswith("-") and a.lower().endswith(".rep")]
+        _rp = _reps[0] if _reps else None
+        if not SCREP:
+            print("screp 을 찾을 수 없습니다(리플레이 파서). 인터넷 연결 후 다시 실행하세요.")
+        elif not _rp or not os.path.isfile(_rp):
+            print("사용법: sc_recorder.exe --coach <리플레이.rep>")
+        else:
+            try:
+                _a = extract_analysis(_rp)
+                _print_coach(coach_report(_a))
+            except Exception as e:
+                print(f"코치 분석 실패: {e}")
         try: input("\nPress Enter to exit...")
         except Exception: pass
         return

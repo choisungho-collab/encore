@@ -77,12 +77,30 @@
     });
   }
 
+  // 내 경기 조회: owner_puuid(=내 계정) 뿐 아니라 saver(=예전 익명 업로드분)까지 합쳐서 보여준다.
+  // (로그인 고치기 전 올린 판은 owner_puuid 가 비어 있거나 달라서 안 뜨던 문제 보완)
+  async function fetchMine(who) {
+    var byId = {}, q = [];
+    q.push("matches?select=*&owner_puuid=eq." + encodeURIComponent(who.puuid) + "&order=uploaded.desc&limit=300");
+    if (who.name) {
+      q.push("matches?select=*&saver=eq." + encodeURIComponent(who.name) + "&order=uploaded.desc&limit=300");
+      var ln = String(who.name).toLowerCase();
+      if (ln && ln !== who.puuid) q.push("matches?select=*&owner_puuid=eq." + encodeURIComponent(ln) + "&order=uploaded.desc&limit=300");
+    }
+    for (var i = 0; i < q.length; i++) {
+      try { var rows = await sbGet(q[i]); (rows || []).forEach(function (g) { if (g && g.id != null) byId[g.id] = g; }); }
+      catch (e) {}
+    }
+    var arr = Object.keys(byId).map(function (k) { return byId[k]; });
+    arr.sort(function (a, b) { return String(b.uploaded || "").localeCompare(String(a.uploaded || "")); });
+    return arr;
+  }
+
   async function boot(who) {
     root = document.getElementById("meRoot"); if (!root) return;
     me = who || null;
     if (!me || !me.puuid) { root.innerHTML = guardHTML(); return; }
-    try { games = await sbGet("matches?select=*&owner_puuid=eq." + encodeURIComponent(me.puuid) + "&order=uploaded.desc&limit=300"); }
-    catch (e) { games = []; }
+    try { games = await fetchMine(me); } catch (e) { games = []; }
     if (!Array.isArray(games)) games = [];
     root.innerHTML = heroHTML();
     renderGrid(); wireHero();

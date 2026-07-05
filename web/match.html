@@ -965,9 +965,168 @@ function _regE(ev,fn){_vidL.push({ev:ev,fn:fn});if(vid){try{vid.addEventListener
 function _regTU(fn){_regE('timeupdate',fn);}
 let _svShow=null,_multiActive=false;
 function hideOverlay(){if(vid){vid.controls=false;vid.classList.remove('vblur');}if(vplay){vplay.style.opacity='0';vplay.style.pointerEvents='none';setTimeout(()=>{if(vplay)vplay.style.display='none';},420);}if(_svShow)_svShow();}
+/* ===== ENCORE 매치 인트로 (재생 전 5·4·3·2·1 + VS 카드) ===== */
+var EINTRO_CSS=`
+.eintro{position:absolute;inset:0;z-index:60;overflow:hidden;display:grid;place-items:center;font-family:'IBM Plex Mono',ui-monospace,monospace;opacity:1;transition:opacity .5s ease;--eacc:#6FE3F2;--eaccGlow:rgba(111,227,242,.55);--eaccSoft:rgba(111,227,242,.22)}
+.eintro.gone{opacity:0;pointer-events:none}
+.eintro .ebg{position:absolute;inset:0;background:radial-gradient(130% 100% at 50% 42%,#14181f,#0b0c0f 60%,#070809);background-size:cover;background-position:center}
+.eintro .ebg.hasimg{filter:blur(9px) brightness(.34) saturate(1.08);transform:scale(1.08)}
+.eintro .egrid{position:absolute;inset:0;opacity:.3;background-image:linear-gradient(rgba(120,150,175,.06) 1px,transparent 1px),linear-gradient(90deg,rgba(120,150,175,.06) 1px,transparent 1px);background-size:40px 40px;-webkit-mask-image:radial-gradient(70% 70% at 50% 45%,#000 40%,transparent);mask-image:radial-gradient(70% 70% at 50% 45%,#000 40%,transparent)}
+.eintro .escan{position:absolute;inset:0;pointer-events:none;opacity:.5;background:repeating-linear-gradient(to bottom,transparent 0 2px,rgba(0,0,0,.26) 2px 3px)}
+.eintro .evig{position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 0 180px 36px rgba(0,0,0,.72)}
+.eintro .euploader{position:absolute;top:14px;left:0;right:0;text-align:center;z-index:5;font-size:11px;letter-spacing:.32em;color:#aeb6c2;font-weight:600}
+.eintro .euploader b{color:var(--eacc)}
+.eintro .estar{width:11px;height:11px;vertical-align:-1px;margin-right:6px;fill:var(--eacc);display:inline-block}
+.eintro .evs{position:absolute;z-index:4;left:0;right:0;top:50%;transform:translateY(-50%);display:flex;align-items:center;justify-content:center;gap:min(6vw,60px);padding:0 5vw}
+.eintro .eside{flex:1;max-width:38%;min-width:0}
+.eintro .eside.L{text-align:right;animation:eInL .7s cubic-bezier(.2,.9,.2,1) both}
+.eintro .eside.R{text-align:left;animation:eInR .7s cubic-bezier(.2,.9,.2,1) both}
+@keyframes eInL{0%{opacity:0;transform:translateX(-60px)}100%{opacity:1;transform:translateX(0)}}
+@keyframes eInR{0%{opacity:0;transform:translateX(60px)}100%{opacity:1;transform:translateX(0)}}
+.eintro .ename{font-family:'Pretendard Variable','Pretendard',sans-serif;font-weight:800;font-size:clamp(15px,3.2vmin,30px);color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 2px 20px rgba(0,0,0,.6)}
+.eintro .emeta{margin-top:6px;font-size:11px;letter-spacing:.1em;color:#c8ced8;display:flex;gap:9px;align-items:center}
+.eintro .eside.L .emeta{justify-content:flex-end}
+.eintro .erace{display:inline-flex;align-items:center;gap:6px;font-weight:700}
+.eintro .erdot{width:9px;height:9px;border-radius:2px;display:inline-block;box-shadow:0 0 8px currentColor}
+.eintro .ehome{display:inline-block;margin-top:9px;font-size:9px;letter-spacing:.18em;color:#0b0c0f;background:var(--eacc);border-radius:5px;padding:2px 7px;font-weight:700}
+.eintro .evsmk{flex:none;font-family:'Pretendard Variable','Pretendard',sans-serif;font-weight:900;font-size:clamp(20px,5vmin,46px);color:var(--eacc);text-shadow:0 0 26px var(--eaccGlow);animation:eVs .7s .1s both}
+@keyframes eVs{0%{opacity:0;transform:scale(2.2)}100%{opacity:.95;transform:scale(1)}}
+.eintro.slam .eside.L{animation:eMrgL .42s ease-in both}
+.eintro.slam .eside.R{animation:eMrgR .42s ease-in both}
+.eintro.slam .evsmk{animation:eVsGo .42s ease-in both}
+@keyframes eMrgL{0%{transform:translateX(0);opacity:1}100%{transform:translateX(38%);opacity:0}}
+@keyframes eMrgR{0%{transform:translateX(0);opacity:1}100%{transform:translateX(-38%);opacity:0}}
+@keyframes eVsGo{0%{transform:scale(1);opacity:.95}60%{transform:scale(1.5);opacity:1}100%{transform:scale(2.5);opacity:0}}
+.eintro .efoot{position:absolute;bottom:16px;left:0;right:0;text-align:center;z-index:5;font-size:11px;letter-spacing:.16em;color:#8992a0}
+.eintro .efoot b{color:#cfd6e1}
+.eintro .enum{position:relative;z-index:6;font-weight:700;font-size:clamp(90px,26vmin,260px);line-height:1;color:#fff;will-change:transform,opacity,filter}
+.eintro .enum::before,.eintro .enum::after{content:attr(data-t);position:absolute;inset:0;z-index:-1;opacity:.5;mix-blend-mode:screen}
+.eintro .enum::before{color:#ff4d6d;transform:translateX(-3px)}
+.eintro .enum::after{color:var(--eacc);transform:translateX(3px)}
+.eintro .enum.go{color:#fff;font-size:clamp(70px,18vmin,190px);letter-spacing:.02em}
+.eintro .epop{animation:ePop 1s cubic-bezier(.16,.9,.24,1) both}
+@keyframes ePop{0%{opacity:0;transform:scale(1.8);filter:blur(20px)}10%{opacity:1;transform:scale(1);filter:blur(0) drop-shadow(0 0 26px var(--eacc))}16%{transform:scale(1.03)}72%{opacity:1;filter:blur(0)}100%{opacity:0;transform:scale(.82);filter:blur(4px)}}
+.eintro .epop.go{animation:ePopGo 1.3s cubic-bezier(.16,.9,.24,1) both}
+@keyframes ePopGo{0%{opacity:0;transform:scale(.4);filter:blur(16px)}16%{opacity:1;transform:scale(1.14);filter:blur(0) drop-shadow(0 0 40px var(--eacc))}30%{transform:scale(.98)}100%{opacity:1;transform:scale(1)}}
+.eintro .earc{position:absolute;z-index:5;width:min(46vmin,340px);aspect-ratio:1;transform:rotate(-90deg);filter:drop-shadow(0 0 8px var(--eacc))}
+.eintro .earc circle{fill:none;stroke-width:2.4}
+.eintro .earc .etrk{stroke:rgba(120,150,175,.16)}
+.eintro .earc .erun{stroke:var(--eacc);stroke-linecap:round;stroke-dasharray:var(--EC);stroke-dashoffset:0}
+.eintro .esweep{animation:eSweep 1s linear both}
+@keyframes eSweep{from{stroke-dashoffset:0}to{stroke-dashoffset:var(--EC)}}
+.eintro .eshock{position:absolute;z-index:5;width:min(34vmin,260px);aspect-ratio:1;border-radius:50%;border:2px solid var(--eacc);opacity:0}
+.eintro .eburst{animation:eBurst 1s ease-out both}
+@keyframes eBurst{0%{opacity:.85;transform:scale(.35)}100%{opacity:0;transform:scale(1.9)}}
+.eintro .eflash{position:absolute;inset:0;z-index:7;pointer-events:none;opacity:0;background:radial-gradient(circle at 50% 46%,var(--eaccSoft),transparent 55%)}
+.eintro .eflash.on{animation:eFlash .5s ease-out both}
+@keyframes eFlash{0%{opacity:.9}100%{opacity:0}}
+.eintro .eskip{position:absolute;bottom:14px;right:16px;z-index:8;font-size:10px;letter-spacing:.14em;color:#8b93a0;background:rgba(12,13,16,.5);border:1px solid rgba(120,150,175,.22);border-radius:6px;padding:5px 9px;cursor:pointer}
+@media (prefers-reduced-motion:reduce){.eintro *{animation:none!important}}
+`;
+/* === 종족별 우주 배경 (NASA/ESA 퍼블릭 도메인) — 원하는 이미지 URL로 자유롭게 교체 ===
+   비우면('') 그 종족은 경기 썸네일 → 어두운 라디얼로 자동 폴백. */
+var SPACE_BG = {
+  // 테란 — 청록/차가운 톤 (NASA/ESA·CSA/STScI, 퍼블릭 도메인)
+  T: [
+    "https://cdn.esawebb.org/archives/images/screen/weic2207b.jpg",
+    "https://cdn.esawebb.org/archives/images/screen/weic2212a.jpg",
+    "https://cdn.esawebb.org/archives/images/screen/weic2411a.jpg",
+    "https://cdn.esawebb.org/archives/images/screen/weic2303a.jpg",
+    "https://cdn.esawebb.org/archives/images/screen/weic2328a.jpg"
+  ],
+  // 저그 — 붉은/보라/유기적 톤
+  Z: [
+    "https://cdn.esawebb.org/archives/images/screen/potm2510a.jpg",
+    "https://cdn.esawebb.org/archives/images/screen/weic2601a.jpg",
+    "https://cdn.esawebb.org/archives/images/screen/weic2207c.jpg",
+    "https://cdn.esawebb.org/archives/images/screen/weic2417a.jpg",
+    "https://cdn.esawebb.org/archives/images/screen/weic2307a.jpg",
+    "https://cdn.esawebb.org/archives/images/screen/weic2415a.jpg"
+  ],
+  // 프로토스 — 금빛/장엄한 톤
+  P: [
+    "https://cdn.esawebb.org/archives/images/screen/weic2205a.jpg",
+    "https://cdn.esawebb.org/archives/images/screen/weic2216b.jpg",
+    "https://cdn.esawebb.org/archives/images/screen/pillarsofcreation_composite.jpg",
+    "https://cdn.esawebb.org/archives/images/screen/weic2513a.jpg",
+    "https://cdn.esawebb.org/archives/images/screen/weic2311a.jpg"
+  ]
+};
+function pickBg(pool, onImg){ // 풀을 섞어 순서대로 프리로드 → 처음 뜨는 이미지 사용(다 실패하면 썸네일 유지)
+  var arr=(pool||[]).slice();
+  for(var i=arr.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1)),t=arr[i];arr[i]=arr[j];arr[j]=t;}
+  var k=0;(function next(){ if(k>=arr.length)return; var u=arr[k++],im=new Image(); im.onload=function(){onImg(u);}; im.onerror=next; im.src=u; })();
+}
+function encoreIntro(onDone){
+  onDone=onDone||function(){};
+  var reduce=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var host=(typeof _vwrap==='function'&&_vwrap())||stage;
+  if(!host||reduce){onDone();return;}
+  if(!document.getElementById('eintro-css')){var st=document.createElement('style');st.id='eintro-css';st.textContent=EINTRO_CSS;document.head.appendChild(st);}
+  function hexRgb(h){h=(h||'').replace('#','');if(h.length===3)h=h.split('').map(function(c){return c+c;}).join('');var n=parseInt(h||'6fe3f2',16);return [(n>>16)&255,(n>>8)&255,n&255];}
+  var teams={};(players||[]).forEach(function(p){(teams[p.team]=teams[p.team]||[]).push(p);});
+  var tks=Object.keys(teams);
+  var sv=meta.saver;var homeP=(players||[]).filter(function(p){return p.name===sv;})[0];
+  var homeT=homeP?String(homeP.team):(tks[0]||'1');
+  var awayT=tks.filter(function(t){return t!==homeT;})[0]||tks[1]||tks[0];
+  var homeArr=teams[homeT]||[],awayArr=teams[awayT]||[];
+  var r1=RID((homeArr[0]||{}).race),r2=RID((awayArr[0]||{}).race);
+  var pair=[r1,r2].sort().join('');
+  var ACC={PZ:'#B27BE8',TZ:'#E8734C',PT:'#E7A73F',PP:'#6FE3F2',TT:'#7FA8D8',ZZ:'#77D98A'};
+  var acc=ACC[pair]||'#6FE3F2';var rgb=hexRgb(acc);
+  function sideHTML(arr,side){
+    var reps=arr.slice(0,3).map(function(p){return '<span class="erace" style="color:'+(p.color||acc)+'"><span class="erdot"></span>'+RID(p.race)+'</span>';}).join(' ');
+    var names=arr.map(function(p){return esc(p.name||'—');}).join(' · ')||'—';
+    var isHome=(side==='L');
+    return '<div class="eside '+side+(isHome?' home':'')+'"><div class="ename">'+names+'</div><div class="emeta">'+reps+' <span>'+(RACE_EN[(arr[0]||{}).race]||'')+'</span></div>'+(isHome?'<div class="ehome">UPLOADER</div>':'')+'</div>';
+  }
+  var mapN=esc(mapName(meta.map)||'리플레이'),len=esc(meta.length||''),muStr=esc(meta.matchup||(r1+' vs '+r2));
+  var thumb=(__m&&__m.thumb)?esc(__m.thumb):'';var EC=(2*Math.PI*46).toFixed(1);
+  var ov=document.createElement('div');ov.className='eintro';
+  ov.style.setProperty('--eacc',acc);
+  ov.style.setProperty('--eaccGlow','rgba('+rgb[0]+','+rgb[1]+','+rgb[2]+',.55)');
+  ov.style.setProperty('--eaccSoft','rgba('+rgb[0]+','+rgb[1]+','+rgb[2]+',.22)');
+  ov.style.setProperty('--EC',EC);
+  ov.innerHTML='<div class="ebg"></div>'
+    +'<div class="egrid"></div>'
+    +'<div class="euploader"><svg class="estar" viewBox="0 0 32 32"><path d="M16 3.8 19.12 12.11 27.98 12.51 21.04 18.04 23.41 26.59 16 21.7 8.59 26.59 10.96 18.04 4.02 12.51 12.88 12.11Z"/></svg>UPLOADED BY <b>'+esc(sv||'—')+'</b></div>'
+    +'<div class="evs">'+sideHTML(homeArr,'L')+'<div class="evsmk">VS</div>'+sideHTML(awayArr,'R')+'</div>'
+    +'<svg class="earc" viewBox="0 0 100 100"><circle class="etrk" cx="50" cy="50" r="46"/><circle class="erun" cx="50" cy="50" r="46"/></svg>'
+    +'<div class="eshock"></div>'
+    +'<div class="enum" data-t="5">5</div>'
+    +'<div class="eflash"></div><div class="escan"></div><div class="evig"></div>'
+    +'<div class="efoot"><b>'+mapN+'</b> · '+len+' · '+muStr+'</div>'
+    +'<div class="eskip">건너뛰기 ▸</div>';
+  host.appendChild(ov);
+  (function(){ // 배경: 종족 우주사진 풀에서 랜덤 → (실패시 다음) → 썸네일 → 어두운 라디얼
+    var ebg=ov.querySelector('.ebg');
+    function setBg(u){if(ebg&&u){ebg.style.backgroundImage="url(\""+String(u).replace(/"/g,'%22')+"\")";ebg.classList.add('hasimg');}}
+    var tRaw=(__m&&__m.thumb)?__m.thumb:'';
+    if(tRaw)setBg(tRaw);
+    pickBg(SPACE_BG[r1], setBg);
+  })();
+  var num=ov.querySelector('.enum'),run=ov.querySelector('.erun'),shock=ov.querySelector('.eshock'),flash=ov.querySelector('.eflash');
+  function rt(el,c){if(!el)return;el.classList.remove(c);void el.offsetWidth;el.classList.add(c);}
+  var seq=['5','4','3','2','1','GO'],i=0,timer=null,finished=false;
+  function finish(){if(finished)return;finished=true;if(timer)clearTimeout(timer);ov.classList.add('slam');ov.classList.add('gone');setTimeout(function(){if(ov&&ov.parentNode)ov.parentNode.removeChild(ov);},520);onDone();}
+  function tick(){
+    if(finished)return;
+    var t=seq[i],go=(t==='GO');
+    num.textContent=t;num.setAttribute('data-t',t);num.classList.toggle('go',go);rt(num,'epop');
+    run.style.display=go?'none':'';if(!go)rt(run,'esweep');
+    rt(shock,'eburst');rt(flash,'on');
+    i++;
+    if(i>=seq.length){timer=setTimeout(finish,1150);return;}
+    timer=setTimeout(tick,go?1300:1000);
+  }
+  ov.querySelector('.eskip').addEventListener('click',function(e){e.stopPropagation();finish();});
+  ov.addEventListener('click',function(e){e.stopPropagation();finish();});
+  tick();
+}
+/* ===== /인트로 ===== */
 if(vid){
  vid.addEventListener('loadedmetadata',()=>{if(vid.duration&&isFinite(vid.duration)){OFF=_povOff(__self,vid.duration);if(OFF>1){try{vid.currentTime=Math.max(0,OFF-10);}catch(e){}}}});
- if(vplay)vplay.addEventListener('click',(e)=>{e.stopPropagation();hideOverlay();const _tryPlay=()=>{const pr=vid.play();if(pr&&pr.catch)pr.catch(()=>{try{vid.muted=true;vid.play().catch(()=>{});}catch(e2){}});};if(vid.readyState>=2){_tryPlay();}else{vid.addEventListener('canplay',_tryPlay,{once:true});try{vid.load();}catch(e2){}}});
+ if(vplay)vplay.addEventListener('click',(e)=>{e.stopPropagation();const _tryPlay=()=>{hideOverlay();const pr=vid.play();if(pr&&pr.catch)pr.catch(()=>{try{vid.muted=true;vid.play().catch(()=>{});}catch(e2){}});};try{vid.load();}catch(e2){}encoreIntro(()=>{if(vid.readyState>=2){_tryPlay();}else{vid.addEventListener('canplay',_tryPlay,{once:true});}});});
  vid.addEventListener('play',hideOverlay);
 }
 const seek=s=>{if(!vid)return;const go=()=>{hideOverlay();try{vid.currentTime=Math.max(0,Math.min((vid.duration||1e9),s+OFF));}catch(e){}vid.play().catch(()=>{});vid.scrollIntoView({behavior:'smooth',block:'center'});};if(vid.readyState>=1){go();}else{vid.addEventListener('loadedmetadata',go,{once:true});}};

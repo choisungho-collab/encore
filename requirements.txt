@@ -1,4 +1,5 @@
 psutil
 requests
-pyaudiowpatch
+pyaudiowpatch; platform_system == "Windows"
+# pyaudiowpatch 는 윈도우 전용이라 마커로 제한 → Netlify(리눅스) 빌드에선 건너뜀, 레코더 빌드(윈도우)에선 설치됨.
 # numpy, windows-capture==2.0.0 는 build.yml에서 --only-binary(휠 강제)로 설치

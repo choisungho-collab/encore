@@ -33,7 +33,7 @@ function prodTarget(race,mins,maxSup){
   if(maxSup>=160)  t=Math.max(t,{T:9,P:9,Z:9}[race]);
   return t||4;
 }
-function coach_player(p,peers,mins){
+function coach_player(p,peers,mins,fast){
   mins=mins||0;
   var unames=(p.units||[]).map(function(u){return u.name;});
   var race=_coach_race(p.race,unames);var build=p.build||[];
@@ -108,8 +108,8 @@ function coach_player(p,peers,mins){
     T("tip","det","감지 수단 부족","베슬도 터렛도 안 보여. 다크·러커·클로킹·드랍 대비로 터렛이나 베슬을 챙겨두는 게 안전해.");
   }
 
-  // 5. 멀티 (저그는 해처리가 생산기지 항목에서 이미 평가됨)
-  if(race!=="Z"){
+  // 5. 멀티 (빨무에선 자원 무한이라 멀티 조언이 무의미 → 건너뜀)
+  if(!fast&&race!=="Z"){
     if(tc>=2) T("good","exp","멀티 "+tc+"개 확보","멀티를 잡았네. 일꾼 생산처가 많을수록 견제로 일꾼이 잘려도 빨리 복구되고 물량도 빨라져 — 좋은 판단이야.");
     else if(mins>=6) T("tip","exp","본진 하나 — 멀티 권장","일꾼 생산기지가 본진 하나뿐이야. 드랍/스플래시로 모인 일꾼이 한 번에 몰살되면 본진 하나로는 복구가 느려 — 멀티로 생산기지를 늘리면 훨씬 안전해.");
   }
@@ -122,9 +122,11 @@ function coach_player(p,peers,mins){
     T("tip","army","최대 ~"+Math.round(maxSup)+" — 물량 부족","9분이 넘었는데 최대 병력이 적은 편이야. 생산기지를 늘려 남는 자원을 병력으로 더 빨리 전환하면 같은 시간에 훨씬 두꺼운 물량이 나와.");
   }
 
-  // 7. 일꾼
+  // 7. 일꾼 (빨무에선 일꾼 수 조언이 무의미 → 건너뜀; 빨무 전용 팁에서 따로)
+  if(!fast){
   if(workers>=40) T("good","worker","일꾼 "+workers+"기 — 경제 탄탄","일꾼을 넉넉히 뽑았네. 일꾼=돈=병력이라 경제 기반이 좋으면 병력·업글이 빨라져.");
   else if(workers<22&&mins>=5) T("tip","worker","일꾼 "+workers+"기 — 부족","일꾼이 적은 편이야. 물량전은 일꾼을 넉넉히(~50기) 꾸준히 뽑아야 돈이 넘쳐서 물량이 터져 — 잘려도 바로 다시 채우자.");
+  }
 
   // 8. APM
   if(series.length>=3){
@@ -138,12 +140,15 @@ function coach_player(p,peers,mins){
     T("tip","apm","APM "+apm+" / 유효 "+eapm,"실제 명령(EAPM)에 비해 전체 APM이 높아 — 같은 곳 반복클릭이 많다는 뜻. 손은 빠르니 그 손을 생산·멀티 분배에 쓰면 실질 효율이 올라가.");
   }
 
-  // 9. 정찰 (첫 정찰 + 대응) — 신규 필드 있는 게임만
-  if(p.scouted!=null){
+  // 9. 정찰 (빨무에선 정찰 타이밍이 무의미 → 건너뜀)
+  if(!fast&&p.scouted!=null){
     if(p.scouted===0||!p.scout_first){
       T("tip","scout","정찰을 거의 안 함","상대 본진을 일찍 못 보면 다크·드랍·올인 같은 빌드를 모르고 당해. 초반에 일꾼이나 빠른 유닛으로 상대 생산기지·테크를 한 번은 확인하자 — 정찰은 곧 대응이야.");
     }else if(_s2(p.scout_first)<150){
       T("good","scout","초반 정찰 "+p.scout_first+(p.scouted>1?" ("+p.scouted+"곳)":""),"일찍 정찰 들어갔네 — 상대 빌드를 보고 대응할 시간을 벌었어. 본 정보로 다음 수를 예측하는 게 핵심이야.");
+    }else if(_s2(p.scout_first)>240){
+      var _std=race==="Z"?"오버로드 2기 직후":"첫 파일런/서플 직후";
+      T("tip","scout","정찰이 늦음 "+p.scout_first,"첫 정찰이 "+p.scout_first+"로 늦었어 — 정찰은 "+_std+"가 표준이야. 늦게 보면 상대 빌드에 대응할 시간이 줄어 초반에 휘둘려. 정찰은 곧 대응이야.");
     }
   }
   // 10. 컨트롤 그룹
@@ -161,6 +166,66 @@ function coach_player(p,peers,mins){
     T("tip","cont","생산 공백 최대 "+p.prod_max_gap+"초","한동안 유닛 생산이 끊긴 구간이 있어. 그때 자원이 쌓였을 가능성이 커 — 돈이 남는 건 생산기지가 부족하거나 생산이 멈췄다는 신호야. 교전 중에도 생산 단축키로 계속 찍는 게 가동률 A급이야.");
   }else if(p.prod_max_gap!=null&&p.prod_max_gap<=35&&(p.total_supply||0)>80){
     T("good","cont","생산 거의 안 끊김","유닛 생산 공백이 거의 없었어(최대 "+p.prod_max_gap+"초) — 교전 중에도 물량을 계속 뽑은 가동률 최상급이야.");
+  }
+
+  // 13. 상대 대비 비교 (1v1) — 같은 판 상대와 직접 비교가 가장 구체적인 코칭
+  var oppList=(peers||[]).filter(function(pe){return pe&&pe.team!=null&&p.team!=null&&pe.team!==p.team;});
+  if(oppList.length===1){
+    var opp=oppList[0];
+    if(!fast){var dw=(opp.workers||0)-workers;
+    if(dw>=15) T("warn","vs","일꾼이 상대보다 "+dw+"기 적음","상대는 "+opp.workers+"기, 너는 "+workers+"기야. 초반 일꾼이 끊겼거나 병력에 과투자했다는 뜻 — 같은 시간 경제가 밀리면 물량·업글이 통째로 밀려. 일꾼은 잘려도 바로 다시 채우자.");
+    else if(dw>=8) T("tip","vs","일꾼이 상대보다 "+dw+"기 적음","상대("+opp.workers+") 대비 경제가 조금 뒤졌어("+workers+"). 견제받는 중이 아니면 일꾼을 꾸준히 더 돌리자.");}
+    var dup=((opp.atk_lv||0)+(opp.arm_lv||0))-(A+R);
+    if(dup>=2) T("warn","vs","업그레이드가 상대보다 낮음","공"+A+"방"+R+" vs 상대 공"+(opp.atk_lv||0)+"방"+(opp.arm_lv||0)+". 풀업 화력전에서 두 단계 차이는 같은 병력도 한타에서 그냥 갈려 — 가스 남으면 업글부터 돌리자.");
+    else if(dup===1) T("tip","vs","업글이 상대보다 한 단계 낮음","공"+A+"방"+R+" vs 공"+(opp.atk_lv||0)+"방"+(opp.arm_lv||0)+". 한 단계만 따라붙어도 교전 결과가 달라져.");
+    if(!fast){var myNat=(p.townhalls&&p.townhalls.length>=2)?p.townhalls[1].t:null;
+    if(myNat&&opp.nat){var de=_s2(myNat)-_s2(opp.nat);
+      if(de>=90) T("tip","vs","앞마당이 상대보다 "+de+"초 늦음","앞마당 "+myNat+" vs 상대 "+opp.nat+". 압박이 없었다면 더 빨리 가져갔어야 — 확장이 늦으면 경제가 통째로 밀려서 이후 물량 차이로 벌어져.");}
+    if((opp.tcount||0)-tc>=2) T("tip","vs","기지 수가 상대보다 적음","기지 "+tc+"개 vs 상대 "+opp.tcount+"개. 멀티 타이밍을 놓쳐 자원 격차가 벌어졌어 — 안전할 때 앞마당·삼룡이를 미리 가져가자.");}
+
+    // 14. 매치업별 정밀 코칭 (레퍼런스 기반 — 매치업 특유의 타이밍·업글·조합)
+    var mu=race+"v"+opp.race;
+    function oHas(n){return !!(opp.uset&&opp.uset.has(n));}
+    var myGate=build.filter(function(b){return b.name==="Gateway";}).length;
+    var obs=(units["Observer"]||{}).n||0;
+    var legZ=bnames.has("Leg Enhancements");
+    var hasVes=!!units["Science Vessel"];
+    var hasTankU=!!(units["Siege Tank (Tank Mode)"]||units["Siege Tank (Siege Mode)"]);
+    var late=(mins>=14)||(maxSup>=160);
+    if(mu==="PvT"){
+      if(!fast&&myGate>0&&opp.fact>0&&myGate<opp.fact+2) T("warn","mu","게이트웨이가 팩토리보다 적음","네 게이트 "+myGate+"개 vs 상대 팩토리 "+opp.fact+"개야. PvT는 '게이트 = 팩토리+2'가 기준이라, 그래야 큰 교전에서 병력과 충원을 감당해. 게이트를 더 늘리자.");
+      if(obs<2&&mins>=8) T("tip","mu","옵저버가 부족 (PvT)","옵저버가 "+obs+"기뿐이야. PvT는 옵저버 2~3기로 스파이더 마인을 제거하고 시야를 잡아야 드라군이 안 녹아 — 항상 몇 기는 유지하자.");
+      if(units["Zealot"]&&!legZ&&mins>=8) T("tip","mu","질럿 발업(Leg)이 없음","발업 없는 질럿·드라군은 탱크/마인 조합을 못 버텨. 시타델 올려 발업부터 — 발업 질럿이 마인을 밟아주고 탱크 첫 볼리를 받아줘.");
+      if(late&&!units["Arbiter"]&&!units["Carrier"]) T("warn","mu","후반 아비터/캐리어가 없음 (PvT)","지상 병력만으론 시즈 라인을 정면으로 못 넘어. 아비터 스테이시스로 탱크 덩어리를 얼리거나 리콜로 뒤를 치는 게 PvT 해법이야.");
+    } else if(mu==="TvP"){
+      if(!units["Vulture"]&&mins>=6) T("tip","mu","벌처가 안 보임 (TvP)","대프로토스 메카닉의 핵심은 벌처+마인이야. 벌처로 질럿을 견제하고 탱크를 질럿으로부터 가려줘 — 마인 라인으로 드라군도 묶고.");
+      if((oHas("Carrier")||oHas("Arbiter"))&&!units["Goliath"]) T("warn","mu","상대 캐리어/아비터인데 골리앗이 없음","골리앗 없이는 캐리어·아비터에 대공이 비어. 골리앗을 섞고 사거리 업글로 공중을 받쳐야 해.");
+    } else if(mu==="PvZ"){
+      if(!units["Corsair"]&&!bnames.has("Photon Cannon")&&mins>=6) T("warn","mu","커세어가 없음 (PvZ)","커세어는 저글링 속업 이후 사실상 유일한 정찰 수단이고, 오버로드를 끊고 뭉친 뮤탈을 스플래시로 잡아. 커세어 없이는 정보와 제공권을 다 내줘 — 스타게이트+커세어를 챙기자.");
+      if(units["Zealot"]&&!legZ&&mins>=8) T("tip","mu","발업 질럿으로 맵 컨트롤 (PvZ)","발업 질럿은 저그 앞마당 압박과 맵 장악의 핵심이야. 커세어와 함께 발업 질럿을 굴리면 저그를 수세로 묶을 수 있어.");
+    } else if(mu==="ZvP"){
+      if(oHas("Corsair")&&!units["Scourge"]) T("tip","mu","상대 커세어엔 스컬지 (ZvP)","커세어가 오버로드와 뮤탈을 끊고 있어. 스컬지로 커세어를 줄여 오버로드(정찰·서플)를 지키는 게 ZvP 필수 대응이야.");
+    } else if(mu==="TvZ"){
+      if(hasVes&&hasTankU&&mxlv<1) T("tip","mu","베슬+탱크 타이밍엔 공1방1을 붙여라","첫 베슬+탱크로 나갈 때 인프 공1방1이 붙어야 디파일러 다크스웜 전에 이득을 봐. 업글 없이 나가면 손해만 보고 물러나게 돼.");
+    } else if(mu==="ZvT"){
+      if(!units["Lurker"]&&mins>=8) T("tip","mu","럴커 컨테인으로 지연 (ZvT)","럴커로 테란 앞마당·진출로를 막으면 마린메딕 타이밍을 늦춰 하이브까지 시간을 벌어. 뮤탈로 맵을 잡는 동안 럴커 라인을 깔자.");
+    } else if(mu==="PvP"){
+      if(obs<1&&mins>=6) T("warn","mu","옵저버 없이 PvP (다크/리버 위험)","PvP에서 옵저버가 없으면 다크템 드랍·리버 드랍을 못 보고 무너져. 옵저버 1~2기는 필수야.");
+      if(!units["Reaver"]&&mins>=7) T("tip","mu","리버는 PvP의 핵심","리버는 확장 방어와 미네랄 견제의 핵심이고, 교전에선 최우선 타겟이야. 셔틀 리버로 상대 프로브를 지지면 경제 격차가 크게 벌어져.");
+    } else if(mu==="TvT"){
+      if(!hasTankU&&mins>=7) T("tip","mu","시즈 라인이 TvT의 전부","탱크 시즈 라인의 포지션이 TvT를 가른다. 하이그라운드 시즈와 마인 라인을 잡고, 드랍십으로 상대 멀티·일꾼을 흔들어 교착을 깨자.");
+    } else if(mu==="ZvZ"){
+      if(!units["Mutalisk"]&&mins>=5) T("warn","mu","ZvZ는 뮤탈+스컬지 싸움","뮤탈이 안 보여 — ZvZ는 뮤탈+스컬지 제공권이 곧 승패야. 스파이어를 놓치면 그대로 진다. 스택·클로닝·카라파이스 우위로 상대 뮤탈을 먼저 잡자.");
+    }
+  }
+
+  // 15. 빠른무한(빨무) 전용 코칭 — 자원 무한이라 경제보다 물량·업글·조합이 승부
+  if(fast){
+    T("tip","fast","빨무는 경제가 아니라 물량·업글·조합 싸움","자원이 무한이라 일꾼·확장·정찰 관리는 거의 의미 없어. 돈이 남으면 "+prodKo+"부터 계속 늘리고, 남는 자원은 업글과 결정타 유닛으로 — '조합된 물량 + 끊김 없는 리맥스'가 빨무의 전부야.");
+    if(workers>=26) T("tip","fast","일꾼이 너무 많음 (빨무)","빨무는 광맥이 본진에 붙어 있어 일꾼 "+workers+"기는 과해. 대략 12~20기면 충분하고 나머지 인구는 병력에 써야 물량이 더 나와 — 남는 일꾼은 인구 낭비야.");
+    if(race==="P") T("tip","fast","프로토스는 빨무 최강 — 셔틀 드랍이 핵심","빨무는 토스가 유리해. 리버·질럿·아콘을 셔틀에 태워 상대 일꾼·본진을 순식간에 부수는 게 승리 공식이야. 하템 스톰도 덩어리 병력에 치명적 — 셔틀 견제를 축으로 굴리자.");
+    else if(race==="T") T("tip","fast","테란은 메카닉을 넓게 펼쳐라 (빨무)","빨무 테란은 탱크+골리앗 메카닉이 축이야. 건물 완성 대기 탓에 초반 테크가 토스보다 느리니 조심하고, 교전 땐 병력을 넓게 펼쳐 사방에서 덮쳐 — 뭉치면 스톰·리버에 녹아.");
+    else if(race==="Z") T("tip","fast","저그는 불리 — 성큰 버티고 가디언으로 (빨무)","빨무는 저그가 가장 불리해. 초반엔 성큰과 아군 백업으로 버티고 후반엔 히드라 웨이브+가디언으로 화력을 내되, 발키리에 취약하니 디바우러를 꼭 동반해. 하템·리버·베슬·탱크는 특히 조심.");
   }
 
   // 총평 (강점 + 1순위 개선 + 격려)
@@ -196,13 +261,21 @@ function coach_report(a){
   (a.players||[]).forEach(p=>{
     const unames=(p.units||[]).map(u=>u.name);
     const race=_coach_race(p.race,unames);const build=p.build||[];
-    base.push({prod:build.filter(b=>COACH_PROD[race].has(b.name)).length,race:race,team:p.team});
+    var units={};(p.units||[]).forEach(u=>units[u.name]=u);
+    var workers=0,army=0;Object.keys(units).forEach(n=>{if(COACH_WORKERS.has(n))workers+=units[n].n;else army+=units[n].n*(COACH_SUPPLY[n]||1);});
+    var th=p.townhalls||[];
+    base.push({prod:build.filter(b=>COACH_PROD[race].has(b.name)).length,race:race,team:p.team,
+      name:p.name,workers:workers,army:pyRound(army),atk_lv:p.atk_lv||0,arm_lv:p.arm_lv||0,
+      tcount:th.length,nat:(th.length>=2?th[1].t:null),total_supply:p.total_supply||0,
+      gate:build.filter(b=>b.name==='Gateway').length, fact:build.filter(b=>b.name==='Factory').length,
+      uset:new Set(Object.keys(units).filter(n=>units[n].n>0))});
   });
+  var fast=/(빨무|빠무|무한|fastest)/i.test((a.meta&&a.meta.map)||"");
   const out=[];
   (a.players||[]).forEach((p,i)=>{
     const peers=base.filter((b,j)=>j!==i);
-    const r=coach_player(p,peers,mins);
-    out.push({id:p.id,name:p.name,race:p.race,timings:r[0],points:r[1],verdict:r[2]});
+    const r=coach_player(p,peers,mins,fast);
+    out.push({id:p.id,name:p.name,race:p.race,timings:r[0],points:r[1],verdict:(fast?"[빠른무한 모드] ":"")+r[2]});
   });
   return out;
 }
