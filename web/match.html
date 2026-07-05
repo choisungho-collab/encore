@@ -994,12 +994,19 @@ var EINTRO_CSS=`
 .eintro.slam .ebg{animation:eWarp .55s ease-in both}
 @keyframes eWarp{0%{transform:scale(1.08)}100%{transform:scale(1.14)}}
 /* 셔터/블라인드 전환: 세로 띠가 촥 닫힘 */
-.eintro .eshut{position:absolute;inset:0;z-index:9;pointer-events:none;display:flex}
-.eintro .eshut i{flex:1;transform:scaleY(0);transform-origin:top;background:linear-gradient(180deg,#111418,#0a0b0e 60%,#050608);border-right:1px solid rgba(255,255,255,.04);box-shadow:inset 0 0 30px rgba(0,0,0,.6)}
-.eintro.slam .eshut i{animation:eShut .5s cubic-bezier(.7,0,.3,1) both}
-.eintro.slam .eshut i:nth-child(2n){animation-delay:.04s}
-.eintro.slam .eshut i:nth-child(3n){animation-delay:.08s}
-@keyframes eShut{0%{transform:scaleY(0)}100%{transform:scaleY(1)}}
+.eintro .eshut{position:absolute;inset:0;z-index:9;pointer-events:none;display:flex;overflow:hidden}
+.eintro .eshut i{position:relative;flex:1;transform:translateX(0);background:linear-gradient(100deg,#0d1015,#14181f 46%,#0a0c10 100%);box-shadow:inset 0 0 60px rgba(0,0,0,.72)}
+.eintro .eshut i::before{content:"";position:absolute;top:0;bottom:0;width:3px;background:linear-gradient(180deg,transparent,var(--eacc),transparent);box-shadow:0 0 22px 3px var(--eaccGlow),0 0 8px 1px var(--eacc);opacity:0}
+.eintro .eshut i::after{content:"";position:absolute;inset:0;opacity:.5;background:repeating-linear-gradient(90deg,transparent 0 15px,rgba(120,150,175,.05) 15px 16px)}
+.eintro .eshut i:first-child::before{right:0}
+.eintro .eshut i:last-child::before{left:0}
+/* slam: 도어가 중앙에서 쾅 닫혔다가 양쪽으로 활짝 열림 */
+.eintro.slam .eshut i:first-child{animation:eDoorL .8s cubic-bezier(.6,0,.15,1) both}
+.eintro.slam .eshut i:last-child{animation:eDoorR .8s cubic-bezier(.6,0,.15,1) both}
+.eintro.slam .eshut i::before{animation:eSeam .8s ease-out both}
+@keyframes eDoorL{0%{transform:translateX(-100%)}22%{transform:translateX(0)}40%{transform:translateX(0)}100%{transform:translateX(-101%)}}
+@keyframes eDoorR{0%{transform:translateX(100%)}22%{transform:translateX(0)}40%{transform:translateX(0)}100%{transform:translateX(101%)}}
+@keyframes eSeam{0%{opacity:0}18%{opacity:0}24%{opacity:1}40%{opacity:1}100%{opacity:0}}
 .eintro .ealert{position:absolute;inset:0;z-index:5;pointer-events:none;opacity:0;box-shadow:inset 0 0 130px 34px var(--eaccSoft),inset 0 0 66px 8px var(--eaccGlow)}
 .eintro .ealert.on{animation:eAlert .95s ease-out both}
 @keyframes eAlert{0%{opacity:.5}100%{opacity:0}}
@@ -1009,7 +1016,9 @@ var EINTRO_CSS=`
 .eintro .enum::before,.eintro .enum::after{content:attr(data-t);position:absolute;inset:0;z-index:-1;opacity:.5;mix-blend-mode:screen}
 .eintro .enum::before{color:#ff4d6d;transform:translateX(-3px)}
 .eintro .enum::after{color:var(--eacc);transform:translateX(3px)}
-.eintro .enum.go{color:#fff;font-size:clamp(70px,18vmin,190px);letter-spacing:.02em}
+.eintro .enum.go{color:#fff;font-size:clamp(48px,12vmin,128px);letter-spacing:.06em;font-weight:900;white-space:nowrap}
+.eintro.slam .enum.go{z-index:11;animation:eGoText .6s cubic-bezier(.2,.8,.2,1) both}
+@keyframes eGoText{0%{opacity:0;transform:scale(.5);filter:blur(14px)}22%{opacity:1;transform:scale(1.12);filter:blur(0) drop-shadow(0 0 34px var(--eacc))}40%{opacity:1;transform:scale(1)}62%{opacity:1}100%{opacity:0;transform:scale(1.3);filter:blur(6px)}}
 .eintro .epop{animation:ePop 1s cubic-bezier(.16,.9,.24,1) both}
 @keyframes ePop{0%{opacity:0;transform:scale(1.8);filter:blur(20px)}10%{opacity:1;transform:scale(1);filter:blur(0) drop-shadow(0 0 26px var(--eacc))}16%{transform:scale(1.03)}72%{opacity:1;filter:blur(0)}100%{opacity:0;transform:scale(.82);filter:blur(4px)}}
 .eintro .epop.go{animation:ePopGo 1.3s cubic-bezier(.16,.9,.24,1) both}
@@ -1107,7 +1116,7 @@ function encoreIntro(onDone){
     +'<div class="eshock"></div>'
     +'<div class="enum" data-t="5">5</div>'
     +'<div class="ehero"><div class="eroster">'+rosterHTML+'</div></div>'
-    +'<div class="eflash"></div><div class="eshut"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="ealert"></div><div class="escan"></div><div class="evig"></div>';
+    +'<div class="eflash"></div><div class="eshut"><i></i><i></i></div><div class="ealert"></div><div class="escan"></div><div class="evig"></div>';
   host.appendChild(ov);
   (function(){ // 배경: 종족 우주사진 풀에서 랜덤 → (실패시 다음) → 썸네일 → 어두운 라디얼
     var ebg=ov.querySelector('.ebg');
@@ -1118,17 +1127,23 @@ function encoreIntro(onDone){
   })();
   var num=ov.querySelector('.enum'),run=ov.querySelector('.erun'),shock=ov.querySelector('.eshock'),flash=ov.querySelector('.eflash'),alert=ov.querySelector('.ealert');
   function rt(el,c){if(!el)return;el.classList.remove(c);void el.offsetWidth;el.classList.add(c);}
-  var seq=['5','4','3','2','1','GO'],i=0,timer=null,finished=false;
-  function finish(){if(finished)return;finished=true;if(timer)clearTimeout(timer);ov.classList.add('slam');ov.classList.add('gone');setTimeout(function(){if(ov&&ov.parentNode)ov.parentNode.removeChild(ov);},560);onDone();}
+  var seq=['5','4','3','2','1'],i=0,timer=null,finished=false;
+  function finish(){if(finished)return;finished=true;if(timer)clearTimeout(timer);
+    // "1" 직후: 도어가 쾅 닫히는 찰나에 '게임시작' 한 번 번쩍 → 도어 열리며 즉시 게임 화면
+    num.textContent='게임시작';num.setAttribute('data-t','게임시작');num.classList.add('go');rt(num,'epop');
+    run.style.display='none';rt(shock,'eburst');rt(flash,'on');
+    ov.classList.add('slam');onDone();
+    setTimeout(function(){if(ov)ov.classList.add('gone');},760);
+    setTimeout(function(){if(ov&&ov.parentNode)ov.parentNode.removeChild(ov);},1080);}
   function tick(){
     if(finished)return;
-    var t=seq[i],go=(t==='GO');
-    num.textContent=t;num.setAttribute('data-t',t);num.classList.toggle('go',go);rt(num,'epop');
-    run.style.display=go?'none':'';if(!go)rt(run,'esweep');
+    var t=seq[i];
+    num.textContent=t;num.setAttribute('data-t',t);num.classList.remove('go');rt(num,'epop');
+    run.style.display='';rt(run,'esweep');
     rt(shock,'eburst');rt(flash,'on');rt(alert,'on');
     i++;
-    if(i>=seq.length){timer=setTimeout(finish,1150);return;}
-    timer=setTimeout(tick,go?1300:1000);
+    if(i>=seq.length){timer=setTimeout(finish,750);return;}
+    timer=setTimeout(tick,1000);
   }
   ov.addEventListener('click',function(e){e.stopPropagation();finish();});
   tick();
