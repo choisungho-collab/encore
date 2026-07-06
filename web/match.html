@@ -713,9 +713,9 @@ svg{display:block}
 <style id="encore-mobile-fix">/* ===== 매치 페이지 모바일 교정 (폰 세로 ≤768px에서 오른쪽 잘림 해결) ===== */
 html,body{overflow-x:hidden;max-width:100%}
 @media(max-width:768px){
-  /* ① 영상 컨트롤바: 스크러버를 첫 줄 전체폭으로 올리고 버튼(전체화면 포함)은 아랫줄에 → 다 보이게 */
-  .svctl{flex-wrap:wrap;column-gap:8px;row-gap:10px;padding:14px 12px 12px}
-  .svctl .svsc{order:-1;flex:1 1 100%;width:100%;min-width:0}
+  /* ① 영상 컨트롤바: 버튼(전체화면 포함)을 윗줄에, 스크러버(진행바)를 맨 아랫줄 전체폭으로 → 진행바가 영상 하단에 붙게 */
+  .svctl{flex-wrap:wrap;column-gap:8px;row-gap:7px;padding:16px 12px 9px}
+  .svctl .svsc{order:1;flex:1 1 100%;width:100%;min-width:0;margin-top:1px}
   .svctl .svtime{margin-right:auto}
   .svctl .svpp{width:40px;height:40px}
   .svctl .svbtn{height:36px;min-width:40px;padding:0 10px}
@@ -953,7 +953,7 @@ const stage=document.getElementById('stage');
 let OFF=0;  // 메뉴 오프셋 = 영상에서 게임이 시작되는 지점(초). lead_sec(정확) 우선, 없으면 영상길이-게임길이.
 const _povOff=(o,dur)=>{const L=(o&&o.lead!=null&&o.lead!=='')?+o.lead:NaN;if(isFinite(L)&&L>-30&&L<60)return L;const gl=(o&&+o.length_sec>0)?+o.length_sec:totalSec;return Math.max(0,(dur||0)-gl);};
 const __self={lead:(meta&&meta.lead_sec!=null?meta.lead_sec:null),length_sec:(__m&&__m.length_sec)};
-stage.innerHTML=VIDEO?`<div class="vwrap"><video id="vid" playsinline preload="metadata" poster="${esc(__m.thumb||'')}" src="${esc(VIDEO)}"></video><button class="vplay" id="vplay" aria-label="재생"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v13.72a1 1 0 0 0 1.52.86l11.43-6.86a1 1 0 0 0 0-1.72L9.52 4.28A1 1 0 0 0 8 5.14Z"/></svg></button></div>`
+stage.innerHTML=VIDEO?`<div class="vwrap"><video id="vid" playsinline preload="metadata" disablepictureinpicture disableremoteplayback controlslist="nodownload noplaybackrate noremoteplayback" poster="${esc(__m.thumb||'')}" src="${esc(VIDEO)}"></video><button class="vplay" id="vplay" aria-label="재생"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v13.72a1 1 0 0 0 1.52.86l11.43-6.86a1 1 0 0 0 0-1.72L9.52 4.28A1 1 0 0 0 8 5.14Z"/></svg></button></div>`
  :`<div class="poster"><div class="pcol"><div class="play">${I.play}</div><div class="pm">Recorded Replay</div><div class="pmap">${esc(mapName(meta.map))}</div></div></div>`;
 let vid=document.getElementById('vid');const vplay=document.getElementById('vplay');
 let _curPovId=String(MID);
@@ -1314,7 +1314,7 @@ function _prewarm(v){
   if(String(v._pid||v.id)===_curPovId)return;              // 현재 보고 있는 시점
   if(_warmV&&String(_warmV._pid||_warmV.id)===String(v._pid||v.id))return;  // 이미 그 시점 예열 중
   const w=_vwrap();if(!w)return;
-  if(!_warmEl){_warmEl=document.createElement('video');_warmEl.playsInline=true;_warmEl.preload='auto';_warmEl.setAttribute('tabindex','-1');_warmEl.style.cssText='position:absolute;inset:0;visibility:hidden;pointer-events:none';w.appendChild(_warmEl);}
+  if(!_warmEl){_warmEl=document.createElement('video');_warmEl.playsInline=true;_warmEl.preload='auto';_warmEl.disablePictureInPicture=true;try{_warmEl.disableRemotePlayback=true;}catch(_){}_warmEl.setAttribute('tabindex','-1');_warmEl.style.cssText='position:absolute;inset:0;visibility:hidden;pointer-events:none';w.appendChild(_warmEl);}
   _warmV=v;_warmOff=0;
   try{_warmEl.pause();}catch(e){}
   _warmEl.muted=true;_warmEl.removeAttribute('poster');_warmEl.src=v.video;
@@ -1396,7 +1396,7 @@ if(VIDEO){(async()=>{try{
         const cell=document.createElement('div');cell.className='mvcell'+(i===0?' aud':'');
         let vd=_mvPool[id]||null;const _reused=!!vd;
         if(_reused){delete _mvPool[id];vd.muted=(i!==0);if(vd._isSingleVid){vd.removeAttribute('style');vd.removeAttribute('id');}}
-        else{vd=document.createElement('video');vd.playsInline=true;vd.preload='auto';vd.src=v.video||'';vd.muted=(i!==0);vd.setAttribute('data-off','0');vd.setAttribute('data-seq',String(_mvSeq++));}
+        else{vd=document.createElement('video');vd.playsInline=true;vd.preload='auto';vd.disablePictureInPicture=true;try{vd.disableRemotePlayback=true;}catch(_){}vd.setAttribute('controlsList','nodownload noplaybackrate noremoteplayback');vd.src=v.video||'';vd.muted=(i!==0);vd.setAttribute('data-off','0');vd.setAttribute('data-seq',String(_mvSeq++));}
         vd._povId=id;
         if(!_reused){
           cell.classList.add('mvseek');
