@@ -1003,12 +1003,18 @@ var EINTRO_CSS=`
 .eintro .eshut i:first-child::before{right:0}
 .eintro .eshut i:last-child::before{left:0}
 /* slam: 도어가 중앙에서 쾅 닫혔다가 양쪽으로 활짝 열림 */
-.eintro.slam .eshut i:first-child{animation:eDoorL 1.15s cubic-bezier(.4,0,.2,1) both}
-.eintro.slam .eshut i:last-child{animation:eDoorR 1.15s cubic-bezier(.4,0,.2,1) both}
-.eintro.slam .eshut i::before{animation:eSeam 1.15s ease-out both}
+.eintro.slam .eshut i:first-child{animation:eDoorL .85s cubic-bezier(.35,0,.15,1) both}
+.eintro.slam .eshut i:last-child{animation:eDoorR .85s cubic-bezier(.35,0,.15,1) both}
+.eintro.slam .eshut i::before{animation:eSeam .85s ease-out both}
 @keyframes eDoorL{0%{transform:translateX(0)}100%{transform:translateX(-101%)}}
 @keyframes eDoorR{0%{transform:translateX(0)}100%{transform:translateX(101%)}}
 @keyframes eSeam{0%{opacity:1}22%{opacity:.85}100%{opacity:0}}
+/* slam 시 도어만 남기고 나머지 레이어 전부 숨김 → 도어 뒤로 실제 스타 화면이 드러남 */
+.eintro.slam .ebg,.eintro.slam .egrid,.eintro.slam .escan,.eintro.slam .evig,.eintro.slam .erays,.eintro.slam .eparts,.eintro.slam .earc,.eintro.slam .eshock,.eintro.slam .enum,.eintro.slam .etitle,.eintro.slam .ehero,.eintro.slam .ealert,.eintro.slam .eflash{opacity:0!important;animation:none!important}
+/* "뿅" 팝 플래시 */
+.eintro .eboom{position:absolute;inset:0;z-index:12;pointer-events:none;opacity:0;background:radial-gradient(circle at 50% 50%,rgba(255,255,255,.92),var(--eaccSoft) 34%,transparent 66%)}
+.eintro.slam .eboom{animation:eBoom .55s ease-out both}
+@keyframes eBoom{0%{opacity:0;transform:scale(.6)}14%{opacity:.82;transform:scale(1)}100%{opacity:0;transform:scale(1.35)}}
 .eintro .ealert{position:absolute;inset:0;z-index:5;pointer-events:none;opacity:0;box-shadow:inset 0 0 130px 34px var(--eaccSoft),inset 0 0 66px 8px var(--eaccGlow)}
 .eintro .ealert.on{animation:eAlert .95s ease-out both}
 @keyframes eAlert{0%{opacity:.5}100%{opacity:0}}
@@ -1133,7 +1139,7 @@ function encoreIntro(onDone){
     +'<div class="enum" data-t=""></div>'
     +'<div class="etitle"><div class="etlbl">UPLOADER</div><div class="emap">'+recName+'</div><div class="emu">'+subLine+'</div></div>'
     +'<div class="ehero"><div class="eroster">'+rosterHTML+'</div></div>'
-    +'<div class="eflash"></div><div class="eshut"><i></i><i></i></div><div class="ealert"></div><div class="escan"></div><div class="evig"></div>';
+    +'<div class="eflash"></div><div class="eshut"><i></i><i></i></div><div class="eboom"></div><div class="ealert"></div><div class="escan"></div><div class="evig"></div>';
   host.appendChild(ov);
   (function(){ // 배경: 종족 우주사진 풀에서 랜덤 → (실패시 다음) → 썸네일 → 어두운 라디얼
     var ebg=ov.querySelector('.ebg');
@@ -1146,11 +1152,12 @@ function encoreIntro(onDone){
   function rt(el,c){if(!el)return;el.classList.remove(c);void el.offsetWidth;el.classList.add(c);}
   var COUNT=['3','2','1'],CTDUR=1000,HOLD=900,timer=null,finished=false;
   function finish(){if(finished)return;finished=true;if(timer)clearTimeout(timer);
-    // 3막: 도어가 닫힌 상태에서 천천히 양쪽으로 열리며 게임 화면 등장 (닫는 동작 없음)
-    if(num)num.style.opacity='0';if(title)title.classList.remove('show','out');
-    ov.classList.add('slam');onDone();
-    setTimeout(function(){if(ov)ov.classList.add('gone');},1000);
-    setTimeout(function(){if(ov&&ov.parentNode)ov.parentNode.removeChild(ov);},1300);}
+    // 3막: 배경(도어)이 양쪽으로 열리며 그 뒤의 실제 스타 화면이 뿅 등장
+    if(num){num.classList.remove('qp');num.style.opacity='0';num.textContent='';}  // 팝 애니 제거 → '1' 확실히 사라짐
+    if(title)title.classList.remove('show','out');
+    ov.classList.add('slam');onDone();          // onDone: 도어 뒤에서 스타 영상 재생 시작
+    setTimeout(function(){if(ov)ov.classList.add('gone');},850);
+    setTimeout(function(){if(ov&&ov.parentNode)ov.parentNode.removeChild(ov);},1150);}
   function runCount(){ // 2막: 빠른 3·2·1 + 링이 한 번에 가득 차오름
     if(finished)return;
     if(title)rt(title,'out');
