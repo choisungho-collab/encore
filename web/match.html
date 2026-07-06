@@ -1003,12 +1003,12 @@ var EINTRO_CSS=`
 .eintro .eshut i:first-child::before{right:0}
 .eintro .eshut i:last-child::before{left:0}
 /* slam: 도어가 중앙에서 쾅 닫혔다가 양쪽으로 활짝 열림 */
-.eintro.slam .eshut i:first-child{animation:eDoorL .8s cubic-bezier(.6,0,.15,1) both}
-.eintro.slam .eshut i:last-child{animation:eDoorR .8s cubic-bezier(.6,0,.15,1) both}
-.eintro.slam .eshut i::before{animation:eSeam .8s ease-out both}
-@keyframes eDoorL{0%{transform:translateX(-100%)}22%{transform:translateX(0)}40%{transform:translateX(0)}100%{transform:translateX(-101%)}}
-@keyframes eDoorR{0%{transform:translateX(100%)}22%{transform:translateX(0)}40%{transform:translateX(0)}100%{transform:translateX(101%)}}
-@keyframes eSeam{0%{opacity:0}18%{opacity:0}24%{opacity:1}40%{opacity:1}100%{opacity:0}}
+.eintro.slam .eshut i:first-child{animation:eDoorL 1.3s cubic-bezier(.55,0,.25,1) both}
+.eintro.slam .eshut i:last-child{animation:eDoorR 1.3s cubic-bezier(.55,0,.25,1) both}
+.eintro.slam .eshut i::before{animation:eSeam 1.3s ease-out both}
+@keyframes eDoorL{0%{transform:translateX(-100%)}16%{transform:translateX(0)}30%{transform:translateX(0)}100%{transform:translateX(-101%)}}
+@keyframes eDoorR{0%{transform:translateX(100%)}16%{transform:translateX(0)}30%{transform:translateX(0)}100%{transform:translateX(101%)}}
+@keyframes eSeam{0%{opacity:0}12%{opacity:0}18%{opacity:1}30%{opacity:1}100%{opacity:0}}
 .eintro .ealert{position:absolute;inset:0;z-index:5;pointer-events:none;opacity:0;box-shadow:inset 0 0 130px 34px var(--eaccSoft),inset 0 0 66px 8px var(--eaccGlow)}
 .eintro .ealert.on{animation:eAlert .95s ease-out both}
 @keyframes eAlert{0%{opacity:.5}100%{opacity:0}}
@@ -1031,6 +1031,7 @@ var EINTRO_CSS=`
 @keyframes eCharge{from{stroke-dashoffset:var(--EC)}to{stroke-dashoffset:0}}
 /* 1막 매치업 타이틀 (맵 + 대진) */
 .eintro .etitle{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:6;text-align:center;pointer-events:none;opacity:0;width:min(90vw,900px)}
+.eintro .etitle .etlbl{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:clamp(10px,1.7vmin,14px);letter-spacing:.42em;color:var(--eacc);opacity:.85;margin-bottom:.7em;text-shadow:0 0 14px var(--eaccGlow)}
 .eintro .etitle .emap{font-family:'Pretendard Variable','Pretendard',sans-serif;font-weight:900;font-size:clamp(40px,8.4vmin,94px);line-height:1.02;color:#fff;text-shadow:0 2px 30px rgba(0,0,0,.72),0 0 42px var(--eaccGlow);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .eintro .etitle .emu{margin-top:.55em;font-size:clamp(13px,2.5vmin,23px);letter-spacing:.36em;color:var(--eacc);text-shadow:0 0 18px var(--eaccGlow);font-weight:700}
 .eintro .etitle.show{animation:eTitleIn .5s cubic-bezier(.16,.9,.24,1) both}
@@ -1118,6 +1119,8 @@ function encoreIntro(onDone){
   var svP=null;(players||[]).forEach(function(p){if(p.name===sv)svP=p;});
   var roster=(_POV_PLAYERS&&_POV_PLAYERS.length)?_POV_PLAYERS:((homeArr&&homeArr.length)?homeArr:(svP?[svP]:[]));
   var rosterHTML=roster.map(function(p){var rid=RID(p.race);return '<div class="eplr"><span class="ebadge" style="--pc:'+(p.color||acc)+'">'+esc(rid)+'</span><span class="epn"><span class="eshine">'+esc(p.name||'—')+'</span></span></div>';}).join('');
+  var recName=esc(sv||((roster[0]||{}).name)||'리플레이');   // 센터: 녹화한 사람
+  var subLine=mapN+(muStr?' · '+muStr:'');                    // 서브: 맵 · 대진
   var partsHTML='<div class="eparts">';
   for(var _pi=0;_pi<16;_pi++){var _pl=Math.round(Math.random()*100),_pd=(4+Math.random()*5).toFixed(1),_pdl=(Math.random()*5).toFixed(1),_ps=(2+Math.random()*2.5).toFixed(1);partsHTML+='<i style="left:'+_pl+'%;width:'+_ps+'px;height:'+_ps+'px;animation-duration:'+_pd+'s;animation-delay:'+_pdl+'s"></i>';}
   partsHTML+='</div>';
@@ -1128,7 +1131,7 @@ function encoreIntro(onDone){
     +'<svg class="earc" viewBox="0 0 100 100"><circle class="etrk" cx="50" cy="50" r="46"/><circle class="erun" cx="50" cy="50" r="46"/></svg>'
     +'<div class="eshock"></div>'
     +'<div class="enum" data-t=""></div>'
-    +'<div class="etitle"><div class="emap">'+mapN+'</div><div class="emu">'+muStr+'</div></div>'
+    +'<div class="etitle"><div class="etlbl">UPLOADER</div><div class="emap">'+recName+'</div><div class="emu">'+subLine+'</div></div>'
     +'<div class="ehero"><div class="eroster">'+rosterHTML+'</div></div>'
     +'<div class="eflash"></div><div class="eshut"><i></i><i></i></div><div class="ealert"></div><div class="escan"></div><div class="evig"></div>';
   host.appendChild(ov);
@@ -1141,13 +1144,13 @@ function encoreIntro(onDone){
   })();
   var num=ov.querySelector('.enum'),run=ov.querySelector('.erun'),shock=ov.querySelector('.eshock'),flash=ov.querySelector('.eflash'),alert=ov.querySelector('.ealert'),arc=ov.querySelector('.earc'),title=ov.querySelector('.etitle');
   function rt(el,c){if(!el)return;el.classList.remove(c);void el.offsetWidth;el.classList.add(c);}
-  var COUNT=['3','2','1'],CTDUR=340,HOLD=850,timer=null,finished=false;
+  var COUNT=['3','2','1'],CTDUR=600,HOLD=1600,timer=null,finished=false;
   function finish(){if(finished)return;finished=true;if(timer)clearTimeout(timer);
-    // 3막: 도어가 양쪽으로 폭발하며 게임 화면 등장
+    // 3막: 도어가 천천히 양쪽으로 열리며 게임 화면 등장
     if(num)num.style.opacity='0';if(title)title.classList.remove('show','out');
     ov.classList.add('slam');onDone();
-    setTimeout(function(){if(ov)ov.classList.add('gone');},760);
-    setTimeout(function(){if(ov&&ov.parentNode)ov.parentNode.removeChild(ov);},1080);}
+    setTimeout(function(){if(ov)ov.classList.add('gone');},1250);
+    setTimeout(function(){if(ov&&ov.parentNode)ov.parentNode.removeChild(ov);},1700);}
   function runCount(){ // 2막: 빠른 3·2·1 + 링이 한 번에 가득 차오름
     if(finished)return;
     if(title)rt(title,'out');
