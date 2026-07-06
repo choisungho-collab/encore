@@ -1022,10 +1022,24 @@ var EINTRO_CSS=`
 @keyframes ePop{0%{opacity:0;transform:scale(1.8);filter:blur(20px)}10%{opacity:1;transform:scale(1);filter:blur(0) drop-shadow(0 0 26px var(--eacc))}16%{transform:scale(1.03)}72%{opacity:1;filter:blur(0)}100%{opacity:0;transform:scale(.82);filter:blur(4px)}}
 .eintro .epop.go{animation:ePopGo 1.3s cubic-bezier(.16,.9,.24,1) both}
 @keyframes ePopGo{0%{opacity:0;transform:scale(.4);filter:blur(16px)}16%{opacity:1;transform:scale(1.14);filter:blur(0) drop-shadow(0 0 40px var(--eacc))}30%{transform:scale(.98)}100%{opacity:1;transform:scale(1)}}
-.eintro .earc{position:absolute;z-index:5;width:min(46vmin,340px);aspect-ratio:1;transform:rotate(-90deg);filter:drop-shadow(0 0 8px var(--eacc))}
-.eintro .earc circle{fill:none;stroke-width:2.4}
-.eintro .earc .etrk{stroke:rgba(120,150,175,.16)}
-.eintro .earc .erun{stroke:var(--eacc);stroke-linecap:round;stroke-dasharray:var(--EC);stroke-dashoffset:0}
+.eintro .earc{position:absolute;z-index:5;width:min(42vmin,320px);aspect-ratio:1;transform:rotate(-90deg);filter:drop-shadow(0 0 10px var(--eacc));opacity:0;transition:opacity .3s ease}
+.eintro .earc.show{opacity:1}
+.eintro .earc circle{fill:none;stroke-width:3}
+.eintro .earc .etrk{stroke:rgba(120,150,175,.18)}
+.eintro .earc .erun{stroke:var(--eacc);stroke-linecap:round;stroke-dasharray:var(--EC);stroke-dashoffset:var(--EC)}
+.eintro .echarge{animation:eCharge var(--countdur,1.1s) linear both}
+@keyframes eCharge{from{stroke-dashoffset:var(--EC)}to{stroke-dashoffset:0}}
+/* 1막 매치업 타이틀 (맵 + 대진) */
+.eintro .etitle{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:6;text-align:center;pointer-events:none;opacity:0;width:min(90vw,900px)}
+.eintro .etitle .emap{font-family:'Pretendard Variable','Pretendard',sans-serif;font-weight:900;font-size:clamp(40px,8.4vmin,94px);line-height:1.02;color:#fff;text-shadow:0 2px 30px rgba(0,0,0,.72),0 0 42px var(--eaccGlow);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.eintro .etitle .emu{margin-top:.55em;font-size:clamp(13px,2.5vmin,23px);letter-spacing:.36em;color:var(--eacc);text-shadow:0 0 18px var(--eaccGlow);font-weight:700}
+.eintro .etitle.show{animation:eTitleIn .5s cubic-bezier(.16,.9,.24,1) both}
+.eintro .etitle.out{animation:eTitleOut .3s ease-in both}
+@keyframes eTitleIn{0%{opacity:0;transform:translate(-50%,-50%) scale(.86);filter:blur(12px)}62%{opacity:1;filter:blur(0)}100%{opacity:1;transform:translate(-50%,-50%) scale(1)}}
+@keyframes eTitleOut{0%{opacity:1}100%{opacity:0;transform:translate(-50%,-50%) scale(1.1);filter:blur(6px)}}
+/* 2막 빠른 카운트 팝 (다음 숫자로 넘어갈 때까지 유지 → 깜빡임 없음) */
+.eintro .qp{animation:eQuick .38s cubic-bezier(.16,.9,.24,1) both}
+@keyframes eQuick{0%{opacity:0;transform:scale(1.5);filter:blur(12px)}30%{opacity:1;transform:scale(1);filter:blur(0) drop-shadow(0 0 24px var(--eacc))}100%{opacity:1;transform:scale(1.02)}}
 .eintro .esweep{animation:eSweep 1s linear both}
 @keyframes eSweep{from{stroke-dashoffset:0}to{stroke-dashoffset:var(--EC)}}
 .eintro .eshock{position:absolute;z-index:5;width:min(34vmin,260px);aspect-ratio:1;border-radius:50%;border:2px solid var(--eacc);opacity:0}
@@ -1113,7 +1127,8 @@ function encoreIntro(onDone){
     +partsHTML
     +'<svg class="earc" viewBox="0 0 100 100"><circle class="etrk" cx="50" cy="50" r="46"/><circle class="erun" cx="50" cy="50" r="46"/></svg>'
     +'<div class="eshock"></div>'
-    +'<div class="enum" data-t="5">5</div>'
+    +'<div class="enum" data-t=""></div>'
+    +'<div class="etitle"><div class="emap">'+mapN+'</div><div class="emu">'+muStr+'</div></div>'
     +'<div class="ehero"><div class="eroster">'+rosterHTML+'</div></div>'
     +'<div class="eflash"></div><div class="eshut"><i></i><i></i></div><div class="ealert"></div><div class="escan"></div><div class="evig"></div>';
   host.appendChild(ov);
@@ -1124,27 +1139,36 @@ function encoreIntro(onDone){
     if(tRaw)setBg(tRaw);
     pickBg(SPACE_BG[r1], setBg);
   })();
-  var num=ov.querySelector('.enum'),run=ov.querySelector('.erun'),shock=ov.querySelector('.eshock'),flash=ov.querySelector('.eflash'),alert=ov.querySelector('.ealert');
+  var num=ov.querySelector('.enum'),run=ov.querySelector('.erun'),shock=ov.querySelector('.eshock'),flash=ov.querySelector('.eflash'),alert=ov.querySelector('.ealert'),arc=ov.querySelector('.earc'),title=ov.querySelector('.etitle');
   function rt(el,c){if(!el)return;el.classList.remove(c);void el.offsetWidth;el.classList.add(c);}
-  var seq=['5','4','3','2','1'],i=0,timer=null,finished=false;
+  var COUNT=['3','2','1'],CTDUR=340,HOLD=850,timer=null,finished=false;
   function finish(){if(finished)return;finished=true;if(timer)clearTimeout(timer);
-    // 5·4·3·2·1 끝 → 숫자 감추고 도어 열리며 즉시 게임 화면
-    if(num)num.style.opacity='0';run.style.display='none';
+    // 3막: 도어가 양쪽으로 폭발하며 게임 화면 등장
+    if(num)num.style.opacity='0';if(title)title.classList.remove('show','out');
     ov.classList.add('slam');onDone();
     setTimeout(function(){if(ov)ov.classList.add('gone');},760);
     setTimeout(function(){if(ov&&ov.parentNode)ov.parentNode.removeChild(ov);},1080);}
-  function tick(){
+  function runCount(){ // 2막: 빠른 3·2·1 + 링이 한 번에 가득 차오름
     if(finished)return;
-    var t=seq[i];
-    num.textContent=t;num.setAttribute('data-t',t);num.classList.remove('go');rt(num,'epop');
-    run.style.display='';rt(run,'esweep');
-    rt(shock,'eburst');rt(flash,'on');rt(alert,'on');
-    i++;
-    if(i>=seq.length){timer=setTimeout(finish,750);return;}
-    timer=setTimeout(tick,1000);
+    if(title)rt(title,'out');
+    if(arc){arc.classList.add('show');ov.style.setProperty('--countdur',(COUNT.length*CTDUR)+'ms');rt(run,'echarge');}
+    rt(alert,'on');
+    var j=0;
+    (function step(){
+      if(finished)return;
+      var t=COUNT[j];
+      if(num){num.style.opacity='';num.textContent=t;num.setAttribute('data-t',t);rt(num,'qp');}
+      rt(shock,'eburst');rt(flash,'on');
+      j++;
+      if(j>=COUNT.length){timer=setTimeout(finish,CTDUR);return;}
+      timer=setTimeout(step,CTDUR);
+    })();
   }
+  // 1막: 맵+대진 등장, 선수 카드 슬램인 → HOLD 후 카운트
+  if(num)num.style.opacity='0';
+  if(title)rt(title,'show');
   ov.addEventListener('click',function(e){e.stopPropagation();finish();});
-  tick();
+  timer=setTimeout(runCount,HOLD);
 }
 /* ===== /인트로 ===== */
 if(vid){
