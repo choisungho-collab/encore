@@ -1003,12 +1003,12 @@ var EINTRO_CSS=`
 .eintro .eshut i:first-child::before{right:0}
 .eintro .eshut i:last-child::before{left:0}
 /* slam: 도어가 중앙에서 쾅 닫혔다가 양쪽으로 활짝 열림 */
-.eintro.slam .eshut i:first-child{animation:eDoorL 1.3s cubic-bezier(.55,0,.25,1) both}
-.eintro.slam .eshut i:last-child{animation:eDoorR 1.3s cubic-bezier(.55,0,.25,1) both}
-.eintro.slam .eshut i::before{animation:eSeam 1.3s ease-out both}
-@keyframes eDoorL{0%{transform:translateX(-100%)}16%{transform:translateX(0)}30%{transform:translateX(0)}100%{transform:translateX(-101%)}}
-@keyframes eDoorR{0%{transform:translateX(100%)}16%{transform:translateX(0)}30%{transform:translateX(0)}100%{transform:translateX(101%)}}
-@keyframes eSeam{0%{opacity:0}12%{opacity:0}18%{opacity:1}30%{opacity:1}100%{opacity:0}}
+.eintro.slam .eshut i:first-child{animation:eDoorL 1.15s cubic-bezier(.4,0,.2,1) both}
+.eintro.slam .eshut i:last-child{animation:eDoorR 1.15s cubic-bezier(.4,0,.2,1) both}
+.eintro.slam .eshut i::before{animation:eSeam 1.15s ease-out both}
+@keyframes eDoorL{0%{transform:translateX(0)}100%{transform:translateX(-101%)}}
+@keyframes eDoorR{0%{transform:translateX(0)}100%{transform:translateX(101%)}}
+@keyframes eSeam{0%{opacity:1}22%{opacity:.85}100%{opacity:0}}
 .eintro .ealert{position:absolute;inset:0;z-index:5;pointer-events:none;opacity:0;box-shadow:inset 0 0 130px 34px var(--eaccSoft),inset 0 0 66px 8px var(--eaccGlow)}
 .eintro .ealert.on{animation:eAlert .95s ease-out both}
 @keyframes eAlert{0%{opacity:.5}100%{opacity:0}}
@@ -1144,13 +1144,13 @@ function encoreIntro(onDone){
   })();
   var num=ov.querySelector('.enum'),run=ov.querySelector('.erun'),shock=ov.querySelector('.eshock'),flash=ov.querySelector('.eflash'),alert=ov.querySelector('.ealert'),arc=ov.querySelector('.earc'),title=ov.querySelector('.etitle');
   function rt(el,c){if(!el)return;el.classList.remove(c);void el.offsetWidth;el.classList.add(c);}
-  var COUNT=['3','2','1'],CTDUR=600,HOLD=1600,timer=null,finished=false;
+  var COUNT=['3','2','1'],CTDUR=1000,HOLD=900,timer=null,finished=false;
   function finish(){if(finished)return;finished=true;if(timer)clearTimeout(timer);
-    // 3막: 도어가 천천히 양쪽으로 열리며 게임 화면 등장
+    // 3막: 도어가 닫힌 상태에서 천천히 양쪽으로 열리며 게임 화면 등장 (닫는 동작 없음)
     if(num)num.style.opacity='0';if(title)title.classList.remove('show','out');
     ov.classList.add('slam');onDone();
-    setTimeout(function(){if(ov)ov.classList.add('gone');},1250);
-    setTimeout(function(){if(ov&&ov.parentNode)ov.parentNode.removeChild(ov);},1700);}
+    setTimeout(function(){if(ov)ov.classList.add('gone');},1000);
+    setTimeout(function(){if(ov&&ov.parentNode)ov.parentNode.removeChild(ov);},1300);}
   function runCount(){ // 2막: 빠른 3·2·1 + 링이 한 번에 가득 차오름
     if(finished)return;
     if(title)rt(title,'out');
