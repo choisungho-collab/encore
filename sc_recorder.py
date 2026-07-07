@@ -155,7 +155,7 @@ import queue as _queue
 from collections import deque as _deque
 GUI_Q = _queue.Queue(maxsize=4000)
 LOG_BUF = _deque(maxlen=400)   # 로그창이 닫혀 있어도 최근 로그를 항상 보관(열면 즉시 채움)
-APP_VERSION = "1.7.4"
+APP_VERSION = "1.7.3"
 REC_STATE = {"recording": False, "encoder": "", "ready": False}
 LAST_ERR = {"msg": "", "t": 0.0}
 UP_DONE = {"t": 0.0, "shown": 0.0}
@@ -3828,7 +3828,7 @@ def run_gui(cfg, url):
     import math
     BG="#0B0E14"; SURF="#161B25"; INK="#EAEDF3"; INK2="#C5CAD3"; DIM="#8B93A3"
     AZ="#AEB9CB"; AZ2="#D7DFEA"; REC="#FF5D52"; AMB="#E0B441"; LINE="#1E2531"; LINE2="#2B3340"
-    PANEL="#0B0E14"; SKY="#0c1018"; GND="#06090e"; OK="#3ED598"   # OK = Ready 상태점(초록)
+    PANEL="#0B0E14"; SKY="#0c1018"; GND="#06090e"
     W=468; CH=154
 
     def _mix(h1, h2, t):
@@ -3967,34 +3967,8 @@ def run_gui(cfg, url):
 
     # ---------- canvas (scene + status + meta + actions) ----------
     cv=_ZC(root, width=Z(W), height=Z(CH), bg=GND, highlightthickness=0); cv.pack(fill="x")
-    cv_img=None   # 리스킨: 정적 씬 PNG 대신 밤하늘을 캔버스로 직접 그린다(별 반짝임 애니메이션)
-    # ── 밤하늘: 세로 그라데이션 ──
-    _NB=22
-    for _i in range(_NB):
-        _t=_i/(_NB-1)
-        cv.create_rectangle(0, _i*CH/_NB, W, (_i+1)*CH/_NB+1,
-                            fill=_mix("#0e1522", GND, _t), outline="")
-    # 지평선 은은한 글로우(하단바에 대부분 가려져 윗부분만 비침)
-    cv.create_oval(W/2-270, 96, W/2+270, 210, fill=_mix(GND, "#17253f", 0.55), outline="")
-    # ── 별 20개(반짝임 대상) + 십자 반짝이 2개 ──
-    import random as _rnd
-    _rng=_rnd.Random(7)
-    _stars=[]
-    for _ in range(20):
-        _sx=_rng.uniform(14, W-14); _sy=_rng.uniform(8, 92); _r=_rng.choice((0.8, 1.0, 1.4))
-        _sid0=cv.create_oval(_sx-_r,_sy-_r,_sx+_r,_sy+_r, fill=_mix(SKY,"#EAF2FF",0.5), outline="")
-        _stars.append((_sid0, _rng.uniform(0,6.28), _rng.uniform(0.7,2.2)))
-    for (_cx,_cy) in ((132,32),(352,62)):
-        for _ln in (cv.create_line(_cx-4,_cy,_cx+4,_cy, fill="#c9d6ea", width=1),
-                    cv.create_line(_cx,_cy-4,_cx,_cy+4, fill="#c9d6ea", width=1)):
-            _stars.append((_ln, _rng.uniform(0,6.28), _rng.uniform(0.5,1.2)))
-    # ── 하단 바(버튼 존) ──
-    cv.create_rectangle(0, 104, W, CH+2, fill="#0a0e15", outline="")
-    cv.create_line(0, 104, W, 104, fill=LINE)
-    # ── 상태 점: 글로우 링 2겹 + 코어 (Ready=초록 글로우 / Recording=빨강 펄스 — _pulse 가 구동) ──
-    gl2=cv.create_oval(13,15,33,35, fill=_mix(SKY, OK, 0.14), outline="")
-    gl1=cv.create_oval(16,18,30,32, fill=_mix(SKY, OK, 0.30), outline="")
-    lid=cv.create_oval(18,20,28,30, fill=OK, outline="")
+    cv_img=cv.create_image(0,0, anchor="nw", image=scene_idle) if scene_idle else None
+    lid=cv.create_oval(18,20,28,30, fill=AZ2, outline="")
     wid=cv.create_text(40,25, anchor="w", text="Starting\u2026", fill=INK, font=fW)
     sid=cv.create_text(41,49, anchor="w", text="", fill=INK2, font=fSub)   # 타이틀 아래 둘째 줄 — 우측 메타와 겹침 없음
 
@@ -4238,18 +4212,9 @@ def run_gui(cfg, url):
         try:
             if not int(root.winfo_exists()): return
         except Exception: return
-        _t=time.time(); _rec=st["rec"]
-        base=REC if _rec else OK
-        k=0.55+0.45*(0.5+0.5*math.sin(_t*(3.4 if _rec else 1.7)))   # 녹화중엔 빠른 펄스, 대기엔 느린 숨쉬기
-        try:
-            cv.itemconfig(lid, fill=_mix(GND, base, min(1.0, k+0.30)))
-            cv.itemconfig(gl1, fill=_mix(SKY, base, 0.30*k))
-            cv.itemconfig(gl2, fill=_mix(SKY, base, 0.14*k))
-        except Exception: pass
-        try:   # 별 반짝임 — 위상·속도가 제각각이라 자연스러운 밤하늘
-            for _sid0,_ph,_sp in _stars:
-                _b=0.30+0.62*(0.5+0.5*math.sin(_t*_sp+_ph))
-                cv.itemconfig(_sid0, fill=_mix(SKY, "#EAF2FF", _b))
+        base=REC if st["rec"] else AZ2
+        k=0.55+0.45*(0.5+0.5*math.sin(time.time()*2.3))
+        try: cv.itemconfig(lid, fill=_mix(GND, base, k))
         except Exception: pass
         root.after(90, _pulse)
 
@@ -4295,7 +4260,7 @@ def run_gui(cfg, url):
         try:
             import ctypes
             hwnd=ctypes.windll.user32.GetParent(root.winfo_id()) or root.winfo_id()
-            _val=ctypes.c_int(1)   # 1 = dark title bar — 밤하늘 리스킨과 톤 일치
+            _val=ctypes.c_int(0)   # 0 = light (white) title bar, matching myPENTA
             for _attr in (20, 19):
                 try: ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, _attr, ctypes.byref(_val), ctypes.sizeof(_val))
                 except Exception: pass
