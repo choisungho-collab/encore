@@ -370,7 +370,28 @@ svg{display:block}
 .cclh::before{content:'';width:8px;height:8px;border-radius:50%;flex-shrink:0}
 .cclh.good{color:var(--acc-ink)}.cclh.good::before{background:var(--acc)}
 .cclh.bad{color:var(--loss)}.cclh.bad::before{background:var(--loss)}
-@media(max-width:760px){.ccols{grid-template-columns:1fr;gap:20px}}
+@media(max-width:760px){.ccols{grid-template-columns:1fr;gap:20px}.ccard{padding:12px 13px}.ccard p{font-size:13.5px;line-height:1.65}}
+.cgrades{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 0}
+.cgrade{display:inline-flex;align-items:center;gap:7px;padding:6px 11px;border-radius:10px;background:var(--well);border:1px solid var(--line)}
+.cgrade i{font-style:normal;font-family:var(--fd);font-size:11.5px;color:var(--dim);font-weight:600}
+.cgrade b{font-family:var(--fm);font-size:13px;font-weight:800;color:var(--ink2)}
+.cgrade.gS{border-color:rgba(231,167,63,.5);background:rgba(231,167,63,.09)}.cgrade.gS b{color:var(--gold)}
+.cgrade.gA{border-color:var(--acc-line);background:var(--acc-soft)}.cgrade.gA b{color:var(--acc-ink)}
+.cgrade.gC{border-color:rgba(232,105,76,.42);background:rgba(232,105,76,.08)}.cgrade.gC b{color:var(--loss)}
+.cseek{font-family:var(--fm);font-size:10.5px;font-weight:700;color:var(--acc-ink);background:var(--acc-soft);border:1px solid var(--acc-line);border-radius:7px;padding:3px 8px;cursor:pointer;flex:none;line-height:1.4}
+.cseek:active{transform:scale(.95)}
+.cctsp{flex:1 1 auto;min-width:6px}
+.statseek{cursor:pointer;position:relative}
+.statseek::after{content:'▶';position:absolute;top:5px;right:7px;font-size:8px;color:var(--acc-ink);opacity:.75}
+.statseek:active{transform:scale(.97)}
+.cmore{display:block}
+.cmore summary{list-style:none;cursor:pointer;font-family:var(--fm);font-size:11px;font-weight:700;color:var(--dim);background:var(--well);border:1px dashed var(--line);border-radius:10px;padding:9px 12px;text-align:center;user-select:none}
+.cmore summary::-webkit-details-marker{display:none}
+.cmore summary:active{transform:scale(.98)}
+.cmore[open] summary{margin-bottom:11px;color:var(--ink2)}
+.cmorein{display:grid;gap:11px}
+.bomore{margin-top:8px}.bomore .cmorein{gap:0}
+.momore{margin:6px 14px 10px}
 
 /* compare */
 .cmp{display:flex;gap:12px;overflow-x:auto;padding-bottom:14px}
@@ -882,17 +903,36 @@ html,body{overflow-x:hidden;max-width:100%}
 <script src="encore-auth.js"></script>
 <script src="coach.js"></script>
 <script>
-
-
-async function __get(p){const r=await fetch(SB+"/rest/v1/"+p,{headers:H});if(!r.ok)throw new Error(r.status);return r.json();}
+// ── 부팅 안전망: 어떤 이유로든 첫 화면이 '검은 화면'으로 침묵하지 않게 ──
+window.addEventListener('error',function(ev){try{__bootFail('스크립트 오류',ev&&ev.message);}catch(_){}});
+window.addEventListener('unhandledrejection',function(ev){try{__bootFail('로딩 오류',(ev&&ev.reason&&ev.reason.message)||'');}catch(_){}});
+function __bootFail(title,detail){
+  if(window.__ENC_BOOTED)return; // 본 렌더가 이미 떴으면 조용히 무시
+  if(document.getElementById('bootfail'))return;
+  var d=document.createElement('div');d.id='bootfail';
+  d.style.cssText='position:fixed;inset:0;z-index:9999;display:grid;place-items:center;background:#080a0f;color:#9AA0AA;font-family:monospace;text-align:center;padding:24px';
+  d.innerHTML='<div><div style="font-size:15px;margin-bottom:6px">'+title+'</div>'+(detail?'<div style="font-size:11px;opacity:.6;margin-bottom:14px;max-width:280px;word-break:break-all">'+String(detail).slice(0,120)+'</div>':'<div style="font-size:12px;opacity:.7;margin-bottom:14px">네트워크 상태를 확인해 주세요</div>')+'<button onclick="location.reload()" style="font:inherit;color:#dfe5ee;background:#1a2230;border:1px solid #2c3a52;border-radius:10px;padding:10px 22px;cursor:pointer">다시 시도</button> <a href="index.html" style="color:#8fb8d8;margin-left:10px;font-size:13px">아카이브로</a></div>';
+  document.body.appendChild(d);
+}
+async function __get(p,ms){
+  const ctl=new AbortController();const t=setTimeout(()=>ctl.abort(),ms||12000);
+  try{const r=await fetch(SB+"/rest/v1/"+p,{headers:H,signal:ctl.signal});if(!r.ok)throw new Error(r.status);return await r.json();}
+  finally{clearTimeout(t);}
+}
 (async()=>{
  const __id=new URLSearchParams(location.search).get("id");
  {var _sk=document.getElementById("stage");if(_sk)_sk.innerHTML=String.raw`<div class="skel-thumb" style="border-radius:17px"></div>`;}
- let __m;try{__m=(await __get("matches?id=eq."+encodeURIComponent(__id)+"&select=*&limit=1"))[0];}catch(e){}
+ let __m,__netErr=null;
+ for(let __try=0;__try<2&&!__m;__try++){ // 인앱 웹뷰 첫 요청 실패가 잦아 1회 자동 재시도
+   try{__m=(await __get("matches?id=eq."+encodeURIComponent(__id)+"&select=*&limit=1",12000))[0];__netErr=null;}
+   catch(e){__netErr=e;if(__try===0)await new Promise(r=>setTimeout(r,700));}
+ }
+ if(__netErr){__bootFail('불러오기 실패',(__netErr.name==='AbortError')?'연결 시간 초과':(__netErr.message||''));return;}
  if(!__m){document.body.innerHTML='<div style="display:grid;place-items:center;height:100vh;color:#9AA0AA;font-family:monospace">경기를 찾을 수 없어요 <a href="index.html" style="color:var(--acc-ink);margin-left:8px">아카이브로</a></div>';return;}
  let __a;try{__a=(typeof __m.analysis==="string")?JSON.parse(__m.analysis||"{}"):(__m.analysis||{});}catch(e){__a=null;}
  if(!__a||!__a.meta){document.body.innerHTML='<div style="display:grid;place-items:center;height:100vh;color:#9AA0AA;font-family:monospace">분석 데이터가 없는 경기예요 <a href="index.html" style="color:var(--acc-ink);margin-left:8px">아카이브로</a></div>';return;}
  if(!__a.highlights)__a.highlights=[];
+ window.__ENC_BOOTED=true; // 첫 페인트 성공 — 이후 오류는 부팅 배너 대상 아님
  let __cmts=[];try{__cmts=await __get("comments?match_id=eq."+encodeURIComponent(__id)+"&select=*&order=created.asc");}catch(e){}
  const __pn=new Set((__a.players||[]).map(p=>p.name));__cmts.forEach(c=>c.participant=__pn.has(c.author));
  document.title=(mapName(__a.meta.map)||"Match")+" · ENCORE";
@@ -1200,6 +1240,7 @@ if(vid){
  if(vplay&&VIDEO){var _at0=Date.now();(function _autoPlay(){if(!vplay||vplay._done)return;if(_POV_PLAYERS||Date.now()-_at0>1200){try{vplay.click();}catch(e){}return;}setTimeout(_autoPlay,120);})();}
 }
 const seek=s=>{if(!vid)return;const go=()=>{hideOverlay();try{vid.currentTime=Math.max(0,Math.min((vid.duration||1e9),s+OFF));}catch(e){}vid.play().catch(()=>{});vid.scrollIntoView({behavior:'smooth',block:'center'});};if(vid.readyState>=1){go();}else{vid.addEventListener('loadedmetadata',go,{once:true});}};
+document.addEventListener('click',function(e){var b=e.target&&e.target.closest?e.target.closest('.cseek,.statseek'):null;if(!b)return;e.preventDefault();e.stopPropagation();var s=parseFloat(b.getAttribute('data-s'));if(isFinite(s))seek(s);});
 
 // ── 단일뷰 커스텀 컨트롤 바(#2) + 키보드 단축키/스크럽 툴팁(#3) ──
 if(vid){(function(){
@@ -1775,8 +1816,9 @@ if(HL.length){
  if(document.fonts&&document.fonts.ready)document.fonts.ready.then(clampTips);
  let _ctw;window.addEventListener('resize',()=>{clearTimeout(_ctw);_ctw=setTimeout(clampTips,120);});
  const moE=document.getElementById('moments');
- moE.innerHTML=HL.map((h,i)=>
-  `<div class="mrow" data-s="${h.sec}"><span class="mtime">${h.t||fmt(h.sec)}</span><span class="mic ${KCLASS[h.kind]}">${KICON[h.kind]}</span><span class="mtx"><span class="mlabel">${h.label}</span><span class="mwho">${h.who||'전장 전체'}</span></span></div>`).join('');
+ const _mrow=h=>`<div class="mrow" data-s="${h.sec}"><span class="mtime">${h.t||fmt(h.sec)}</span><span class="mic ${KCLASS[h.kind]}">${KICON[h.kind]}</span><span class="mtx"><span class="mlabel">${h.label}</span><span class="mwho">${h.who||'전장 전체'}</span></span></div>`;
+ const _MLIM=6,_mrest=HL.slice(_MLIM);
+ moE.innerHTML=HL.slice(0,_MLIM).map(_mrow).join('')+(_mrest.length?`<details class="cmore momore" style="grid-column:1/-1"><summary>나머지 ${_mrest.length}개 장면 보기</summary><div class="moments" style="padding:0">${_mrest.map(_mrow).join('')}</div></details>`:'');
  moE.querySelectorAll('.mrow').forEach(el=>el.onclick=()=>seek(+el.dataset.s));
  moE.querySelectorAll('.mthumb video').forEach(v=>{v.addEventListener('loadedmetadata',()=>{try{v.currentTime=Math.min(11,(v.duration||28)*0.42);}catch(e){}},{once:true});});
  const upd=()=>{const v=document.getElementById('vid');if(!v||!v.duration)return;const gt=Math.max(0,Math.min(totalSec,v.currentTime-OFF));const p=gt/totalSec*100;
@@ -1803,29 +1845,42 @@ const BO_TECHB=new Set(['Cybernetics Core','Citadel of Adun','Templar Archives',
 function boGroup(b){if(b.cat==='building'){if(BO_HALL.has(b.name))return{c:'bo-hall',l:'확장'};if(BO_PROD.has(b.name))return{c:'bo-prod',l:'생산'};if(BO_TECHB.has(b.name))return{c:'bo-tech',l:'테크'};return{c:'bo-mute',l:'건물'};}if(b.cat==='morph')return{c:'bo-tech',l:'변환'};if(b.cat==='upgrade')return{c:'bo-tech',l:'업글'};if(b.cat==='tech')return{c:'bo-tech',l:'연구'};return{c:'bo-mute',l:''};}
 function coachBlock(p){
  const cr=(typeof COACH!=='undefined'?COACH:[]).find(c=>c.id===p.id);if(!cr)return'';
- const cardHTML=(pt,top)=>`<div class="ccard ${TONEC[pt.tone]||'ct'}"><div class="cct"><span class="cci">${CIC[pt.k]||I.info}</span><b>${pt.t}</b>${top?'<span class="cpri">1순위</span>':''}</div><p>${pt.x}</p></div>`;
- const gp=(cr.points||[]).filter(pt=>pt.tone==='good'),bp=(cr.points||[]).filter(pt=>pt.tone!=='good');
+ const _fmt=s=>{s=Math.max(0,Math.round(+s||0));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');};
+ const cardHTML=(pt,top)=>`<div class="ccard ${TONEC[pt.tone]||'ct'}"><div class="cct"><span class="cci">${CIC[pt.k]||I.info}</span><b>${pt.t}</b><span class="cctsp"></span>${(pt.sec!=null&&VIDEO)?`<button class="cseek" data-s="${pt.sec}" title="영상에서 이 순간 보기">▶ ${_fmt(pt.sec)}</button>`:''}${top?'<span class="cpri">1순위</span>':''}</div><p>${pt.x}</p></div>`;
+ const gp=(cr.points||[]).filter(pt=>pt.tone==='good');
+ const _sev={warn:0,tip:1};
+ const bp=(cr.points||[]).filter(pt=>pt.tone!=='good').sort((a,b)=>(_sev[a.tone]??1)-(_sev[b.tone]??1));
+ const _wrap=(arr,lim,firstPri)=>{
+   const head=arr.slice(0,lim).map((pt,i)=>cardHTML(pt,firstPri&&i===0)).join('');
+   const rest=arr.slice(lim);
+   return head+(rest.length?`<details class="cmore"><summary>나머지 ${rest.length}개 보기</summary><div class="cmorein">${rest.map(pt=>cardHTML(pt,false)).join('')}</div></details>`:'');
+ };
+ const GC={S:'gS',A:'gA',B:'gB',C:'gC'};
+ const gr=(cr.grades&&cr.grades.length)?`<div class="cgrades">${cr.grades.map(g=>`<span class="cgrade ${GC[g.g]||''}"><i>${g.k}</i><b>${g.g}</b></span>`).join('')}</div>`:'';
  const vd=cr.verdict?`<div class="cverdict"><span class="cvl">총평</span><span class="cvt">${cr.verdict}</span></div>`:'';
  const cnt=n=>n?`<span class="ccln">${n}</span>`:'';
- return `<div class="coach"><div class="ch coachh">코치 리포트 <span class="cnote">실제 리플레이 기반 · 스타크래프트 기준</span></div>${vd}<div class="ccols"><div class="ccol"><div class="cclh good">잘한 점${cnt(gp.length)}</div>${gp.length?gp.map(pt=>cardHTML(pt,false)).join(''):'<div class="cnone">—</div>'}</div><div class="ccol"><div class="cclh bad">아쉬운 점${cnt(bp.length)}</div>${bp.length?bp.map((pt,i)=>cardHTML(pt,i===0)).join(''):'<div class="cnone">개선할 점이 없어요 — 깔끔한 한 판!</div>'}</div></div></div>`;
+ return `<div class="coach"><div class="ch coachh">코치 리포트 <span class="cnote">실제 리플레이 기반 · 스타크래프트 기준</span></div>${gr}${vd}<div class="ccols"><div class="ccol"><div class="cclh good">잘한 점${cnt(gp.length)}</div>${gp.length?_wrap(gp,3,false):'<div class="cnone">—</div>'}</div><div class="ccol"><div class="cclh bad">아쉬운 점${cnt(bp.length)}</div>${bp.length?_wrap(bp,4,true):'<div class="cnone">개선할 점이 없어요 — 깔끔한 한 판!</div>'}</div></div></div>`;
 }
 function factsBlock(p){
  const cr=(typeof COACH!=='undefined'?COACH:[]).find(c=>c.id===p.id);if(!cr||!cr.timings)return'';
- const t=cr.timings;const st=(v,k)=>`<div class="stat"><div class="v">${v}</div><div class="k">${k}</div></div>`;
+ const t=cr.timings;const st=(v,k,sec)=>`<div class="stat${(sec!=null&&VIDEO)?' statseek':''}"${(sec!=null&&VIDEO)?` data-s="${sec}" title="영상에서 이 순간 보기"`:''}><div class="v">${v}</div><div class="k">${k}</div></div>`;
  const _up=(t.atk_lv!=null||t.arm_lv!=null)?`공${t.atk_lv||0}·방${t.arm_lv||0}`:`${t.up_n}개`;
  let h=st(t.workers,'일꾼')+st(t.tcount,'멀티');
  if(t.main_prod_n!=null)h+=st(t.main_prod_n,t.main_prod_ko||'생산');
- h+=st(_up,'업글');
+ h+=st(_up,'업글',t.up1?_s2(t.up1):null);
  if(t.supply_bld!=null)h+=st(t.supply_bld,t.supply_ko||'서플');
- if(t.scout_first)h+=st(t.scout_first,'정찰');
- if(t.atk_first)h+=st(t.atk_first,'첫 진출');
+ if(t.scout_first)h+=st(t.scout_first,'정찰',_s2(t.scout_first));
+ if(t.atk_first)h+=st(t.atk_first,'첫 진출',_s2(t.atk_first));
  if(t.groups!=null)h+=st(t.groups,'컨트롤');
  if(t.drops)h+=st(t.drops,'드랍');
  return `<div class="statline statsub">${h}</div>`;
 }
 function detail(p){const s=p.summary;
  const stat=(v,k,acc)=>{const d=(typeof v==='number'&&isFinite(v))?String(Math.round(v)):(v??'—');return `<div class="stat"><div class="v ${acc?'acc':''}">${d}</div><div class="k">${k}</div></div>`;};
- const bo=(p.build||[]).map(b=>{const g=boGroup(b);return `<div class="brow ${g.c}"><span class="bt">${b.t}</span><span class="bd"></span><span class="bn">${esc(b.name||'')}</span><span class="bc">${g.l}</span></div>`;}).join('')||'<div style="color:var(--faint);padding:8px;font-size:14px">기록 없음</div>';
+ const _brow=b=>{const g=boGroup(b);return `<div class="brow ${g.c}"><span class="bt">${b.t}</span><span class="bd"></span><span class="bn">${esc(b.name||'')}</span><span class="bc">${g.l}</span></div>`;};
+ const _ball=(p.build||[]);const _bseen=new Set();
+ const _bkey=_ball.filter(b=>{const g=boGroup(b);if(g.c==='bo-hall'||g.c==='bo-tech')return true;if(g.c==='bo-prod'){if(_bseen.has(b.name))return false;_bseen.add(b.name);return true;}return false;});
+ const bo=_ball.length?(_bkey.map(_brow).join('')+(_ball.length>_bkey.length?`<details class="cmore bomore"><summary>전체 빌드 ${_ball.length}개 보기</summary><div class="cmorein">${_ball.map(_brow).join('')}</div></details>`:'')):'<div style="color:var(--faint);padding:8px;font-size:14px">기록 없음</div>';
  const mu=Math.max(1,...((p.units||[]).map(u=>u.n)));
  const un=(p.units||[]).slice(0,10).map(u=>`<div class="urow"><span class="un">${esc(u.name)}</span><span class="ubar"><span style="width:${u.n/mu*100}%"></span></span><span class="uc">${u.n}</span><span class="uf">${u.first||''}</span></div>`).join('')||'<div style="color:var(--faint);font-size:14px">기록 없음</div>';
  const _ut=p.up_timed;
