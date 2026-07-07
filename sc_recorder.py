@@ -155,7 +155,7 @@ import queue as _queue
 from collections import deque as _deque
 GUI_Q = _queue.Queue(maxsize=4000)
 LOG_BUF = _deque(maxlen=400)   # 로그창이 닫혀 있어도 최근 로그를 항상 보관(열면 즉시 채움)
-APP_VERSION = "1.7.0"
+APP_VERSION = "1.7.2"
 REC_STATE = {"recording": False, "encoder": "", "ready": False}
 LAST_ERR = {"msg": "", "t": 0.0}
 UP_DONE = {"t": 0.0, "shown": 0.0}
@@ -1233,7 +1233,7 @@ def make_preview(src, out, start_sec=12, dur=5):
     try:
         f = FFMPEG or "ffmpeg"
         cmd = [f, "-y", "-ss", str(max(0, int(start_sec or 0))), "-i", src, "-t", str(dur), "-an",
-               "-vf", "scale=-2:360", "-c:v", "libx264", "-preset", "veryfast", "-crf", "30",
+               "-vf", "scale=-2:360", *_hw_or_x264(30),
                "-movflags", "+faststart", out]
         subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=240,
                        creationflags=(0x08000000 if os.name == "nt" else 0))
@@ -1620,18 +1620,47 @@ def prebind_identity():
     return None
 
 def upload_selftest():
-    """서명 라우트(/api/storage)가 살아있는지 확인. 콘솔 상태 표시용."""
+    """서명 라우트(/api/storage) 상태를 '정확한 이유와 함께' 진단해 콘솔에 남긴다.
+    이전엔 모든 실패를 '함수 배포 필요' 하나로 뭉뚱그려 원인 파악이 불가능했음 → 케이스별로 분리."""
     import requests
+    origin = _gallery_origin()
+    url = origin + "/api/storage"
     try:
-        r = requests.post(_gallery_origin() + "/api/storage", json={"action": "ping"}, timeout=10)
-        if r.status_code == 200 and (r.json() or {}).get("ok"):
-            log("Cloud upload self-test: OK ✓  (signed route /api/storage is live)")
-            return True
-    except Exception:
-        pass
-    log("⚠ signed route /api/storage 없음 → netlify/functions/storage.js + netlify.toml 배포, "
-        "Netlify env(SUPABASE_SERVICE_KEY) 설정 필요. (설정 전엔 로컬 보관/재시도)")
-    return False
+        r = requests.post(url, json={"action": "ping"}, timeout=10)
+    except requests.exceptions.ConnectionError:
+        log("⚠ 업로드 서버 연결 실패 → gallery_url(%s) 주소·인터넷 연결 확인. (영상은 로컬 보관 후 자동 재시도)" % origin)
+        return False
+    except requests.exceptions.Timeout:
+        log("⚠ 업로드 서버 응답 시간 초과(%s) → 네트워크 확인. (영상은 로컬 보관 후 자동 재시도)" % origin)
+        return False
+    except Exception as e:
+        log("⚠ 업로드 자가진단 오류(%s: %s) — 영상은 로컬 보관 후 자동 재시도." % (type(e).__name__, str(e)[:80]))
+        return False
+
+    # 라우트가 없다(404) = 함수/리다이렉트 미배포
+    if r.status_code == 404:
+        log("⚠ /api/storage 라우트 없음(404) → netlify/functions/storage.js + netlify.toml 배포 확인. (로컬 보관/재시도)")
+        return False
+    if r.status_code != 200:
+        log("⚠ 업로드 서버 오류(HTTP %s): %s (로컬 보관/재시도)" % (r.status_code, (r.text or "")[:120]))
+        return False
+
+    try: j = r.json() or {}
+    except Exception: j = {}
+    if not j.get("ok"):
+        log("⚠ /api/storage 응답 이상(%s) → 함수 버전 확인. (로컬 보관/재시도)" % (str(j)[:100]))
+        return False
+
+    # 라우트는 살아있음. 이제 '실제 업로드가 가능한 상태'인지(=service_key 설정)까지 검증.
+    # 함수가 configured=false 를 주면 selftest 는 통과했는데 업로드만 죽는 '거짓 안심'을 방지.
+    if j.get("configured") is False:
+        log("⚠ /api/storage 는 살아있지만 Netlify 환경변수 SUPABASE_SERVICE_KEY 가 없음 → "
+            "Netlify 대시보드 → Site configuration → Environment variables 에 설정 후 재배포. "
+            "(설정 전엔 업로드가 로컬 보관됨)")
+        return False
+
+    log("Cloud upload self-test: OK ✓  (업로드 경로 정상 · %s)" % (("버킷 " + j.get("bucket")) if j.get("bucket") else origin))
+    return True
 
 def sb_get_comments(mid):
     return _sb_get("comments?match_id=eq.%s&select=id,author,body,created&order=created.asc" % mid).json()
@@ -2225,6 +2254,21 @@ def _ffprobe_dur(path):
     except Exception:
         return None
 
+def _hw_or_x264(q, x264_preset="veryfast"):
+    """짧은 클립·프리뷰용 인코더 인자 — 하드웨어(NVENC/AMF/QSV) 우선, 없으면 x264 폴백.
+    게임 직후 스타가 켜져 있어도 CPU 를 잡아먹지 않도록 녹화와 같은 HW 인코더를 재사용한다.
+    q: 품질 값(HW cq/qp ↔ x264 crf 로 그대로 사용, 값이 클수록 저용량)."""
+    try: base = _encoder_args()
+    except Exception: base = []
+    qs = str(int(q))
+    if "h264_nvenc" in base:
+        return ["-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", qs, "-b:v", "0"]
+    if "h264_amf" in base:
+        return ["-c:v", "h264_amf", "-quality", "quality", "-rc", "cqp", "-qp_i", qs, "-qp_p", qs]
+    if "h264_qsv" in base:
+        return ["-c:v", "h264_qsv", "-preset", "faster", "-global_quality", qs]
+    return ["-c:v", "libx264", "-preset", x264_preset, "-crf", qs]
+
 CLIP_KINDS = {"battle", "gg", "drop"}
 def make_clips(video_path, highlights, game_len_sec, out_dir, lead=6.0, maxn=3, dur=30.0, pre=12.0):
     """하이라이트(교전·드랍·GG) 지점에서 짧은 공유용 클립 생성 → [(highlight_idx, local_path), ...]."""
@@ -2245,7 +2289,7 @@ def make_clips(video_path, highlights, game_len_sec, out_dir, lead=6.0, maxn=3, 
         clip = os.path.join(out_dir, f"clip{idx}.mp4")
         try:
             _run([FFMPEG, "-y", "-loglevel", "error", "-ss", f"{vstart:.2f}", "-i", video_path,
-                  "-t", f"{dur:.0f}", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+                  "-t", f"{dur:.0f}", *_hw_or_x264(23),
                   "-g", "48", "-keyint_min", "24",
                   "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", clip], timeout=180)
             if os.path.isfile(clip) and os.path.getsize(clip) > 5000:
@@ -2317,18 +2361,18 @@ def _compress_encoder():
     base = _encoder_args()
     if "h264_nvenc" in base:
         # NVENC 는 라이브 녹화와 동시 2세션 이상 가능(GTX 900대 이후). p5=빠름·고효율, cq=용량/화질 균형.
-        return (["-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "24", "-b:v", "0"], "NVENC (하드웨어)")
+        return (["-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "26", "-b:v", "0"], "NVENC (하드웨어)")
     if "h264_amf" in base:
-        return (["-c:v", "h264_amf", "-quality", "quality", "-rc", "cqp", "-qp_i", "24", "-qp_p", "24"], "AMF (하드웨어)")
+        return (["-c:v", "h264_amf", "-quality", "quality", "-rc", "cqp", "-qp_i", "26", "-qp_p", "26"], "AMF (하드웨어)")
     if "h264_qsv" in base:
-        return (["-c:v", "h264_qsv", "-preset", "faster", "-global_quality", "24"], "QSV (하드웨어)")
+        return (["-c:v", "h264_qsv", "-preset", "faster", "-global_quality", "26"], "QSV (하드웨어)")
     return (None, None)
 
 def _compress_for_upload(video_path):
     """업로드 전 재인코딩 — '하드웨어(NVENC/AMF/QSV)'로만 압축한다(x264 등 CPU 압축은 느려서 안 씀).
     해상도 유지 · 오디오는 복사(재인코딩 X). NVENC 는 라이브 녹화와 동시에도 돌아가므로 판 사이
     지연이 거의 없다. 하드웨어가 없으면 압축을 건너뛰고 원본을 업로드한다.
-    결과가 원본의 80% 이하일 때만 교체, 길이가 훼손되면 폐기. 진행률은 GUI 헤더에 %로 표시."""
+    결과가 원본의 88% 이하일 때만 교체, 길이가 훼손되면 폐기. 진행률은 GUI 헤더에 %로 표시."""
     try:
         if str(CFG.get("upload_compress", "auto")).lower() in ("off", "0", "false", "no"): return
         if not (FFMPEG and video_path and os.path.isfile(video_path)): return
@@ -2353,7 +2397,7 @@ def _compress_for_upload(video_path):
         if ok:
             d0 = _dur; d1 = _ffprobe_dur(tmp) or 0
             if d0 and abs(d0 - d1) > 2.5: ok = False        # 길이 훼손 방지
-        if ok and os.path.getsize(tmp) <= src_sz * 0.8:
+        if ok and os.path.getsize(tmp) <= src_sz * 0.88:
             new_sz = os.path.getsize(tmp); os.replace(tmp, video_path)
             log(f"  Compression done: {src_sz/1048576:.0f}MB → {new_sz/1048576:.0f}MB ({100-int(new_sz*100/src_sz)}% smaller)")
         else:
@@ -2575,6 +2619,15 @@ def _force_software_encoder(reason=""):
     if _ENC_FORCE_SW: return
     _ENC_FORCE_SW = True; _ENC_CACHE = None   # 캐시 비워 다음 인코딩부터 재선택
     if reason: log("[stability] " + reason)
+def _reset_encoder_force():
+    """새 판(캡처 세션) 시작 시 소프트웨어 강제 상태를 해제하고 HW 를 재검사.
+    일시적 NVENC 오류(드라이버 순단·세션 포화 등)로 남은 판 전부가 720p CPU 녹화로
+    영구 고정되는 것을 방지한다. HW 가 정말 죽어 있으면 _hw_ok 1초 테스트에서 걸러져
+    자동으로 다시 x264 가 선택되므로 안전하다."""
+    global _ENC_FORCE_SW, _ENC_CACHE
+    if _ENC_FORCE_SW:
+        _ENC_FORCE_SW = False; _ENC_CACHE = None
+        log("Encoder: retrying hardware encoder for the new game (was software-forced)")
 def _enc_is_software():
     _encoder_args()   # _ENC_IS_SW 확정
     return _ENC_IS_SW
@@ -2808,8 +2861,21 @@ class Recorder:
         if mode == "ddagrab":
             return [FFMPEG, "-y", "-loglevel", "error",
                     "-filter_complex", f"ddagrab=output_idx={output_idx}:framerate={self.fps},hwdownload,format=bgra{chain}", *tail]
+        # gdigrab 근본수정: 영역 미지정('-i desktop')은 멀티모니터 '가상 데스크톱 전체'를 잡아
+        # 상하 배치=세로 프레임, 좌우 배치=초광폭 프레임이 그대로 녹화되던 원인.
+        # → 주 모니터(항상 (0,0) 시작) 영역만 캡처하도록 offset/size 를 명시한다.
+        geo = []
+        try:
+            import ctypes
+            _u = ctypes.windll.user32
+            _w, _h = int(_u.GetSystemMetrics(0)), int(_u.GetSystemMetrics(1))
+            if _w >= 320 and _h >= 240:   # 비정상 값이면 기존 동작 유지
+                geo = ["-offset_x", "0", "-offset_y", "0",
+                       "-video_size", "%dx%d" % (_w // 2 * 2, _h // 2 * 2)]   # h264용 짝수 보정
+        except Exception:
+            pass   # 값을 못 얻으면 기존 동작(전체 데스크톱) 폴백
         return [FFMPEG, "-y", "-loglevel", "error", "-f", "gdigrab",
-                "-framerate", str(self.fps), "-i", "desktop", *vf, *tail]
+                "-framerate", str(self.fps), *geo, "-i", "desktop", *vf, *tail]
     def _spawn(self, mode, output_idx=0):
         self.path = os.path.join(REC_DIR, f"clip_{datetime.datetime.now():%Y%m%d_%H%M%S}.mp4")
         try:                                            # stderr를 파일로 — 스트림이 죽으면 이유를 로그에 띄운다
@@ -3114,6 +3180,8 @@ class Recorder:
     def start(self):
         if self._recording(): return True
         _game_det_reset()                       # 새 캡처 세션 — 이전 세션의 인게임 판정 제거
+        try: _reset_encoder_force()             # 일시적 NVENC 실패로 720p CPU 에 고정됐던 것 해제(HW 재검사)
+        except Exception: pass
         _free=_disk_free_gb()
         if _free is not None and _free < 2.0:
             try: _reclaim_disk_if_low()          # 부족하면 이미 업로드된 오래된 영상 회수 후 재측정
