@@ -475,7 +475,13 @@ svg{display:block}
 .mucard .pn{font-family:var(--fd);font-weight:600;font-size:14.5px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mucard .me{font-family:var(--fm);font-size:9.5px;letter-spacing:.04em;color:var(--acc-ink);background:var(--acc-soft);border:1px solid var(--acc-line);padding:2px 6px;border-radius:6px;flex:0 0 auto}
 /* 주요 장면 리스트 */
-.momcard .moments{display:grid;grid-template-columns:1fr 1fr;gap:0;overflow:visible;padding:3px 0;scroll-snap-type:none}
+.momcard .moments{display:flex;flex-direction:row;gap:8px;overflow-x:auto;overflow-y:hidden;padding:11px 16px 13px;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;scrollbar-width:thin}
+.mchip{flex:0 0 auto;scroll-snap-align:start;display:flex;flex-direction:column;align-items:center;gap:3px;min-width:64px;padding:9px 12px 8px;background:var(--well);border:1px solid var(--line);border-radius:12px;cursor:pointer;font:inherit;color:inherit;transition:.12s}
+.mchip:hover{border-color:var(--acc-line);background:var(--acc-soft)}
+.mchip:active{transform:scale(.96)}
+.mchip b{font-family:var(--fm);font-size:13px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+.mchip s{text-decoration:none;font-size:10.5px;color:var(--dim);white-space:nowrap;max-width:96px;overflow:hidden;text-overflow:ellipsis;line-height:1.2}
+.mchip.kb b{color:#ff9d7a}.mchip.kt b{color:var(--acc-ink)}.mchip.ke b{color:#7ad0c0}.mchip.kd b{color:#c4a0ff}.mchip.kg b{color:#f0c574}
 .momcard .moments .mrow:nth-child(even){box-shadow:-1px 0 0 var(--line)}
 @media(max-width:600px){.mucard{grid-template-columns:1fr}.mucard .mt{padding:12px 14px 13px}.plrow{gap:6px 8px}.pl{gap:6px}.me{padding:1px 5px;font-size:9px}.mucard .pn{font-size:13.5px}.momcard .moments{grid-template-columns:1fr}.momcard .moments .mrow:nth-child(even){box-shadow:none}}
 .momcard .mrow{display:flex;align-items:center;gap:11px;padding:6px 18px;cursor:pointer;transition:.12s;border-left:2px solid transparent}
@@ -694,7 +700,7 @@ svg{display:block}
 #hero:empty,#stage:empty,#matchup:empty,#moments:empty{border-radius:17px;border:1px solid var(--line);background:linear-gradient(100deg,#12161f 40%,#182031 50%,#12161f 60%);background-size:220% 100%;animation:encSk 1.1s linear infinite}
 #hero:empty{min-height:118px}
 #matchup:empty{min-height:150px}
-#moments:empty{min-height:180px}
+#moments:empty{min-height:64px}
 @keyframes encSk{to{background-position:-120% 0}}
 .svpp,.svbtn{position:relative;overflow:visible}
 .svpp::after,.svbtn::after{content:'';position:absolute;inset:-6px}
@@ -752,10 +758,9 @@ html,body{overflow-x:hidden;max-width:100%}
   .svctl .svbtn{height:36px;min-width:40px;padding:0 10px}
   .svctl .svbtn svg{width:18px;height:18px}
   .vplay svg{width:58px;height:58px;padding:17px}
-  /* ② 주요 장면: 2열 → 1열 강제 */
-  .momcard .moments{grid-template-columns:1fr!important;overflow:visible!important}
-  .momcard .moments .mrow:nth-child(even){box-shadow:none!important}
-  .momcard .mrow{padding:9px 14px}
+  /* ② 주요 장면: 모바일도 가로 칩 스크롤 유지 */
+  .momcard .moments{padding:10px 12px 12px}
+  .mchip{min-width:58px;padding:8px 10px 7px}
   .momcard .mlabel{font-size:13px}
   /* ③ 선수 카드: 한 줄에 하나씩 → 이름 전체 표시 */
   .pl{display:flex;flex-wrap:wrap;gap:8px}
@@ -904,8 +909,9 @@ html,body{overflow-x:hidden;max-width:100%}
 <script src="coach.js"></script>
 <script>
 // ── 부팅 안전망: 어떤 이유로든 첫 화면이 '검은 화면'으로 침묵하지 않게 ──
-window.addEventListener('error',function(ev){try{__bootFail('스크립트 오류',ev&&ev.message);}catch(_){}});
-window.addEventListener('unhandledrejection',function(ev){try{__bootFail('로딩 오류',(ev&&ev.reason&&ev.reason.message)||'');}catch(_){}});
+window.addEventListener('error',function(ev){try{var m=(ev&&ev.message)||'';if(/Transition was skipped|AbortError/i.test(m))return;__bootFail('스크립트 오류',m);}catch(_){}});
+window.addEventListener('unhandledrejection',function(ev){try{var r=ev&&ev.reason||{};var m=(r&&r.message)||String(r||'');if(r.name==='AbortError'||/Transition was skipped|skipped/i.test(m))return; // 브라우저 전환 스킵 등 무해한 rejection은 무시
+__bootFail('로딩 오류',m);}catch(_){}});
 function __bootFail(title,detail){
   if(window.__ENC_BOOTED)return; // 본 렌더가 이미 떴으면 조용히 무시
   if(document.getElementById('bootfail'))return;
@@ -933,6 +939,7 @@ async function __get(p,ms){
  if(!__a||!__a.meta){document.body.innerHTML='<div style="display:grid;place-items:center;height:100vh;color:#9AA0AA;font-family:monospace">분석 데이터가 없는 경기예요 <a href="index.html" style="color:var(--acc-ink);margin-left:8px">아카이브로</a></div>';return;}
  if(!__a.highlights)__a.highlights=[];
  window.__ENC_BOOTED=true; // 첫 페인트 성공 — 이후 오류는 부팅 배너 대상 아님
+ {var _bf=document.getElementById('bootfail');if(_bf)_bf.remove();}
  let __cmts=[];try{__cmts=await __get("comments?match_id=eq."+encodeURIComponent(__id)+"&select=*&order=created.asc");}catch(e){}
  const __pn=new Set((__a.players||[]).map(p=>p.name));__cmts.forEach(c=>c.participant=__pn.has(c.author));
  document.title=(mapName(__a.meta.map)||"Match")+" · ENCORE";
@@ -1816,11 +1823,8 @@ if(HL.length){
  if(document.fonts&&document.fonts.ready)document.fonts.ready.then(clampTips);
  let _ctw;window.addEventListener('resize',()=>{clearTimeout(_ctw);_ctw=setTimeout(clampTips,120);});
  const moE=document.getElementById('moments');
- const _mrow=h=>`<div class="mrow" data-s="${h.sec}"><span class="mtime">${h.t||fmt(h.sec)}</span><span class="mic ${KCLASS[h.kind]}">${KICON[h.kind]}</span><span class="mtx"><span class="mlabel">${h.label}</span><span class="mwho">${h.who||'전장 전체'}</span></span></div>`;
- const _MLIM=6,_mrest=HL.slice(_MLIM);
- moE.innerHTML=HL.slice(0,_MLIM).map(_mrow).join('')+(_mrest.length?`<details class="cmore momore" style="grid-column:1/-1"><summary>나머지 ${_mrest.length}개 장면 보기</summary><div class="moments" style="padding:0">${_mrest.map(_mrow).join('')}</div></details>`:'');
- moE.querySelectorAll('.mrow').forEach(el=>el.onclick=()=>seek(+el.dataset.s));
- moE.querySelectorAll('.mthumb video').forEach(v=>{v.addEventListener('loadedmetadata',()=>{try{v.currentTime=Math.min(11,(v.duration||28)*0.42);}catch(e){}},{once:true});});
+ moE.innerHTML=HL.map(h=>`<button class="mchip ${KCLASS[h.kind]||''}" data-s="${h.sec}" title="${esc((h.label||'')+(h.who?' · '+h.who:''))}"><b>${h.t||fmt(h.sec)}</b><s>${esc(h.label||'')}</s></button>`).join('');
+ moE.querySelectorAll('.mchip').forEach(el=>el.onclick=()=>seek(+el.dataset.s));
  const upd=()=>{const v=document.getElementById('vid');if(!v||!v.duration)return;const gt=Math.max(0,Math.min(totalSec,v.currentTime-OFF));const p=gt/totalSec*100;
   document.getElementById('tlfill').style.width=p+'%';document.getElementById('tlhead').style.left=p+'%';};
  _regTU(upd);
