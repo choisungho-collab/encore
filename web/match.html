@@ -79,9 +79,13 @@ svg{display:block}
 .chip.dl .ic{color:var(--acc-ink)}
 
 /* ── video ── */
-.stage{position:relative;aspect-ratio:16/9;max-height:760px;border-radius:var(--r3);overflow:hidden;
+.stage{position:relative;aspect-ratio:16/9;max-height:min(76vh,760px);border-radius:var(--r3);overflow:hidden;
  background:#0A0A08;border:1px solid var(--line2);box-shadow:0 40px 90px -52px #000}
 .stage video{width:100%;height:100%;object-fit:contain;background:#000;display:block}
+/* 모바일: 가로폭 100% + 영상 실제 비율대로 세로 결정 → 여백 없음(잘림 없음). _fitAR이 stage에 인라인 aspect-ratio를 영상 비율로 넣으므로 contain이어도 레터박스가 안 생김. 화면을 넘지 않게 상한만 유지 */
+@media(max-width:600px){
+  .stage:not(.mvon):not(:fullscreen){width:100%;max-height:92vh}
+}
 .stage:fullscreen,.stage:-webkit-full-screen{width:100vw;height:100vh;max-height:none;aspect-ratio:auto!important;border-radius:0;background:#000}
 .stage:fullscreen video,.stage:-webkit-full-screen video{width:100%;height:100%;object-fit:contain}
 .vwrap{position:absolute;inset:0}
@@ -1239,7 +1243,11 @@ function encoreIntro(onDone){
 }
 /* ===== /인트로 ===== */
 if(vid){
- function _fitAR(){try{if(vid&&vid.videoWidth>0&&vid.videoHeight>0&&stage&&!stage.classList.contains('mvon'))stage.style.aspectRatio=vid.videoWidth+' / '+vid.videoHeight;}catch(_){}}
+ function _fitAR(){try{if(!(vid&&vid.videoWidth>0&&vid.videoHeight>0&&stage)||stage.classList.contains('mvon'))return;
+   var r=vid.videoWidth/vid.videoHeight;
+   if(r>=1.15&&r<=2.7)stage.style.aspectRatio=vid.videoWidth+' / '+vid.videoHeight; // 정상 가로 녹화만 적용
+   else stage.style.removeProperty('aspect-ratio'); // 세로/이상값(일부 안드로이드 디코더의 W/H 스왑 등) → 기본 16:9 유지
+ }catch(_){}}
  vid.addEventListener('loadedmetadata',()=>{_fitAR();if(vid.duration&&isFinite(vid.duration)){OFF=_povOff(__self,vid.duration);if(OFF>1){try{vid.currentTime=Math.max(0,OFF-10);}catch(e){}}}});
  if(vid&&vid.videoWidth>0)_fitAR();
  if(vplay)vplay.addEventListener('click',(e)=>{e.stopPropagation();if(vplay._done)return;vplay._done=true;const _tryPlay=()=>{hideOverlay();const pr=vid.play();if(pr&&pr.catch)pr.catch(()=>{try{vid.muted=true;vid.play().catch(()=>{});}catch(e2){}});};try{vid.load();}catch(e2){}encoreIntro(()=>{if(vid.readyState>=2){_tryPlay();}else{vid.addEventListener('canplay',_tryPlay,{once:true});}});});
