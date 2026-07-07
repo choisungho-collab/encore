@@ -155,7 +155,7 @@ import queue as _queue
 from collections import deque as _deque
 GUI_Q = _queue.Queue(maxsize=4000)
 LOG_BUF = _deque(maxlen=400)   # 로그창이 닫혀 있어도 최근 로그를 항상 보관(열면 즉시 채움)
-APP_VERSION = "1.7.2"
+APP_VERSION = "1.7.4"
 REC_STATE = {"recording": False, "encoder": "", "ready": False}
 LAST_ERR = {"msg": "", "t": 0.0}
 UP_DONE = {"t": 0.0, "shown": 0.0}
@@ -1357,6 +1357,22 @@ def cleanup_local_videos(log_fn=None):
 def _gallery_origin():
     return (CFG.get("gallery_url") or "https://encorestar.netlify.app/").rstrip("/")
 
+def _storage_endpoints():
+    """서명 업로드 라우트 후보. /api/storage(리다이렉트)가 404면
+       Netlify 함수 직접 경로로 자동 폴백 → 리다이렉트 설정이 죽어도 업로드는 살아있게."""
+    o = _gallery_origin()
+    return [o + "/api/storage", o + "/.netlify/functions/storage"]
+
+def _post_storage(payload, timeout):
+    """후보 엔드포인트에 순서대로 POST. 404(라우트 없음)일 때만 다음 후보로 넘어간다."""
+    import requests
+    r = None
+    for ep in _storage_endpoints():
+        r = requests.post(ep, json=payload, timeout=timeout)
+        if r.status_code != 404:
+            return r
+    return r   # 전부 404 → 마지막 응답 반환
+
 def _my_ident():
     """(puuid, device_secret) — 서명 업로드/소유 등록에 쓰는 신원. puuid 없으면 (None, secret)."""
     try:
@@ -1378,9 +1394,8 @@ def sb_upload(local, path, ctype, track=False):
     if _do_track: _pipe_pct(0.0)
     if pu:   # 표준 경로: 서명 업로드
         try:
-            pr = requests.post(_gallery_origin() + "/api/storage",
-                               json={"action": "sign-upload", "puuid": pu, "secret": secret,
-                                     "paths": [path], "bytes": size}, timeout=30)
+            pr = _post_storage({"action": "sign-upload", "puuid": pu, "secret": secret,
+                                "paths": [path], "bytes": size}, timeout=30)
             if pr.status_code == 429:
                 raise RuntimeError("upload limit reached: " + (pr.text or "")[:120])
             pr.raise_for_status()
@@ -1624,9 +1639,8 @@ def upload_selftest():
     이전엔 모든 실패를 '함수 배포 필요' 하나로 뭉뚱그려 원인 파악이 불가능했음 → 케이스별로 분리."""
     import requests
     origin = _gallery_origin()
-    url = origin + "/api/storage"
     try:
-        r = requests.post(url, json={"action": "ping"}, timeout=10)
+        r = _post_storage({"action": "ping"}, timeout=10)
     except requests.exceptions.ConnectionError:
         log("⚠ 업로드 서버 연결 실패 → gallery_url(%s) 주소·인터넷 연결 확인. (영상은 로컬 보관 후 자동 재시도)" % origin)
         return False
@@ -1637,9 +1651,11 @@ def upload_selftest():
         log("⚠ 업로드 자가진단 오류(%s: %s) — 영상은 로컬 보관 후 자동 재시도." % (type(e).__name__, str(e)[:80]))
         return False
 
-    # 라우트가 없다(404) = 함수/리다이렉트 미배포
+    # _post_storage 가 직접 경로까지 시도했는데도 404 = 함수 자체가 라이브에 배포 안 된 것
     if r.status_code == 404:
-        log("⚠ /api/storage 라우트 없음(404) → netlify/functions/storage.js + netlify.toml 배포 확인. (로컬 보관/재시도)")
+        log("⚠ Netlify 함수(storage)가 라이브에 없음(404) → Netlify 대시보드에서 "
+            "① Deploys 탭 최근 배포가 Failed 인지 ② Functions 탭에 storage 가 있는지 "
+            "③ Build settings 의 Base directory 가 비어있는지(web 이면 안 됨) 확인. (로컬 보관/재시도)")
         return False
     if r.status_code != 200:
         log("⚠ 업로드 서버 오류(HTTP %s): %s (로컬 보관/재시도)" % (r.status_code, (r.text or "")[:120]))
@@ -3812,7 +3828,7 @@ def run_gui(cfg, url):
     import math
     BG="#0B0E14"; SURF="#161B25"; INK="#EAEDF3"; INK2="#C5CAD3"; DIM="#8B93A3"
     AZ="#AEB9CB"; AZ2="#D7DFEA"; REC="#FF5D52"; AMB="#E0B441"; LINE="#1E2531"; LINE2="#2B3340"
-    PANEL="#0B0E14"; SKY="#0c1018"; GND="#06090e"
+    PANEL="#0B0E14"; SKY="#0c1018"; GND="#06090e"; OK="#3ED598"   # OK = Ready 상태점(초록)
     W=468; CH=154
 
     def _mix(h1, h2, t):
@@ -3951,8 +3967,34 @@ def run_gui(cfg, url):
 
     # ---------- canvas (scene + status + meta + actions) ----------
     cv=_ZC(root, width=Z(W), height=Z(CH), bg=GND, highlightthickness=0); cv.pack(fill="x")
-    cv_img=cv.create_image(0,0, anchor="nw", image=scene_idle) if scene_idle else None
-    lid=cv.create_oval(18,20,28,30, fill=AZ2, outline="")
+    cv_img=None   # 리스킨: 정적 씬 PNG 대신 밤하늘을 캔버스로 직접 그린다(별 반짝임 애니메이션)
+    # ── 밤하늘: 세로 그라데이션 ──
+    _NB=22
+    for _i in range(_NB):
+        _t=_i/(_NB-1)
+        cv.create_rectangle(0, _i*CH/_NB, W, (_i+1)*CH/_NB+1,
+                            fill=_mix("#0e1522", GND, _t), outline="")
+    # 지평선 은은한 글로우(하단바에 대부분 가려져 윗부분만 비침)
+    cv.create_oval(W/2-270, 96, W/2+270, 210, fill=_mix(GND, "#17253f", 0.55), outline="")
+    # ── 별 20개(반짝임 대상) + 십자 반짝이 2개 ──
+    import random as _rnd
+    _rng=_rnd.Random(7)
+    _stars=[]
+    for _ in range(20):
+        _sx=_rng.uniform(14, W-14); _sy=_rng.uniform(8, 92); _r=_rng.choice((0.8, 1.0, 1.4))
+        _sid0=cv.create_oval(_sx-_r,_sy-_r,_sx+_r,_sy+_r, fill=_mix(SKY,"#EAF2FF",0.5), outline="")
+        _stars.append((_sid0, _rng.uniform(0,6.28), _rng.uniform(0.7,2.2)))
+    for (_cx,_cy) in ((132,32),(352,62)):
+        for _ln in (cv.create_line(_cx-4,_cy,_cx+4,_cy, fill="#c9d6ea", width=1),
+                    cv.create_line(_cx,_cy-4,_cx,_cy+4, fill="#c9d6ea", width=1)):
+            _stars.append((_ln, _rng.uniform(0,6.28), _rng.uniform(0.5,1.2)))
+    # ── 하단 바(버튼 존) ──
+    cv.create_rectangle(0, 104, W, CH+2, fill="#0a0e15", outline="")
+    cv.create_line(0, 104, W, 104, fill=LINE)
+    # ── 상태 점: 글로우 링 2겹 + 코어 (Ready=초록 글로우 / Recording=빨강 펄스 — _pulse 가 구동) ──
+    gl2=cv.create_oval(13,15,33,35, fill=_mix(SKY, OK, 0.14), outline="")
+    gl1=cv.create_oval(16,18,30,32, fill=_mix(SKY, OK, 0.30), outline="")
+    lid=cv.create_oval(18,20,28,30, fill=OK, outline="")
     wid=cv.create_text(40,25, anchor="w", text="Starting\u2026", fill=INK, font=fW)
     sid=cv.create_text(41,49, anchor="w", text="", fill=INK2, font=fSub)   # 타이틀 아래 둘째 줄 — 우측 메타와 겹침 없음
 
@@ -4196,9 +4238,18 @@ def run_gui(cfg, url):
         try:
             if not int(root.winfo_exists()): return
         except Exception: return
-        base=REC if st["rec"] else AZ2
-        k=0.55+0.45*(0.5+0.5*math.sin(time.time()*2.3))
-        try: cv.itemconfig(lid, fill=_mix(GND, base, k))
+        _t=time.time(); _rec=st["rec"]
+        base=REC if _rec else OK
+        k=0.55+0.45*(0.5+0.5*math.sin(_t*(3.4 if _rec else 1.7)))   # 녹화중엔 빠른 펄스, 대기엔 느린 숨쉬기
+        try:
+            cv.itemconfig(lid, fill=_mix(GND, base, min(1.0, k+0.30)))
+            cv.itemconfig(gl1, fill=_mix(SKY, base, 0.30*k))
+            cv.itemconfig(gl2, fill=_mix(SKY, base, 0.14*k))
+        except Exception: pass
+        try:   # 별 반짝임 — 위상·속도가 제각각이라 자연스러운 밤하늘
+            for _sid0,_ph,_sp in _stars:
+                _b=0.30+0.62*(0.5+0.5*math.sin(_t*_sp+_ph))
+                cv.itemconfig(_sid0, fill=_mix(SKY, "#EAF2FF", _b))
         except Exception: pass
         root.after(90, _pulse)
 
@@ -4244,7 +4295,7 @@ def run_gui(cfg, url):
         try:
             import ctypes
             hwnd=ctypes.windll.user32.GetParent(root.winfo_id()) or root.winfo_id()
-            _val=ctypes.c_int(0)   # 0 = light (white) title bar, matching myPENTA
+            _val=ctypes.c_int(1)   # 1 = dark title bar — 밤하늘 리스킨과 톤 일치
             for _attr in (20, 19):
                 try: ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, _attr, ctypes.byref(_val), ctypes.sizeof(_val))
                 except Exception: pass
