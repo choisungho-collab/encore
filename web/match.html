@@ -657,7 +657,13 @@ svg{display:block}
 .tlcard{margin-top:14px;padding:19px 24px 17px}
 .ch{font-family:var(--fh);font-weight:700;font-size:13.5px;letter-spacing:.02em;color:var(--ink2);margin-bottom:4px}
 /* 레일 */
-.tl{height:58px;margin:9px 4px 0}
+.tl{height:92px;margin:9px 4px 0}
+/* 마커 상시 라벨: 레일 아래에 시각(굵게)+종류(작게) 노출 → 주요 장면 카드 대체 */
+.mk .lab{position:absolute;top:20px;left:50%;transform:translateX(-50%);text-align:center;white-space:nowrap;pointer-events:none;transition:opacity .15s}
+.mk .lab .lt{display:block;font-family:var(--fm);font-weight:600;font-size:11px;color:var(--ink);font-variant-numeric:tabular-nums;letter-spacing:.01em}
+.mk .lab .ll{display:block;font-family:var(--fd);font-weight:600;font-size:10.5px;color:currentColor;margin-top:1px;letter-spacing:.01em}
+.mk.lab-hide .lab{opacity:0}   /* 겹치면 JS가 라벨만 숨김(점은 유지) */
+.mk:hover .lab{opacity:0}      /* hover 시엔 상세 툴팁으로 대체 */
 .tl-rail{top:42px;height:5px;background:var(--line2);border-radius:99px;overflow:hidden}
 .tl-fill{background:linear-gradient(90deg,var(--acc-ink),var(--acc));opacity:.9;border-radius:99px}
 .tl-head{top:37px;height:15px;width:2px;background:#fff;border-radius:99px;box-shadow:0 0 8px rgba(126,156,255,.55);transform:translateX(-1px)}
@@ -1815,7 +1821,7 @@ if(HL.length){
  tl.innerHTML='<div class="tl-rail"><div class="tl-fill" id="tlfill"></div></div><div class="tl-head" id="tlhead" style="left:0"></div>';
  HL.forEach(h=>{const x=Math.max(.5,Math.min(99.5,h.sec/totalSec*100));
   const m=document.createElement('div');m.className='mk '+KCLASS[h.kind];m.style.left=x+'%';
-  m.innerHTML=`<div class="tip"><div class="tt">${KICON[h.kind]}<b>${h.t||fmt(h.sec)}</b></div><s>${h.label}${h.who?' · '+h.who:''}</s></div><div class="pin"></div><div class="stem"></div>`;
+  m.innerHTML=`<div class="tip"><div class="tt">${KICON[h.kind]}<b>${h.t||fmt(h.sec)}</b></div><s>${h.label}${h.who?' · '+h.who:''}</s></div><div class="pin"></div><div class="stem"></div><div class="lab"><span class="lt">${h.t||fmt(h.sec)}</span><span class="ll">${esc(h.label||'')}</span></div>`;
   m.onclick=()=>seek(h.sec);tl.appendChild(m);});
  // 가장자리 마커 툴팁이 뷰포트를 넘어 가로 스크롤을 만드는 것 방지(모바일). 데스크탑은 넘치지 않아 no-op.
  function clampTips(){const de=document.documentElement,pad=6;
@@ -1830,9 +1836,16 @@ if(HL.length){
  clampTips();
  if(document.fonts&&document.fonts.ready)document.fonts.ready.then(clampTips);
  let _ctw;window.addEventListener('resize',()=>{clearTimeout(_ctw);_ctw=setTimeout(clampTips,120);});
- const moE=document.getElementById('moments');
- moE.innerHTML=HL.map(h=>`<button class="mchip ${KCLASS[h.kind]||''}" data-s="${h.sec}" title="${esc((h.label||'')+(h.who?' · '+h.who:''))}"><b>${h.t||fmt(h.sec)}</b><s>${esc(h.label||'')}</s></button>`).join('');
- moE.querySelectorAll('.mchip').forEach(el=>el.onclick=()=>seek(+el.dataset.s));
+ // 주요 장면 카드는 타임라인 상시 라벨로 통합 → 카드 영역 제거
+ var _mc=document.getElementById('momcard');if(_mc)_mc.style.display='none';
+ // 라벨 겹침 방지: 좌→우로 훑으며 직전 라벨과 겹치면 현재 라벨만 숨김(점·클릭은 유지)
+ function declutter(){const mks=[...tl.querySelectorAll('.mk')];let lastR=-1e9;
+  mks.forEach(mk=>{const lab=mk.querySelector('.lab');if(!lab)return;mk.classList.remove('lab-hide');
+   const r=mk.getBoundingClientRect(),lr=lab.getBoundingClientRect(),c=r.left+r.width/2,half=lr.width/2;
+   if(c-half < lastR+6){mk.classList.add('lab-hide');}else{lastR=c+half;}});}
+ declutter();
+ if(document.fonts&&document.fonts.ready)document.fonts.ready.then(declutter);
+ window.addEventListener('resize',()=>{clearTimeout(window._dcw);window._dcw=setTimeout(declutter,120);});
  const upd=()=>{const v=document.getElementById('vid');if(!v||!v.duration)return;const gt=Math.max(0,Math.min(totalSec,v.currentTime-OFF));const p=gt/totalSec*100;
   document.getElementById('tlfill').style.width=p+'%';document.getElementById('tlhead').style.left=p+'%';};
  _regTU(upd);
