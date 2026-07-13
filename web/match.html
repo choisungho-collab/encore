@@ -1017,8 +1017,19 @@ function _heroSide(arr,t,right){const isWin=_won!=null&&String(t)===String(_won)
 const _matchHTML=_tk.length===2?`<div class="vcteams">${_side(_tk[0],_teams[_tk[0]],'vcside-l')}<div class="vcvs">VS</div>${_side(_tk[1],_teams[_tk[1]],'vcside-r')}</div>`:`<div class="vcteams">${_tk.map(t=>_side(t,_teams[t],'vcside-c')).join('<div class="vcvs">VS</div>')}</div>`;
 const _date=(()=>{try{const r=new Date(__m.uploaded);if(isNaN(r.getTime()))return '';const d=new Date(r.getUTCFullYear(),r.getUTCMonth(),r.getUTCDate(),r.getUTCHours(),r.getUTCMinutes());const p=n=>String(n).padStart(2,'0');return d.getFullYear()+'.'+p(d.getMonth()+1)+'.'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes());}catch(e){return '';}})();
 const stage=document.getElementById('stage');
-let OFF=0;  // 메뉴 오프셋 = 영상에서 게임이 시작되는 지점(초). lead_sec(정확) 우선, 없으면 영상길이-게임길이.
-const _povOff=(o,dur)=>{const L=(o&&o.lead!=null&&o.lead!=='')?+o.lead:NaN;if(isFinite(L)&&L>-30&&L<60)return L;const gl=(o&&+o.length_sec>0)?+o.length_sec:totalSec;return Math.max(0,(dur||0)-gl);};
+let OFF=0;  // 메뉴 오프셋 = 영상에서 게임이 시작되는 지점(초).
+// 트리밍된 영상은 '끝에서 (게임길이+리드인)' 구조라 (영상길이 − 게임길이)가 곧 리드인이며, 이 값은
+// 녹화 PC의 벽시계와 무관해 여러 시점(멀티뷰)을 겹쳐도 게임 0:00 이 정확히 정렬된다.
+// 과거 저장된 lead_sec 은 PC별 벽시계로 측정돼 시점 간 어긋날 수 있으므로, 영상길이 기반값을 우선한다.
+// (영상길이 기반값이 비정상일 때 — 트리밍 안 된 원본 등 — 만 lead_sec 로 폴백.)
+const _povOff=(o,dur)=>{
+  const gl=(o&&+o.length_sec>0)?+o.length_sec:totalSec;
+  const byLen=(dur&&gl)?(dur-gl):NaN;                      // 영상길이 − 게임길이 = 리드인(트리밍 영상에서 정확)
+  if(isFinite(byLen)&&byLen>=-1&&byLen<60)return Math.max(0,byLen);
+  const L=(o&&o.lead!=null&&o.lead!=='')?+o.lead:NaN;       // 폴백: 저장된 lead_sec
+  if(isFinite(L)&&L>-30&&L<60)return Math.max(0,L);
+  return Math.max(0,(dur||0)-gl);
+};
 const __self={lead:(meta&&meta.lead_sec!=null?meta.lead_sec:null),length_sec:(__m&&__m.length_sec)};
 stage.innerHTML=VIDEO?`<div class="vwrap"><video id="vid" playsinline preload="metadata" disablepictureinpicture disableremoteplayback controlslist="nodownload noplaybackrate noremoteplayback" poster="${esc(__m.thumb||'')}" src="${esc(VIDEO)}"></video><button class="vplay" id="vplay" aria-label="재생"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v13.72a1 1 0 0 0 1.52.86l11.43-6.86a1 1 0 0 0 0-1.72L9.52 4.28A1 1 0 0 0 8 5.14Z"/></svg></button></div>`
  :`<div class="poster"><div class="pcol"><div class="play">${I.play}</div><div class="pm">Recorded Replay</div><div class="pmap">${esc(mapName(meta.map))}</div></div></div>`;
