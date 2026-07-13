@@ -155,7 +155,7 @@ import queue as _queue
 from collections import deque as _deque
 GUI_Q = _queue.Queue(maxsize=4000)
 LOG_BUF = _deque(maxlen=400)   # 로그창이 닫혀 있어도 최근 로그를 항상 보관(열면 즉시 채움)
-APP_VERSION = "1.7.3"
+APP_VERSION = "1.7.4"
 REC_STATE = {"recording": False, "encoder": "", "ready": False}
 LAST_ERR = {"msg": "", "t": 0.0}
 UP_DONE = {"t": 0.0, "shown": 0.0}
@@ -1392,12 +1392,16 @@ def sb_upload(local, path, ctype, track=False):
     except Exception: pass
     _do_track = bool(track and size > 4 * 1048576)   # 4MB 초과일 때만 진행률(썸네일 등 소형 제외)
     if _do_track: _pipe_pct(0.0)
+    _signed_err = None
     if pu:   # 표준 경로: 서명 업로드
         try:
             pr = _post_storage({"action": "sign-upload", "puuid": pu, "secret": secret,
                                 "paths": [path], "bytes": size}, timeout=30)
             if pr.status_code == 429:
                 raise RuntimeError("upload limit reached: " + (pr.text or "")[:120])
+            if pr.status_code in (401, 403):
+                raise RuntimeError("기기 인증 거부(HTTP %s) — 갤러리에서 로그인/기기 등록 확인. 응답: %s"
+                                   % (pr.status_code, (pr.text or "")[:140]))
             pr.raise_for_status()
             items = (pr.json() or {}).get("items") or []
             if items and items[0].get("uploadUrl"):
@@ -1408,14 +1412,20 @@ def sb_upload(local, path, ctype, track=False):
                 if _do_track: _pipe_pct(1.0)
                 if ur.status_code in (200, 201):
                     return pub or ("%s/storage/v1/object/public/%s/%s" % (_sb_base(), _sb_bucket(), path))
-                raise RuntimeError("signed PUT %s: %s" % (ur.status_code, (ur.text or "")[:160]))
+                raise RuntimeError("서명 PUT 실패 %s: %s" % (ur.status_code, (ur.text or "")[:160]))
+            # 200인데 items 가 비어있음 = 함수가 서명 URL 을 못 만듦(서버측 SUPABASE_SERVICE_KEY 문제 가능성)
+            raise RuntimeError("서명 URL 응답 비어있음 — Netlify 함수의 SUPABASE_SERVICE_KEY 설정/권한 확인. 응답: %s"
+                               % (str(pr.json() if pr.headers.get('content-type','').startswith('application/json') else pr.text)[:140]))
         except Exception as e:
-            log(f"signed upload failed ({e}) — trying legacy…")
+            _signed_err = str(e)
+            log("⚠ 클라우드 업로드 실패: %s" % _signed_err)   # 진짜 원인을 표면에 남김(스크롤로 안 묻히게)
     # 레거시 폴백: config 에 service_key 가 있을 때만 (구 배포 호환). 없으면 실패.
     k = (sb_cfg().get("service_key") or "").strip()
     if not k:
-        raise RuntimeError("no signed route and no service_key — deploy netlify/functions/storage.js "
-                           "and set SUPABASE_SERVICE_KEY in Netlify env")
+        # service_key 부재는 '정상'(서명 방식은 config 에 키를 안 둠) → 진짜 원인은 위 _signed_err 다.
+        if _signed_err:
+            raise RuntimeError("업로드 실패 — 원인: %s (로컬 보관 후 자동 재시도)" % _signed_err)
+        raise RuntimeError("기기 신원 없음 — 갤러리에서 로그인 후 재시도하면 업로드됩니다. (로컬 보관)")
     with open(local, "rb") as f:
         body = _ProgressReader(f, size, _pipe_pct) if _do_track else f
         r = requests.post("%s/storage/v1/object/%s/%s" % (_sb_base(), _sb_bucket(), path), data=body,
