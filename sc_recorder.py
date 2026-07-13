@@ -155,7 +155,7 @@ import queue as _queue
 from collections import deque as _deque
 GUI_Q = _queue.Queue(maxsize=4000)
 LOG_BUF = _deque(maxlen=400)   # 로그창이 닫혀 있어도 최근 로그를 항상 보관(열면 즉시 채움)
-APP_VERSION = "1.7.4"
+APP_VERSION = "1.7.7"
 REC_STATE = {"recording": False, "encoder": "", "ready": False}
 LAST_ERR = {"msg": "", "t": 0.0}
 UP_DONE = {"t": 0.0, "shown": 0.0}
@@ -450,8 +450,14 @@ def parse_rep(path):
     frames = h.get("Frames", 0) or 0; secs = frames / FPS_GAME
     t1 = "".join(pl["rl"] for pl in players if pl["team"] == 1)
     t2 = "".join(pl["rl"] for pl in players if pl["team"] == 2)
+    # WinnerTeam 검증: screp 는 '가장 큰 팀이 남으면 승리' 추정으로 감지 실패 시 0을 준다.
+    # 실제 존재하는 팀 번호일 때만 신뢰하고, 그 외(0·무효·팀 구성 불명)는 미상(None)으로 둔다.
+    # → 틀린 승패를 보여주느니 '결과 미상'이 정직하다.
+    _teams_present = {pl["team"] for pl in players if pl.get("team") in (1, 2)}
+    _wt = comp.get("WinnerTeam")
+    _winner = _wt if (_wt in _teams_present and len(_teams_present) >= 2) else None
     meta.update({"map": clean(h.get("Map")), "length": "%d:%02d" % (secs // 60, secs % 60),
-                 "type": (h.get("Type") or {}).get("Name"), "winner": comp.get("WinnerTeam"),
+                 "type": (h.get("Type") or {}).get("Name"), "winner": _winner,
                  "saver": (next((p.get("Name") for p in (h.get("Players") or [])
                                 if p.get("ID") == comp.get("RepSaverPlayerID")), None)
                            # RepSaver 매칭 실패(컴퓨터전·옵저버 등) 폴백: 인간 플레이어가 정확히 1명이면 그 사람
@@ -1142,6 +1148,25 @@ def stats_global():
                             "SUM(CASE WHEN won IS NOT NULL THEN 1 ELSE 0 END) FROM matches").fetchone(); c.close()
     n, tsec, w, rated = r[0] or 0, r[1] or 0, r[2] or 0, r[3] or 0
     return n, tsec, (f"{round(100*w/rated)}%" if rated else "—")
+
+def _compute_won(players, saver, winner):
+    """저장자(saver)의 승패를 일관되게 판정. 반환: True(승)/False(패)/None(미상).
+    - winner 가 None 이면 미상(승패 표시 안 함).
+    - saver 를 players 에서 찾을 때 대소문자·앞뒤공백 차이를 흡수(이름 표기 불일치로 미상 처리되는 것 방지).
+    - 5곳에 흩어져 있던 서로 다른 계산을 하나로 통일."""
+    if winner is None:
+        return None
+    if not saver or not players:
+        return None
+    sv = str(saver).strip().lower()
+    sp = next((p for p in players if str(p.get("name") or "").strip().lower() == sv), None)
+    if not sp or sp.get("team") is None:
+        return None
+    try:
+        return int(sp.get("team")) == int(winner)
+    except (TypeError, ValueError):
+        return sp.get("team") == winner
+
 def set_analysis(mid, js):
     if sb_enabled(): return sb_set_analysis(mid, js)
     c = db(); c.execute("UPDATE matches SET analysis=? WHERE id=?", (js, mid)); c.commit(); c.close()
@@ -1439,17 +1464,26 @@ def sb_insert_match(row):
     """경기 행 등록. service_key 직접 insert 대신 RPC.
        기기 신원이 있으면 upload_match(소유 등록), 없거나 실패하면 upload_match_anon(폴백)."""
     sv = (row.get("saver") or "").strip()
+    _claimed_pu = None
     if sv:
         row.setdefault("owner_puuid", sv.lower())   # (서버가 owner 를 다시 지정하지만 참고용으로 유지)
-        try: claim_identity(sv)                      # 이 기기 = 이 이름 (멱등)
-        except Exception: pass
+        try: _claimed_pu = claim_identity(sv)        # 이 기기 = 이 이름 (멱등)
+        except Exception as e: log(f"claim_identity 예외: {e}")
     pu, secret = _my_ident()
     if pu:
         try:
             _sb_rpc("upload_match", {"p_puuid": pu, "p_secret": secret, "p_row": row}, timeout=60)
             return
         except Exception as e:
-            log(f"upload_match failed ({e}) — trying anon…")
+            # "unauthorized device" = 서버 DB에 이 기기 신원이 없음.
+            # claim_identity 가 방금 성공(_claimed_pu)했는데도 이러면, 서버측 claim/upload 함수 불일치.
+            _hint = ""
+            if "unauthorized" in str(e).lower():
+                if _claimed_pu:
+                    _hint = " · 기기 등록(claim)은 됐는데 upload_match가 거부 → 서버 claim_identity/upload_match 함수 버전 불일치 가능"
+                else:
+                    _hint = " · 기기 신원 등록(claim_identity)이 안 됨 → 로그인/DB 함수 확인 필요"
+            log(f"upload_match failed ({e}){_hint} — 익명으로 저장합니다")
     _sb_rpc("upload_match_anon", {"p_row": row}, timeout=60)
 def _sb_get(path):
     import requests
@@ -1535,10 +1569,6 @@ def _wgc_border_save():
         _atomic_write_json(_WGC_STATE_FILE, {"border_off_supported": _WGC_BORDER["off_ok"]})
     except Exception: pass
 
-# ── (개선) 클라우드 계정 연결(claim_identity) 스키마 오류를 세션 1회만 알림 ──
-#  DB에 claim_identity 함수가 중복 정의되어 있으면(PGRST203) 매 업로드마다
-#  같은 오류가 뜬다. 세션당 한 번만 안내하고 이후엔 조용히 익명 업로드로 진행.
-_ID_CLAIM = {"schema_broken": False}
 
 def _sb_rpc(fn, body, timeout=15):
     import requests
@@ -1548,35 +1578,27 @@ def _sb_rpc(fn, body, timeout=15):
         raise RuntimeError("rpc %s %s: %s" % (fn, r.status_code, (r.text or "")[:150]))
     try: return r.json()
     except Exception: return None
-def claim_identity(name, quiet=False):
+def claim_identity(name, quiet=False, force=False):
     """이 기기를 name 계정에 바인딩(서버 등록) → 로그인/소유표시의 전제.
-    서버 함수(claim_identity)의 파라미터명/개수가 배포마다 다를 수 있어, 여러 시그니처를
-    순서대로 시도해 자동으로 맞춘다. 성공하면 puuid 반환, 실패하면 None.
-    같은 이름이면 no-op. 실패해도 업로드(익명)에는 영향 없음."""
+    서버 claim_identity(p_name, p_secret) 는 멱등: 같은 이름/기기를 다시 호출해도 안전하며
+    device_secrets 배열에 이 기기 해시를 추가한다(이미 있으면 무시).
+    force=True 면 로컬 캐시가 있어도 서버에 재등록을 강제(로그인 코드 발급 실패 복구용).
+    성공하면 puuid 반환, 실패하면 None. 실패해도 업로드(익명)에는 영향 없음."""
     nm = (name or "").strip()
     if not nm or not sb_enabled(): return None
     st = _identity_load()
     if st.get("last_name") != nm:                      # 로그인 코드 발급 때 쓰려고 이름 기억
         st["last_name"] = nm; _identity_save(st); st = _identity_load()
-    if st.get("name") == nm and st.get("puuid"):
+    # 캐시가 있어도 force면 서버 재등록으로 진행(기기 해시가 서버에서 누락된 경우 복구)
+    if (not force) and st.get("name") == nm and st.get("puuid"):
         return st.get("puuid")
-    if _ID_CLAIM["schema_broken"]:
-        return None                                    # 이번 세션에서 이미 DB 오버로드 문제 확인 → 조용히 skip
     sec = device_secret()
-    # 아바타 아이콘 인덱스(기본 0). 사용자가 고른 값이 있으면 그걸 쓴다.
-    try: _ic = int(st.get("icon") or 0)
-    except Exception: _ic = 0
-    # 서버 claim_identity 오버로드:  (p_name,p_secret,p_icon)  와  (p_name,p_secret)  가 공존.
-    # p_icon 에 DEFAULT 가 있어 2-arg 로 부르면 둘 다 매칭 → PGRST203(모호).
-    # → p_icon 을 함께 보내 3-arg 하나만 매칭시키면 모호성이 사라진다(=로그인 성공, DB 수정 불필요).
-    # (다른 배포 호환을 위해 2-arg·대체 파라미터명도 뒤에 후보로 둔다.)
+    # 서버 표준 시그니처(p_name,p_secret) 우선. 구 배포 호환을 위해 대체 파라미터명만 폴백으로 둔다.
     shapes = [
-        {"p_name": nm, "p_secret": sec, "p_icon": _ic},   # ★ 핵심: 3-arg 확정 매칭
-        {"p_name": nm, "p_secret": sec},                   # 2-arg 만 있는 배포
-        {"name": nm, "secret": sec, "icon": _ic},
-        {"name": nm, "secret": sec},
+        {"p_name": nm, "p_secret": sec},   # ★ 현재 서버 함수와 일치
+        {"name": nm, "secret": sec},       # 구 배포 호환(파라미터명이 다른 경우)
     ]
-    last_err = None; overload = False
+    last_err = None
     for body in shapes:
         try:
             r = _sb_rpc("claim_identity", body)
@@ -1588,33 +1610,49 @@ def claim_identity(name, quiet=False):
             msg = str(e); last_err = msg
             if ("PGRST202" in msg) or (" 404:" in msg) or ("Could not find" in msg):
                 continue                               # 이 시그니처의 함수 없음 → 다음 후보
-            if ("PGRST203" in msg) or ("function overloading" in msg) or (" 300:" in msg):
-                overload = True; continue              # 오버로드 모호 → 더 구체적 후보로 재시도
             break                                      # 권한/네트워크 등은 재시도 무의미
-    # 모든 후보 실패
-    if overload:
-        _ID_CLAIM["schema_broken"] = True
-        if not quiet:
-            log("⚠ 로그인 연결 실패: 클라우드 DB에 claim_identity 함수가 중복 정의돼 있습니다(PGRST203, "
-                "오버로드 충돌). 경기 업로드는 익명으로 계속 정상 저장됩니다. Supabase에서 중복 함수를 "
-                "하나만 남기면 즉시 로그인됩니다 — 함께 드린 fix_login.sql 참고. (이 안내는 반복되지 않습니다)")
-    elif not quiet:
-        log(f"identity claim skipped: {last_err}")
+    if not quiet:
+        log(f"⚠ 로그인 연결 실패({last_err}) — 경기 업로드는 익명으로 계속 저장됩니다. 인터넷/클라우드 설정을 확인하세요.")
     return None
 
 def issue_login_code():
-    """갤러리 자동 로그인용 1회 코드. 바인딩이 없으면 사용자명/마지막 게임 이름으로 즉석 연결을 시도한다."""
+    """갤러리 자동 로그인용 1회 코드. 바인딩이 없으면 사용자명/마지막 게임 이름으로 즉석 연결을 시도한다.
+    코드 발급이 실패하면(서버에 이 기기 해시가 없음) 강제 재등록 후 한 번 더 시도해 자동 복구한다."""
     if not sb_enabled(): return None
     st = _identity_load()
+    nm = (st.get("name") or CFG.get("username") or st.get("last_name") or "").strip()
     if not st.get("puuid"):
-        nm = (CFG.get("username") or st.get("last_name") or "").strip()
-        if nm:
-            claim_identity(nm)                         # 지금 바로 서버 등록 시도
-            st = _identity_load()
+        if not nm: return None
+        claim_identity(nm)                             # 지금 바로 서버 등록 시도
+        st = _identity_load()
     if not st.get("puuid"): return None
     code = secrets.token_hex(16)
-    _sb_rpc("issue_login_code", {"p_secret": device_secret(), "p_code": code}, timeout=10)
-    return code
+    # issue_login_code 는 서버에서 '이 기기 해시가 identities.device_secrets 에 있어야' 코드를 만든다.
+    # 발급을 시도하고, 실제로 코드가 생겼는지 확인 → 없으면 기기 재등록(force) 후 1회 재시도.
+    def _try_issue():
+        _sb_rpc("issue_login_code", {"p_secret": device_secret(), "p_code": code}, timeout=10)
+    try:
+        _try_issue()
+        if _login_code_exists(code):
+            return code
+        # 코드가 안 만들어짐 = 서버에 이 기기 해시 누락 → 강제 재등록 후 재시도
+        if nm and claim_identity(nm, quiet=True, force=True):
+            _try_issue()
+            if _login_code_exists(code):
+                log("로그인 복구: 이 기기를 다시 등록했습니다.")
+                return code
+    except Exception as e:
+        log(f"로그인 코드 발급 오류: {e}")
+        return None
+    return None
+
+def _login_code_exists(code):
+    """방금 발급한 코드가 서버 login_codes 에 실제로 생성됐는지 확인(발급 성공 검증)."""
+    try:
+        r = _sb_get("login_codes?select=code&code=eq." + code)
+        return bool(r.json())
+    except Exception:
+        return True   # 확인 자체가 실패하면(권한 등) 일단 코드가 있다고 보고 진행(오탐 방지)
 
 def prebind_identity():
     """스타 실행 시(또는 시작 시) 내 스타 아이디로 미리 로그인 바인딩을 시도 —
@@ -1790,14 +1828,23 @@ def sync_existing_to_cloud(log_fn=None, auto=False):
         except Exception as e:
             failed += 1
             if auto:
-                fails[str(mid)] = int(fails.get(str(mid), 0)) + 1; _fdirty = True
-                _att = fails[str(mid)]
-                lg(f"    ✗ failed({mid}) [{_att}/{_UPLOAD_MAX_ATTEMPTS}]: {e}"
-                   + ("  → giving up (manual Upload will still retry)" if _att >= _UPLOAD_MAX_ATTEMPTS else ""))
+                _emsg = str(e).lower()
+                # 재시도해도 절대 성공 못 하는 영구적 실패 → 즉시 포기(상한까지 카운트)
+                # 예: 파일 크기 초과("file too large"). 매번 대용량 재압축·전송하는 낭비를 막는다.
+                _permanent = ("file too large" in _emsg) or ("too large" in _emsg and "limit" in _emsg)
+                if _permanent:
+                    fails[str(mid)] = _UPLOAD_MAX_ATTEMPTS; _fdirty = True
+                    lg(f"    ✗ failed({mid}): {e}  → 영구 실패(파일 크기 초과)로 판단, 자동 재시도 목록에서 제외합니다")
+                else:
+                    fails[str(mid)] = int(fails.get(str(mid), 0)) + 1; _fdirty = True
+                    _att = fails[str(mid)]
+                    lg(f"    ✗ failed({mid}) [{_att}/{_UPLOAD_MAX_ATTEMPTS}]: {e}"
+                       + ("  → giving up (manual Upload will still retry)" if _att >= _UPLOAD_MAX_ATTEMPTS else ""))
             else:
                 lg(f"    ✗ failed({mid}): {e}")
     if _fdirty: _upfail_save(fails)
     lg(f"Existing-game upload done — completed {done} · skipped {skipped} · failed {failed}")
+    _pipe(None)   # 배치 업로드 종료 → 헤더가 'Uploading'에 갇히지 않고 Ready 로 복귀
     return (done, skipped, failed)
 
 # ── (신뢰성) 업로드 실패 자동 재시도 ─────────────────────────────────────────
@@ -2037,8 +2084,7 @@ def reanalyze_all(log_fn=None):
                 try: a.setdefault("meta", {})["lead_sec"] = float(_old_lead)
                 except Exception: pass
             players = meta.get("players") or []; saver = meta.get("saver"); winner = meta.get("winner")
-            sp = next((p for p in players if p.get("name") == saver), None)
-            won = (sp.get("team") == winner) if (sp and winner is not None) else None
+            won = _compute_won(players, saver, winner)
             _patch_pv = {}
             if not m.get("preview") and m.get("video"):
                 try:
@@ -2108,8 +2154,7 @@ def rebuild_db_from_recordings(log_fn=None):
                 try: make_thumb(video, thumb)
                 except Exception: pass
             players = meta.get("players") or []; saver = meta.get("saver"); winner = meta.get("winner")
-            sp = next((p for p in players if p.get("name") == saver), None)
-            won = (1 if sp.get("team") == winner else 0) if (sp and winner) else None
+            won = _compute_won(players, saver, winner)
             try:
                 con = db()
                 con.execute("INSERT OR REPLACE INTO matches (id,uploader,uploaded,video,replay,thumb,video_size,map,matchup,length,length_sec,type,winner,saver,np,players,won,analysis) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -2194,6 +2239,7 @@ def recover_orphan_clips(log_fn=None):
         lg(f"  · discarded {_stale_n} stale clip(s) (>{_keep_days_log}d, no replay)"
            + (f"  [{_stale_files} files]" if _stale_files else ""))
     if recovered: lg(f"✓ Pending-video recovery done — {recovered} item(s)")
+    _pipe(None)   # 복구 배치 종료 → 헤더 상태 초기화
     return recovered
 
 
@@ -2235,8 +2281,7 @@ def r2_presign_put(key, ctype, expires=3600):
 
 def _insert_match(gid, video, replay, thumb, size, uploader, meta):
     players = meta.get("players") or []; saver = meta.get("saver"); winner = meta.get("winner")
-    sp = next((p for p in players if p.get("name") == saver), None)
-    won = (1 if sp.get("team") == winner else 0) if (sp and winner) else None
+    won = _compute_won(players, saver, winner)
     c = db()
     c.execute("INSERT OR REPLACE INTO matches (id,uploader,uploaded,video,replay,thumb,video_size,map,matchup,length,length_sec,type,winner,saver,np,players,won,analysis) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (gid, uploader or saver, datetime.datetime.now().isoformat(timespec="seconds"),
@@ -2249,8 +2294,9 @@ def _insert_match(gid, video, replay, thumb, size, uploader, meta):
     log(f"✓ Registered: {meta.get('map') or 'game'} ({(size or 0)/1048576:.0f}MB) by {uploader or saver or '?'}{tag}")
 
 def _trim_lead(video_path, game_len_sec, lead=6.0):
-    """로비/로딩 구간을 잘라 카운트다운(게임 시작 ~6초 전)부터 시작하게. 게임은 영상 끝에서 game_len_sec 길이라 끝에서 역산(-sseof)."""
-    if not (FFMPEG and video_path and game_len_sec): return
+    """로비/로딩 구간을 잘라 카운트다운(게임 시작 ~6초 전)부터 시작하게. 게임은 영상 끝에서 game_len_sec 길이라 끝에서 역산(-sseof).
+    반환: 트리밍 성공 시 True, 건너뜀/실패 시 False."""
+    if not (FFMPEG and video_path and game_len_sec): return False
     try:
         keep = float(game_len_sec) + lead
         tmp = video_path + ".trim.mp4"
@@ -2260,11 +2306,13 @@ def _trim_lead(video_path, game_len_sec, lead=6.0):
         if r.returncode == 0 and os.path.isfile(tmp) and os.path.getsize(tmp) > 1024:
             os.replace(tmp, video_path)
             log("Trimmed the lobby/loading intro so playback starts at the countdown")
+            return True
         else:
             try: os.remove(tmp)
             except OSError: pass
     except Exception as e:
         log(f"Skipped video trim (kept original): {e}")
+    return False
 
 def _ffprobe_dur(path):
     probe = None
@@ -2482,12 +2530,19 @@ def ingest(video_path, rep_path, uploader=None, t0=None, rep_mtime=None):
         _gl = _len_sec(meta.get("length") or "")
         if _gl and video_path and os.path.isfile(video_path):
             _draw = _ffprobe_dur(video_path)            # 자르기 전 원본 길이
-            _trim_lead(video_path, _gl)
+            _trimmed = _trim_lead(video_path, _gl)
             _dout = _ffprobe_dur(video_path)            # 자른 뒤 길이
-            # 리플레이 기록시각(=리플레이 끝) − 리플레이 길이 = 게임 시작(벽시계). T0=녹화 시작시각.
-            if rep_mtime and t0 and _draw and _dout:
-                _gs_raw = rep_mtime - _gl - t0           # 원본에서 게임 시작 위치(초)
-                _ls = _gs_raw - _draw + _dout            # 잘린 영상에서 게임 시작 위치(키프레임 스냅까지 반영, 정확)
+            # ★ 멀티뷰 동기화 핵심: lead_sec = '영상에서 게임 0:00 이 시작하는 지점'.
+            # 트리밍은 영상 끝에서 (게임길이 + 6초)만 남기므로, 성공 시 lead = (트리밍후 길이 − 게임길이).
+            # 이 값은 각 PC의 벽시계·녹화시작 타이밍과 무관하게 '영상 구조'에서만 나오므로,
+            # 서로 다른 PC로 녹화한 여러 시점을 겹쳐도 게임 0:00 이 정확히 정렬된다.
+            if _trimmed and _dout and _dout > _gl - 1:
+                _ls = _dout - _gl                       # 트리밍 결과에서 직접 도출(PC 독립적, 정확)
+                if -5.0 <= _ls <= 60.0: _lead_sec = round(max(0.0, _ls), 2)
+            # 트리밍을 못 했을 때만(이미 짧은 영상 등) 벽시계로 폴백 추정
+            elif rep_mtime and t0 and _draw and _dout:
+                _gs_raw = rep_mtime - _gl - t0
+                _ls = _gs_raw - _draw + _dout
                 if -30.0 <= _ls <= 60.0: _lead_sec = round(_ls, 2)
     except Exception as _e:
         log(f"lead_sec measure skipped: {_e}")
@@ -2534,8 +2589,7 @@ def ingest(video_path, rep_path, uploader=None, t0=None, rep_mtime=None):
             thumb_url = sb_upload(tmp_thumb, f"thumbs/{gid}.jpg", "image/jpeg") if has_thumb else None
             replay_url = sb_upload(rdst, f"replays/{gid}.rep", "application/octet-stream") if rdst else None
             players = meta.get("players") or []; saver = meta.get("saver"); winner = meta.get("winner")
-            sp = next((p for p in players if p.get("name") == saver), None)
-            won = (sp.get("team") == winner) if (sp and winner is not None) else None
+            won = _compute_won(players, saver, winner)
             sb_insert_match({
                 "id": gid, "uploader": uploader or saver,
                 "uploaded": datetime.datetime.now().isoformat(timespec="seconds"),
@@ -3428,8 +3482,7 @@ def _cloud_send(video, rep):
     if has_thumb: _put_file(info["thumb_put"], tmp_thumb, "image/jpeg")
     if rep and os.path.isfile(rep): _put_file(info["rep_put"], rep, "application/octet-stream")
     players = meta.get("players") or []; saver = meta.get("saver"); winner = meta.get("winner")
-    sp = next((p for p in players if p.get("name") == saver), None)
-    won = (sp.get("team") == winner) if (sp and winner) else None
+    won = _compute_won(players, saver, winner)
     row = {"id": gid, "uploader": user or saver,
            "uploaded": datetime.datetime.now().isoformat(timespec="seconds"),
            "video": info["video_url"], "thumb": (info["thumb_url"] if has_thumb else None),
@@ -3726,6 +3779,7 @@ def recorder_loop(cfg):
                 if new:
                     newest = max(new, key=lambda f: cur[f])
                     log(f"Game-end detected: {os.path.basename(newest)}")
+                    _pipe("processing")   # 게임 끝 → 즉시 Processing 표시(스레드 시작 지연 없이). 압축 시작되면 %가 채워짐
                     time.sleep(1.5)
                     pend = rec.stop(merge=False); active = False   # 병합은 백그라운드 — 다음 판 녹화 공백 최소화
                     threading.Thread(target=_dispatch, args=(pend, newest, rec._t_start, cur.get(newest)), daemon=True).start()
@@ -3737,6 +3791,7 @@ def recorder_loop(cfg):
                 cur = list_reps(autosave); new = [f for f in cur if f not in known]
                 if pend and new:
                     newest = max(new, key=lambda f: cur[f])
+                    _pipe("processing")   # 게임 끝(스타 종료) → 즉시 Processing 표시
                     threading.Thread(target=_dispatch, args=(pend, newest, rec._t_start, cur.get(newest)), daemon=True).start()
                 elif pend:
                     # 리플레이가 없으면(메뉴·대기 화면 등) 게임이 아니므로 저장하지 않고 폐기 — 용량 낭비 방지
@@ -3925,8 +3980,6 @@ def run_gui(cfg, url):
                 if c:
                     u = url + "/#code=" + c           # 웹(encore-auth.js)이 소비 → 자동 로그인
                     log("Opening gallery — auto-login ready.")
-                elif _ID_CLAIM.get("schema_broken"):
-                    log("⚠ 로그인 불가: 클라우드 DB의 claim_identity 중복(PGRST203). fix_login.sql 실행 후 다시 시도하세요. 우선 갤러리는 그냥 엽니다.")
                 elif not (CFG.get("username") or (_identity_load() or {}).get("last_name")):
                     log("로그인 없이 갤러리를 엽니다 — 아직 계정 이름을 모릅니다. 게임을 1판 저장하거나 config.json 의 username 을 채우면 자동 로그인됩니다.")
                 else:
@@ -4306,11 +4359,6 @@ def _login_diagnose():
         if pu:
             print(f"    ✓ 방금 연결됨 → {pu}")
             st = _identity_load()
-        elif _ID_CLAIM.get("schema_broken"):
-            print("    ✗ 실패: 클라우드 DB에 claim_identity 함수가 중복(오버로드 충돌, PGRST203).")
-            print("      ▶ 조치: Supabase SQL 편집기에서 fix_login.sql 실행 → 중복 함수 제거 → 즉시 로그인됨.")
-            print("      (경기 업로드는 그동안에도 익명으로 정상 저장됩니다.)")
-            return
         else:
             print("    ✗ 연결 실패 (위 로그의 사유 확인). 네트워크/키를 점검하세요.")
             return
