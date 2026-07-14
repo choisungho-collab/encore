@@ -93,6 +93,9 @@ body{ background:radial-gradient(132% 82% at 82% -8%, #11151f 0%, #080a0f 54%) n
 .lnteam.r .lnpl{flex-direction:row-reverse}
 .lnnm{font-family:var(--fd);font-size:12.5px;font-weight:600;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .lnteam.win .lnnm{color:var(--ink)}
+/* 승리팀 명시 칩 — 카드에서 어느 편이 이겼는지 즉시 보이도록 (저장자 미상이어도 팀 단위 승패는 표시) */
+.lnteam.win::before{content:"승리";font-family:var(--fm);font-size:9px;font-weight:700;letter-spacing:.1em;color:#F0CE7A;background:rgba(224,180,65,.13);border:1px solid rgba(224,180,65,.4);border-radius:5px;padding:1.5px 6px;align-self:flex-start;line-height:1.35}
+.lnteam.r.win::before{align-self:flex-end}
 .lnvs{font-family:var(--fh);font-weight:700;font-size:11px;color:var(--faint);flex:none;letter-spacing:.03em}
 .lineup.comp{align-items:center}
 .lncomp{display:flex;align-items:center;gap:7px;flex:1;min-width:0}

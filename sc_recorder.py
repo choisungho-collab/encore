@@ -155,7 +155,7 @@ import queue as _queue
 from collections import deque as _deque
 GUI_Q = _queue.Queue(maxsize=4000)
 LOG_BUF = _deque(maxlen=400)   # 로그창이 닫혀 있어도 최근 로그를 항상 보관(열면 즉시 채움)
-APP_VERSION = "1.7.7"
+APP_VERSION = "1.7.10"
 REC_STATE = {"recording": False, "encoder": "", "ready": False}
 LAST_ERR = {"msg": "", "t": 0.0}
 UP_DONE = {"t": 0.0, "shown": 0.0}
@@ -429,6 +429,22 @@ def ensure_screp():
 # ===================== 3. 리플레이 파싱 =====================
 def clean(s): return re.sub(r"[\x00-\x1f]", "", s).strip() if s else s
 
+def _identity_saver_fallback(names):
+    """RepSaverPlayerID 매칭 실패 시 최후 폴백: 내 계정 이름(config username → 기억된 로그인 이름)이
+    플레이어 목록에 있으면 그 사람이 저장자다 — 내 레코더의 오토세이브 저장자는 정의상 나이므로.
+    (2026-07-14 실측: 4인 게임에서 RepSaver 매칭이 실패해 saver=null → 갤러리에 '익명'+'기록됨'으로 노출)"""
+    try:
+        nm = (CFG.get("username") or (_identity_load() or {}).get("last_name") or "").strip()
+        if not nm:
+            return None
+        low = nm.lower()
+        for n in names or []:
+            if n and str(n).strip().lower() == low:
+                return str(n)
+    except Exception:
+        pass
+    return None
+
 def parse_rep(path):
     meta = {"map": None, "length": None, "type": None, "matchup": None,
             "winner": None, "saver": None, "players": []}
@@ -464,7 +480,9 @@ def parse_rep(path):
                            or next(iter([p.get("Name") for p in (h.get("Players") or [])
                                          if ((p.get("Type") or {}).get("Name") == "Human")]
                                         if sum(1 for p in (h.get("Players") or [])
-                                               if (p.get("Type") or {}).get("Name") == "Human") == 1 else []), None)),
+                                               if (p.get("Type") or {}).get("Name") == "Human") == 1 else []), None)
+                           # 최후 폴백: 내 계정 이름이 플레이어 중에 있으면 그가 저장자 (다인전 RepSaver 매칭 실패 대비)
+                           or _identity_saver_fallback([p.get("Name") for p in (h.get("Players") or [])])),
                  "players": players,
                  "matchup": (f"{t1} vs {t2}" if t1 and t2 else None)})
     return meta
@@ -837,7 +855,8 @@ def extract_analysis(rep_path):
     secs = frames / FPS_GAME
     meta = {"map": clean(h.get("Map")), "length": f"{int(secs//60)}:{int(secs%60):02d}",
             "winner": comp.get("WinnerTeam"),
-            "saver": next((p.get("Name") for p in (h.get("Players") or []) if p.get("ID") == comp.get("RepSaverPlayerID")), None)}
+            "saver": (next((p.get("Name") for p in (h.get("Players") or []) if p.get("ID") == comp.get("RepSaverPlayerID")), None)
+                      or _identity_saver_fallback([p.get("Name") for p in (h.get("Players") or [])]))}
     leave_list = sorted([{"sec": int(max(0, fr)/FPS_GAME), "t": mmss(fr), "name": (players.get(pid) or {}).get("name")}
                          for fr, pid in leaves], key=lambda x: x["sec"])
     team_fine = {}
@@ -2153,6 +2172,11 @@ def rebuild_db_from_recordings(log_fn=None):
             if not os.path.isfile(thumb):
                 try: make_thumb(video, thumb)
                 except Exception: pass
+            try:
+                _sw = detect_screen_result(video)
+                if _sw is not None:
+                    meta["winner"] = _winner_from_screen(meta.get("players") or [], meta.get("saver"), _sw, meta.get("winner"))
+            except Exception: pass
             players = meta.get("players") or []; saver = meta.get("saver"); winner = meta.get("winner")
             won = _compute_won(players, saver, winner)
             try:
@@ -2489,6 +2513,163 @@ def _compress_for_upload(video_path):
         except Exception: pass
 
 
+# ===================== 화면 승패 인식 (승리/패배 텍스트 · 순수 numpy) =====================
+# 왜: BW 리플레이엔 승자 정보가 없어 screp 의 WinnerTeam 추정이 자주 실패(→ '결과 미상')한다.
+# 레코더는 POV(리플레이 저장자) 화면을 녹화하므로, 게임 종료 점수판 좌상단의 한글 문구
+# '승리!' / '패배!' 를 직접 읽어 저장자의 승패를 확정한다. 읽히면 그 결과를 우선 신뢰하고,
+# 안 읽히면(점수판 미포착·다른 언어 클라이언트 등) 기존 screp 판정으로 폴백 — 지금보다
+# 나빠질 일 없이 '미상'만 줄인다. 의존성은 numpy + 번들 ffmpeg 뿐(cv2/PIL 불필요):
+# ffmpeg 로 영상 끝 몇 초를 높이 650 으로 스케일해 raw rgb24 프레임을 뽑고(디코더 불필요),
+# numpy 로 글자 획만 이진화한 뒤 제목 존에서 템플릿 정규상관(NCC)으로 승리/패배를 구분한다.
+# 파라미터·템플릿은 실제 녹화 프레임(720p/1080p/1440p)에 대해 실측 검증됨.
+_WL_REF_H  = 650
+_WL_THR    = 138
+_WL_ABS    = 0.42
+_WL_MARGIN = 0.07
+_WL_SCALES = (0.90, 0.95, 1.00, 1.05, 1.10, 1.20)
+_WL_TPL_WIN_HW  = (28, 70)   # 승리!
+_WL_TPL_LOSE_HW = (26, 70)   # 패배!
+_WL_TPL_WIN_B64  = "NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NGJjZ2RaW2ZucWplZ2dlZWVlZWRiZWNlcHFuZ1xbXVtfZGNbWWFqYllWUlJOUmZxbmlqZl9XUU9UT0pWYVxVV1ZWYGdhZ2mLhYmEf4SWloaAfn2Ch42XlZaVioqNj5yooopweoV8goqGeniLmJmRh4F1ZG6Jn6WpqJyHdXBwcnFxgI+HdHp6ZHSCdYSDXVxfW1ldZGViX11fYmRlZWRjY2RiZmhkZ2hYTFFYVlhWVVlaXWFlY19ZVU1MWV5hZWZjXlpbWFVVWGFpZVpbXU1RWVZbWCoqLCwwMS8uMDEwLi0uLi4wMi8sKiopKS8xLiorLC8qJS0wKSspKCswLy4wLzMyMTAwMDEzMComKCwuLi0tLCsqKiorKCotLi8yNzUvMDQ0MzI0Nzg3NDQzMjQzMTQ3Ojs2MzU2Mi8zMy8yMi0vODkyMzkzMDIxMTQ2NDQxKCUlJSQkJCQkIyIiIyQlYGBhX1trdm5zeHt4dW12g3xxdYSGhIOBgIV3c313dHh2a2ZyeHVwdH6CdnB3bmRzdGFhYVZPTDwqIyMkJCQjIyIjJCMkIUNEQj49TVpUWFtdYmNaXWVhXV9gX1tYXGFkW1VfWlRaVlBUVlhWUlVfYFtaWVhZV1lVVFNCP05NLR8hJCUlIyMjJSUjJB0hIh0cHR4iIiIiIiQnLDAxLCcoJR8eHyQrLC0pJyUiISAeISQoKi0tNj8qIiYlIyQqKyspJyYoLywfICUlJSUkIyQlIyIdKCUgHR4fHh8gICI0QkRFQjctJiMjJCUnLC8wLy0qKScjHBwkLjQ4OUhIKx8gIh8jMDY2My4oJSYjHR4lJiQjIyIjIyMhHCwmIx8bGRkbISYsQ1pcUEAwIR0hJigpLDE2NzUwKyorHhUkOkFBQD05MBkTGR4iKjI3ODQwLCglHxccISIhISEhISIiIRw3JR0YExMXGyo2OEJWWUUvJRwdIycvOTw9Qj4yKSQlIhgZMkdMRkA1JRwUFR4kLzg3OjoyLisnJR0UGh8gHyAgICAhIB4cOCMWEREVGyQ2PzczQEAuIh8eGh8qMj9CPD43KCAdHBcdNEVGSEg3IBMTERUfJDhFODs6KSElIiIbExoeIB8fHx4eHx8eGy8eGhkaICIrOjYrKi0mHh0bFhcrQDw5PTkuKislGxchMURRTU1EJxEMEBAcLC1ASjg4MCAbIR8eFxMZHh8fHx4eHh4dHRsnGiEhICQmLDIuKioiFhYZExAnSltKMzg0HxslJBUgOT07SVdTMhMNERUXKkE6Nz05NB8XHiIeHBYTGB0gHh4eHRwdHRwbLCooJicpKiorKyotIhUXGBUkQ1tiTjovIhoYGBkdLDUxMzo5KxMJEBATJzY9ODAwMhwOFxwZHBwSERccHx8dHBwcGxsbFy4wMTExMTEwMTExMS4qIx4jNURLUEU5MCYiIyMpLS8uLCsuKBsWExcaIS43NDEvKyYcFhcXFxoWCw0XHR8fHRwcGxsbGBQmJygpKSknJygoKSkrKiYjJSgmJiUjIyYlJSUmJygnJyUlJiEaGRocGRoeISMlJiEbGxkXFhYSCgcOGBweHh0bGxobGxsWBgcHBwcGBgYGBQUFBQUFBQcFBAYIBgUHBgYGBgcFBgUFBwcFBAQFBQQFBAQEBQUEBAQEBAQFBQUIDxccHRwcGhoaGhsaEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAQEAAAAAAAAAAAAAAAAAAAABAAEBAQEBAQEAAQEBAgUGChEWGRwcHBsbGxsbGhMDAgMDAgMCAgICAgICAgICAgMDAwMDAwMDAgICAgICAgICAgICAgIDBAQEAwMDAwMEBAQEBAQHBgsTFxgbHRwcHBwcHBkSAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQEBAQEBAQEBAQEBAgIBAgIHDQwKDAwKCgoKCwsKCwMCAwMDBAQFBQUFBQUDAwQFBQUEBAMEBAUGBQQEBQUFBQUEBAMDAwMDAwMDBAQEBAQDAwMDAwQEBAQEBAQEBAQEBAQEBAQDAwMEBAQEBAUFBAQEAwMEBAQEBAQDBAQFBQQEBAUFBQUFBQUEBAQEBAQDAwQEBAQDAwQDBAMDAwMDAwMDAwQEBAQEBAQDBQQEBAQDAwMEBAQEBAQEAwMDAwMDAwMDBAQDAwMDAwMEBAQEBAQEBAQEBAQEBAMDAwMEAwMEAwMDAwMDAwMEBAQEBAQEAwUFBAQEAwMDAwMDAwMDAwMDAwMDAwMDAwQEAwMDAwMDAwMEBAQEBQUEBAQDAwMDAwMDAgICAwMDAwMDAwMDAwMDAwQEBAMFBAQDAwMDAwMDAwMDAgMDAwMDAwMDAwMDAwMDAwMDAwQDAwMDBAQEAwMDAwMDAwMDAgMDAwMDAwMDAwMDAwMDAwMDBAQDBQUEBAQDBAQEBAQDAwMDBAQEAwIEAwMEBAQEBAQEBAQDAgMEBAQEAwMEBAQDAwQEBAQDAwMEAwMDAwMDAwMEBAQEBAQEBA=="
+_WL_TPL_LOSE_B64 = "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"
+
+def _wl_np():
+    import numpy as _np; return _np
+
+def _wl_load_tpl(b64, hw):
+    import base64 as _bs
+    _np = _wl_np()
+    a = _np.frombuffer(_bs.b64decode(b64), dtype=_np.uint8).reshape(hw).astype(_np.float32)
+    return (a > _WL_THR).astype(_np.float32)
+
+def _wl_scale_tpl(t, fx):
+    _np = _wl_np()
+    h, w = t.shape
+    nh, nw = max(1, int(round(h * fx))), max(1, int(round(w * fx)))
+    yi = _np.clip((_np.arange(nh) / fx).astype(int), 0, h - 1)
+    xi = _np.clip((_np.arange(nw) / fx).astype(int), 0, w - 1)
+    return t[yi][:, xi]
+
+def _wl_best(fbin, tpl):
+    # 제목 존에서 템플릿 정규상관(NCC) 최댓값. 적분영상으로 창별 평균/분산을 O(영역)에 구하고,
+    # 분자(평균제거 템플릿과의 상관)는 strided view + einsum 으로 큰 배열 복사 없이 계산(고속).
+    _np = _wl_np()
+    from numpy.lib.stride_tricks import sliding_window_view as _swv
+    H, W = fbin.shape
+    sr = fbin[int(H * 0.01):int(H * 0.16), int(W * 0.14):int(W * 0.40)].astype(_np.float32, copy=False)  # 제목 존: 탭 왼쪽·명단 위
+    rh, rw = sr.shape
+    if rh < 4 or rw < 4: return -1.0
+    ii = _np.zeros((rh + 1, rw + 1), _np.float64); ii[1:, 1:] = _np.cumsum(_np.cumsum(sr, 0), 1)
+    sr2 = sr * sr
+    ii2 = _np.zeros((rh + 1, rw + 1), _np.float64); ii2[1:, 1:] = _np.cumsum(_np.cumsum(sr2, 0), 1)
+    best = -1.0
+    for sc in _WL_SCALES:
+        t = _wl_scale_tpl(tpl, sc); th, tw = t.shape
+        if th >= rh or tw >= rw or t.sum() < 10: continue
+        Tc = t - t.mean(); tn = _np.sqrt((Tc * Tc).sum()); n = th * tw
+        if tn < 1e-6: continue
+        ws  = ii[th:, tw:]  - ii[:-th, tw:]  - ii[th:, :-tw]  + ii[:-th, :-tw]
+        ws2 = ii2[th:, tw:] - ii2[:-th, tw:] - ii2[th:, :-tw] + ii2[:-th, :-tw]
+        var = _np.clip(ws2 - (ws * ws) / n, 0, None)
+        den = _np.sqrt(var) * tn
+        num = _np.einsum("ijuv,uv->ij", _swv(sr, (th, tw)), Tc, optimize=True)
+        with _np.errstate(divide="ignore", invalid="ignore"):
+            r = _np.where(den > 1e-6, num / den, -1.0)
+        m = float(r.max())
+        if m > best: best = m
+    return best
+
+def _wl_vote(frame_rgb, tw, tl):
+    _np = _wl_np()
+    g = frame_rgb[..., 0] * 0.299 + frame_rgb[..., 1] * 0.587 + frame_rgb[..., 2] * 0.114
+    fb = (g > _WL_THR).astype(_np.float32)
+    sw = _wl_best(fb, tw); sl = _wl_best(fb, tl)
+    if max(sw, sl) < _WL_ABS: return None
+    if sw >= sl + _WL_MARGIN: return True
+    if sl >= sw + _WL_MARGIN: return False
+    return None
+
+def _wl_video_dims(path):
+    probe = None
+    if FFMPEG:
+        c = (FFMPEG[:-10] + "ffprobe.exe") if FFMPEG.lower().endswith("ffmpeg.exe") else FFMPEG.replace("ffmpeg", "ffprobe")
+        if os.path.isfile(c): probe = c
+    probe = probe or shutil.which("ffprobe")
+    if not probe: return None
+    try:
+        r = _run([probe, "-v", "error", "-select_streams", "v:0",
+                  "-show_entries", "stream=width,height", "-of", "csv=s=x:p=0", path],
+                 capture_output=True, text=True, timeout=20)
+        parts = (r.stdout or "").strip().split("x")
+        return (int(parts[0]), int(parts[1])) if len(parts) >= 2 else None
+    except Exception:
+        return None
+
+def detect_screen_result(video_path, tail=2.5, want=5):
+    """영상 끝 종료 점수판에서 저장자(POV)의 승패를 읽어 True(승)/False(패)/None(미상) 반환.
+    한글 클라이언트('승리!'/'패배!')에서만 동작. 점수판이 안 잡히거나 애매하면 None → screp 폴백."""
+    if not FFMPEG or not video_path or not os.path.isfile(video_path): return None
+    try:
+        _np = _wl_np()
+    except Exception:
+        return None
+    dims = _wl_video_dims(video_path)
+    if not dims: return None
+    ow, oh = dims
+    if oh <= 0 or ow <= 0: return None
+    nw = int(round(ow * _WL_REF_H / oh)); nw -= (nw & 1)   # 짝수 폭(rawvideo 안전)
+    if nw < 2: return None
+    fps = max(1, int(round(want / max(0.5, tail))))
+    try:
+        raw = _run([FFMPEG, "-v", "error", "-sseof", "-%.2f" % tail, "-i", video_path,
+                    "-vf", "scale=%d:%d" % (nw, _WL_REF_H), "-r", str(fps),
+                    "-pix_fmt", "rgb24", "-f", "rawvideo", "pipe:"],
+                   capture_output=True, timeout=40).stdout or b""
+    except Exception:
+        return None
+    fsz = nw * _WL_REF_H * 3
+    n = len(raw) // fsz
+    if n <= 0: return None
+    try:
+        tw = _wl_load_tpl(_WL_TPL_WIN_B64, _WL_TPL_WIN_HW)
+        tl = _wl_load_tpl(_WL_TPL_LOSE_B64, _WL_TPL_LOSE_HW)
+    except Exception:
+        return None
+    wins = losses = 0
+    for i in range(n):
+        try:
+            fr = _np.frombuffer(raw[i * fsz:(i + 1) * fsz], dtype=_np.uint8).reshape(_WL_REF_H, nw, 3).astype(_np.float32)
+        except Exception:
+            continue
+        v = _wl_vote(fr, tw, tl)
+        if v is True: wins += 1
+        elif v is False: losses += 1
+    decided = wins + losses
+    if decided < 2: return None                          # 확정 프레임이 너무 적음 → 폴백
+    need = max(2, int(decided * 0.6 + 0.999))            # 다수결(>=60%) + 최소 개수
+    if wins >= need and wins > losses: return True
+    if losses >= need and losses > wins: return False
+    return None
+
+def _winner_from_screen(players, saver, screen_won, screp_winner):
+    """화면 판정(True/False)을 저장자 기준 winner 팀번호로 변환. meta/analysis 의 winner 를
+    이 값으로 갱신하면 _compute_won 과 코치 리포트가 같은 승패를 내도록 일관 유지된다."""
+    sv = str(saver or "").strip().lower()
+    sp = next((p for p in (players or []) if str(p.get("name") or "").strip().lower() == sv), None)
+    if not sp or sp.get("team") is None:
+        return screp_winner
+    st = sp.get("team")
+    if screen_won:
+        return st
+    try:
+        others = sorted({p.get("team") for p in players
+                         if p.get("team") is not None and p.get("team") != st})
+    except Exception:
+        others = [p.get("team") for p in players
+                  if p.get("team") is not None and p.get("team") != st]
+    if screp_winner is not None and screp_winner != st and screp_winner in others:
+        return screp_winner
+    return others[0] if others else screp_winner
+
 def ingest(video_path, rep_path, uploader=None, t0=None, rep_mtime=None):
     if not video_path or not os.path.isfile(video_path) or os.path.getsize(video_path) < 10000:
         log("Video is empty, skipping registration."); return
@@ -2549,6 +2730,16 @@ def ingest(video_path, rep_path, uploader=None, t0=None, rep_mtime=None):
     _compress_for_upload(video_path)                # 업로드 전 재인코딩(트리밍 뒤 = 게임 구간만 인코딩)
     try: size = os.path.getsize(video_path)         # 트리밍·압축 반영한 실제 업로드 크기
     except Exception: pass
+    # 화면 승패 인식: 종료 점수판의 '승리!'/'패배!' 로 저장자 승패 확정(읽히면 screp 대신 우선)
+    _screen_won = None
+    try:
+        _screen_won = detect_screen_result(video_path)
+        if _screen_won is not None:
+            meta["winner"] = _winner_from_screen(meta.get("players") or [], meta.get("saver"),
+                                                 _screen_won, meta.get("winner"))
+            log("  화면 판정: %s (종료 점수판 인식)" % ("승리" if _screen_won else "패배"))
+    except Exception as _e:
+        log("screen result skipped: %s" % _e)
     if sb_writable():
         analysis = None
         try:
@@ -2558,6 +2749,9 @@ def ingest(video_path, rep_path, uploader=None, t0=None, rep_mtime=None):
                 except Exception: pass
                 if analysis is not None and _lead_sec is not None:
                     try: analysis.setdefault("meta", {})["lead_sec"] = _lead_sec
+                    except Exception: pass
+                if analysis is not None and _screen_won is not None:
+                    try: analysis.setdefault("meta", {})["winner"] = meta.get("winner")
                     except Exception: pass
         except Exception as e:
             log(f"Analysis failed (continuing): {e}")
@@ -3481,6 +3675,12 @@ def _cloud_send(video, rep):
     _put_file(info["video_put"], video, "video/mp4")
     if has_thumb: _put_file(info["thumb_put"], tmp_thumb, "image/jpeg")
     if rep and os.path.isfile(rep): _put_file(info["rep_put"], rep, "application/octet-stream")
+    try:
+        _sw = detect_screen_result(video)
+        if _sw is not None:
+            meta["winner"] = _winner_from_screen(meta.get("players") or [], meta.get("saver"), _sw, meta.get("winner"))
+            if analysis is not None: analysis.setdefault("meta", {})["winner"] = meta.get("winner")
+    except Exception: pass
     players = meta.get("players") or []; saver = meta.get("saver"); winner = meta.get("winner")
     won = _compute_won(players, saver, winner)
     row = {"id": gid, "uploader": user or saver,
@@ -3886,6 +4086,375 @@ def _hide_console():
         if hwnd: ctypes.windll.user32.ShowWindow(hwnd, 0)   # SW_HIDE
     except Exception: pass
 
+# ===================== \ub9ac\ud038\ub4dc \uae00\ub798\uc2a4 \uc0c1\ud0dc\ucc3d 통합 =====================
+_WEBVIEW_HTML = r'''<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css">
+<style>
+  @property --acc { syntax:'<color>'; inherits:true; initial-value:#38bdf8; }
+  @property --deg { syntax:'<angle>'; inherits:true; initial-value:0deg; }
+  :root{
+    --ink:#f4f6fb;--ink-2:#c3cad8;--ink-dim:#8b93a6;--ink-faint:#5f6678;
+    --glass:rgba(17,19,28,.42);--glass-brd:rgba(255,255,255,.14);
+    --sky:#38bdf8;--emerald:#34d39a;--coral:#fb6f6a;--amber:#fbbf24;--cyan:#22d3ee;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden}
+  body{
+    font-family:"Pretendard Variable",Pretendard,-apple-system,"Segoe UI",sans-serif;color:var(--ink);
+    background:
+      radial-gradient(42% 46% at 18% 22%, rgba(124,58,237,.62), transparent 62%),
+      radial-gradient(46% 50% at 82% 20%, rgba(37,99,235,.58), transparent 62%),
+      radial-gradient(50% 52% at 72% 84%, rgba(6,182,212,.52), transparent 60%),
+      radial-gradient(44% 48% at 20% 82%, rgba(219,39,119,.50), transparent 60%),
+      radial-gradient(60% 60% at 50% 50%, rgba(76,29,149,.35), transparent 70%),
+      #07070e;
+    -webkit-font-smoothing:antialiased;
+    display:flex;align-items:center;justify-content:center;padding:16px;
+  }
+  .bganim{position:fixed;inset:-20%;z-index:-2;filter:saturate(125%);
+    background:inherit;animation:drift 22s ease-in-out infinite alternate}
+  @keyframes drift{0%{transform:translate3d(0,0,0) scale(1.02)}50%{transform:translate3d(-2.5%,1.6%,0) scale(1.07)}100%{transform:translate3d(2%,-1.4%,0) scale(1.03)}}
+  .grain{position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.05;mix-blend-mode:overlay;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+  .drag{position:fixed;inset:0;z-index:0}
+
+  .glass{
+    position:relative;width:100%;max-width:468px;border-radius:24px;overflow:hidden;isolation:isolate;z-index:2;
+    background:var(--glass);border:1px solid var(--glass-brd);
+    -webkit-backdrop-filter:blur(30px) saturate(180%);backdrop-filter:blur(30px) saturate(180%);
+    box-shadow:0 30px 80px -24px rgba(0,0,0,.6),0 6px 24px -8px rgba(0,0,0,.4),inset 0 1px 0 rgba(255,255,255,.30),inset 0 -1px 0 rgba(255,255,255,.05);
+    padding:16px 18px 13px;--acc:var(--sky);transition:--acc .55s ease, box-shadow .55s ease;
+  }
+  .glass[data-s="ready"]{box-shadow:0 30px 80px -24px rgba(0,0,0,.6),0 6px 24px -8px rgba(0,0,0,.4),inset 0 1px 0 rgba(255,255,255,.30),inset 0 -1px 0 rgba(255,255,255,.05),0 0 44px -14px rgba(56,189,248,.5)}
+  .glass[data-s="rec"]{--acc:var(--coral);box-shadow:0 30px 80px -24px rgba(0,0,0,.6),0 6px 24px -8px rgba(0,0,0,.4),inset 0 1px 0 rgba(255,255,255,.30),inset 0 -1px 0 rgba(255,255,255,.05),0 0 52px -12px rgba(251,111,106,.55)}
+  .glass[data-s="proc"]{--acc:var(--amber);box-shadow:0 30px 80px -24px rgba(0,0,0,.6),0 6px 24px -8px rgba(0,0,0,.4),inset 0 1px 0 rgba(255,255,255,.30),inset 0 -1px 0 rgba(255,255,255,.05),0 0 48px -13px rgba(251,191,36,.5)}
+  .glass[data-s="uplink"]{--acc:var(--cyan);box-shadow:0 30px 80px -24px rgba(0,0,0,.6),0 6px 24px -8px rgba(0,0,0,.4),inset 0 1px 0 rgba(255,255,255,.30),inset 0 -1px 0 rgba(255,255,255,.05),0 0 48px -13px rgba(34,211,238,.5)}
+  .glass::before{content:"";position:absolute;inset:0;z-index:0;pointer-events:none;border-radius:24px;
+    background:radial-gradient(130% 90% at 12% -8%, rgba(255,255,255,.16), transparent 42%)}
+  .sheen{position:absolute;top:0;bottom:0;width:44%;z-index:0;pointer-events:none;
+    background:linear-gradient(105deg,transparent,rgba(255,255,255,.08) 48%,transparent);
+    transform:translateX(-140%);animation:sheen 7s ease-in-out infinite;animation-delay:1.5s}
+  @keyframes sheen{0%{transform:translateX(-140%)}55%,100%{transform:translateX(340%)}}
+  .glass > *{position:relative;z-index:1}
+
+  /* 창 컨트롤 */
+  .winctrl{position:absolute;top:9px;right:11px;display:flex;gap:3px;z-index:3}
+  .wc{width:22px;height:20px;display:grid;place-items:center;border:0;background:transparent;border-radius:7px;
+    color:var(--ink-dim);cursor:pointer;transition:.15s}
+  .wc:hover{color:#fff;background:rgba(255,255,255,.12)}
+  .wc.x:hover{color:#fff;background:rgba(251,111,106,.28)}
+  .wc svg{width:11px;height:11px;stroke:currentColor;stroke-width:1.6;fill:none;stroke-linecap:round}
+
+  .row{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:15px;padding-right:30px}
+  .orb-wrap{width:44px;height:44px;position:relative;flex:none;display:grid;place-items:center}
+  .orb-wrap > *{grid-area:1/1}
+  .orb{width:32px;height:32px;border-radius:50%;position:relative;
+    background:radial-gradient(circle at 32% 28%, rgba(255,255,255,.9), rgba(255,255,255,.15) 30%, transparent 46%),radial-gradient(circle at 50% 60%, var(--acc), color-mix(in srgb,var(--acc) 40%,#05060a) 88%);
+    box-shadow:0 0 22px -2px var(--acc),inset 0 -3px 8px rgba(0,0,0,.4),inset 0 2px 3px rgba(255,255,255,.35);
+    transition:background .55s ease, box-shadow .55s ease}
+  .orb::after{content:"";position:absolute;top:5px;left:8px;width:7px;height:5px;border-radius:50%;background:rgba(255,255,255,.85);filter:blur(1px)}
+  .oring{width:44px;height:44px;border-radius:50%;opacity:0;transition:opacity .4s;
+    background:conic-gradient(var(--acc) var(--deg), rgba(255,255,255,.10) 0deg);
+    -webkit-mask:radial-gradient(circle,transparent 18px,#000 18.6px);mask:radial-gradient(circle,transparent 18px,#000 18.6px);
+    filter:drop-shadow(0 0 6px var(--acc))}
+  .glass[data-s="proc"] .oring,.glass[data-s="uplink"] .oring{opacity:1}
+  .glass[data-s="ready"] .orb{animation:breathe 3.8s ease-in-out infinite}
+  .glass[data-s="rec"] .orb{animation:pulse 2.2s ease-in-out infinite}
+  @keyframes breathe{0%,100%{box-shadow:0 0 16px -3px var(--acc),inset 0 -3px 8px rgba(0,0,0,.4),inset 0 2px 3px rgba(255,255,255,.35)}50%{box-shadow:0 0 30px 1px var(--acc),inset 0 -3px 8px rgba(0,0,0,.4),inset 0 2px 3px rgba(255,255,255,.35)}}
+  @keyframes pulse{0%,100%{transform:scale(.94);box-shadow:0 0 18px -2px var(--acc),inset 0 -3px 8px rgba(0,0,0,.4),inset 0 2px 3px rgba(255,255,255,.35)}50%{transform:scale(1.06);box-shadow:0 0 40px 3px var(--acc),inset 0 -3px 8px rgba(0,0,0,.4),inset 0 2px 3px rgba(255,255,255,.35)}}
+
+  .status{min-width:0}
+  .title-row{display:flex;align-items:center;gap:8px}
+  .title{font-size:18px;font-weight:600;letter-spacing:-.02em;line-height:1.14;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .standby{display:none;align-items:center;gap:5px;font-size:10.5px;font-weight:500;color:var(--ink-2);flex:none;
+    padding:2px 8px 2px 7px;border-radius:20px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12)}
+  .standby i{width:5px;height:5px;border-radius:50%;background:var(--coral);box-shadow:0 0 6px var(--coral);animation:sb 2.2s ease-in-out infinite}
+  @keyframes sb{0%,100%{opacity:.5}50%{opacity:1}}
+  .glass[data-s="proc"] .standby,.glass[data-s="uplink"] .standby{display:inline-flex}
+  .sub{font-size:12.5px;font-weight:400;color:var(--ink-dim);margin-top:4px;line-height:1.4;letter-spacing:-.005em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sub .num{color:var(--ink-2);font-variant-numeric:tabular-nums;letter-spacing:.01em}
+  .sub.warn{color:#fcd34d}
+  .sub .wdot{display:none}
+  .sub.warn .wdot{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--amber);box-shadow:0 0 6px var(--amber);margin-right:6px;vertical-align:1px}
+
+  .ctrl{display:flex;gap:5px}
+  .btn{width:34px;height:34px;display:grid;place-items:center;border:1px solid rgba(255,255,255,.10);
+    background:rgba(255,255,255,.06);border-radius:11px;color:var(--ink-2);cursor:pointer;transition:.18s cubic-bezier(.2,.7,.2,1)}
+  .btn svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+  .btn:hover{color:#fff;background:rgba(255,255,255,.14);transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.3)}
+  .btn:active{transform:translateY(0) scale(.96)}
+  .btn.on{color:#fff;background:rgba(255,255,255,.16);border-color:rgba(255,255,255,.2)}
+
+  .pbar{height:3px;border-radius:3px;margin:14px 2px 0;background:rgba(255,255,255,.08);overflow:hidden;opacity:0;max-height:0;transition:opacity .4s,max-height .4s,margin .4s}
+  .glass[data-s="proc"] .pbar,.glass[data-s="uplink"] .pbar{opacity:1;max-height:6px}
+  .pfill{height:100%;width:0%;border-radius:3px;transition:width .5s cubic-bezier(.4,0,.2,1);
+    background:linear-gradient(90deg,color-mix(in srgb,var(--acc) 55%,#fff),var(--acc));box-shadow:0 0 10px var(--acc),0 0 4px var(--acc)}
+
+  .div{height:1px;background:rgba(255,255,255,.08);margin:14px 0 0}
+  .glass[data-s="proc"] .div,.glass[data-s="uplink"] .div{opacity:0;height:0;margin:6px 0 0}
+  .foot{display:flex;align-items:center;justify-content:space-between;padding-top:11px}
+  .brand{font-size:11.5px;font-weight:600;letter-spacing:.2em;color:rgba(255,255,255,.5)}
+  .meta{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--ink-dim);min-width:0}
+  .meta .enc{color:var(--ink-2);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .meta .sep{width:3px;height:3px;border-radius:50%;background:var(--ink-faint);flex:none}
+  .meta .live{width:6px;height:6px;border-radius:50%;background:var(--acc);box-shadow:0 0 7px var(--acc);flex:none}
+
+  .logwrap{overflow:hidden;max-height:0;transition:max-height .34s cubic-bezier(.4,0,.2,1)}
+  .logwrap.open{max-height:210px}
+  .log{margin-top:10px;border-radius:16px;border:1px solid rgba(255,255,255,.10);background:rgba(12,13,20,.4);
+    -webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);padding:12px 14px;box-shadow:inset 0 1px 0 rgba(255,255,255,.12)}
+  .log .h{display:flex;justify-content:space-between;align-items:center;font-size:10.5px;color:var(--ink-faint);letter-spacing:.02em;padding-bottom:8px;margin-bottom:7px;border-bottom:1px solid rgba(255,255,255,.08)}
+  .lines{font-size:11.5px;line-height:1.7;color:var(--ink-2);font-variant-numeric:tabular-nums;max-height:150px;overflow:auto;white-space:pre-wrap;word-break:break-word}
+  .lines .ln{opacity:.92}
+</style>
+</head>
+<body>
+  <div class="bganim"></div>
+  <div class="grain"></div>
+  <div class="drag pywebview-drag-region"></div>
+
+  <div class="glass" data-s="ready" id="glass">
+    <div class="sheen"></div>
+
+    <div class="winctrl">
+      <button class="wc" id="minBtn" title="최소화"><svg viewBox="0 0 12 12"><path d="M2 9h8"/></svg></button>
+      <button class="wc x" id="quitBtn" title="종료"><svg viewBox="0 0 12 12"><path d="M3 3l6 6M9 3l-6 6"/></svg></button>
+    </div>
+
+    <div class="row">
+      <div class="orb-wrap pywebview-drag-region">
+        <div class="oring"></div>
+        <div class="orb"></div>
+      </div>
+
+      <div class="status pywebview-drag-region">
+        <div class="title-row">
+          <span class="title" id="title">준비 중</span>
+          <span class="standby"><i></i>대기 녹화</span>
+        </div>
+        <div class="sub" id="sub"><span class="wdot"></span><span id="subText">도구를 준비하고 있습니다…</span></div>
+      </div>
+
+      <div class="ctrl">
+        <button class="btn" id="galleryBtn" title="갤러리 열기">
+          <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="14" rx="2.5"/><path d="M3 15l4.5-4.5a2 2 0 0 1 2.8 0L15 15"/><path d="M14 14l1.8-1.8a2 2 0 0 1 2.8 0L21 14"/><circle cx="9" cy="9" r="1.3"/></svg>
+        </button>
+        <button class="btn" id="folderBtn" title="녹화 폴더 열기">
+          <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+        </button>
+        <button class="btn" id="logBtn" title="로그 보기">
+          <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="pbar"><div class="pfill" id="pfill"></div></div>
+    <div class="div"></div>
+    <div class="foot">
+      <div class="brand">ENCORE</div>
+      <div class="meta"><span class="live"></span><span class="enc" id="enc"></span><span class="sep"></span><span id="footState">준비 중</span></div>
+    </div>
+
+    <div class="logwrap" id="logwrap">
+      <div class="log">
+        <div class="h"><span>이벤트 로그</span><span id="ver">ENCORE</span></div>
+        <div class="lines" id="lines"></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+  const glass=document.getElementById('glass'), title=document.getElementById('title'),
+        sub=document.getElementById('sub'), subText=document.getElementById('subText'),
+        pfill=document.getElementById('pfill'), footState=document.getElementById('footState'),
+        enc=document.getElementById('enc'), lines=document.getElementById('lines');
+
+  // Python → JS : 상태 반영
+  window.applyState = function(s){
+    try{
+      glass.dataset.s = s.state || 'ready';
+      glass.style.setProperty('--deg', ((s.pct||0)*3.6) + 'deg');
+      title.textContent = s.title || '';
+      footState.textContent = s.footState || '';
+      enc.textContent = s.encoder || '';
+      if(typeof s.pct === 'number'){ pfill.style.width = s.pct + '%'; }
+      if(s.disk){ sub.classList.add('warn'); subText.textContent = s.disk; }
+      else { sub.classList.remove('warn'); subText.innerHTML = s.sub || ''; }
+    }catch(e){}
+  };
+  // Python → JS : 로그
+  window.pushLog = function(line){
+    const d=document.createElement('div'); d.className='ln'; d.textContent=line;
+    lines.appendChild(d);
+    while(lines.childElementCount>80) lines.removeChild(lines.firstChild);
+    lines.scrollTop = lines.scrollHeight;
+  };
+  window.setLog = function(arr){
+    lines.innerHTML='';
+    (arr||[]).forEach(window.pushLog);
+  };
+  window.setVersion = function(v){ document.getElementById('ver').textContent = v; };
+
+  function api(){ return (window.pywebview && window.pywebview.api) ? window.pywebview.api : null; }
+  document.getElementById('galleryBtn').onclick = ()=>{ const a=api(); if(a) a.gallery(); };
+  document.getElementById('folderBtn').onclick  = ()=>{ const a=api(); if(a) a.folder(); };
+  document.getElementById('minBtn').onclick     = ()=>{ const a=api(); if(a) a.minimize(); };
+  document.getElementById('quitBtn').onclick    = ()=>{ const a=api(); if(a) a.quit(); };
+  document.getElementById('logBtn').onclick = function(){
+    const w=document.getElementById('logwrap'); const open=!w.classList.contains('open');
+    w.classList.toggle('open',open); this.classList.toggle('on',open);
+    const a=api(); if(a) a.set_expanded(open);
+  };
+</script>
+</body>
+</html>
+'''
+
+
+_RECLOOP_STARTED = {"v": False}
+
+def _recloop_prep_and_run(cfg):
+    """run_gui 의 _prep_and_run 과 동일한 시작 시퀀스(도구 준비 → 복구 → 녹화 루프)."""
+    global FFMPEG, SCREP
+    try:
+        if not FFMPEG: FFMPEG = ensure_ffmpeg()
+        if not SCREP: SCREP = ensure_screp()
+    except Exception as e:
+        log("Problem preparing tools: %s" % e)
+    if not FFMPEG:
+        log("\u26a0 ffmpeg not ready - check your internet connection and run again."); return
+    try: recover_orphan_clips()
+    except Exception as e: log("Skipped recovering pending clips: %s" % e)
+    try: rebuild_db_from_recordings()
+    except Exception as e: log("Skipped folder recovery: %s" % e)
+    try: threading.Thread(target=prebind_identity, daemon=True).start()
+    except Exception: pass
+    recorder_loop(cfg)
+
+def _start_recloop_once(cfg):
+    """녹화 파이프라인을 정확히 1회만 기동(웹뷰 실패로 tkinter 폴백 시 이중 실행 방지)."""
+    if _RECLOOP_STARTED["v"]: return
+    _RECLOOP_STARTED["v"] = True
+    threading.Thread(target=lambda: _recloop_prep_and_run(cfg), daemon=True).start()
+
+def _webview_state(cfg):
+    """REC_STATE → 웹뷰 상태 dict(목업과 동일한 한글 표기). Ready→Recording→Processing→Uploading."""
+    rs = REC_STATE
+    rec_on = bool(rs.get("recording")); ready = bool(rs.get("ready"))
+    pipe = rs.get("pipe"); ingame = rs.get("ingame")
+    pct_f = rs.get("pipe_pct")
+    pct = int(round(pct_f * 100)) if isinstance(pct_f, (int, float)) else None
+    enc = rs.get("encoder") or ""; disk = rs.get("disk_low")
+    gs = rs.get("game_since"); game_el = (time.time() - gs) if gs else 0.0
+    def mmss(sec):
+        x = int(max(0, sec)); return "%d:%02d" % (x // 60, x % 60)
+    st = {"encoder": enc, "pct": None, "disk": None}
+    if pipe == "uploading":
+        st.update(state="uplink", title="Uploading", footState="\uc804\uc1a1 \uc911",
+                  sub="\uc544\uce74\uc774\ube0c\ub85c \uc804\uc1a1 \uc911" + ((' \u00b7 <span class="num">%d%%</span>' % pct) if pct is not None else ""),
+                  pct=(pct if pct is not None else 0))
+    elif pipe == "processing":
+        has = isinstance(pct_f, (int, float))
+        st.update(state="proc", title="Processing", footState="\ucc98\ub9ac \uc911",
+                  sub=("\uc9c0\ub09c \uac8c\uc784 \uc555\ucd95 \uc911" if has else "\uc9c0\ub09c \uac8c\uc784 \uc815\ub9ac\u00b7\ubd84\uc11d \uc911") + ((' \u00b7 <span class="num">%d%%</span>' % pct) if has else ""),
+                  pct=(pct if has else 0))
+    elif rec_on and ingame is False:
+        st.update(state="ready", title="Ready", footState="\ub300\uae30 \uc911",
+                  sub="\ub85c\ube44 \ub300\uae30 \u00b7 \uac8c\uc784 \uc2dc\uc791 \uc2dc \uc790\ub3d9 \ub179\ud654")
+    elif rec_on:
+        st.update(state="rec", title="Recording", footState="\ub179\ud654 \uc911",
+                  sub=('\uac8c\uc784 \ub179\ud654 \uc911 \u00b7 <span class="num">%s</span>' % mmss(game_el)))
+    elif ready:
+        st.update(state="ready", title="Ready", footState="\uc900\ube44\ub428",
+                  sub="\uc2a4\ud0c0\ud06c\ub798\ud504\ud2b8 \uc2e4\ud589 \uc2dc \uc790\ub3d9\uc73c\ub85c \ub179\ud654\ud569\ub2c8\ub2e4")
+    else:
+        st.update(state="ready", title="Starting", footState="\uc900\ube44 \uc911",
+                  sub="\ub3c4\uad6c\ub97c \uc900\ube44\ud558\uace0 \uc788\uc2b5\ub2c8\ub2e4 (1~2\ubd84)")
+    if disk is not None:
+        st["disk"] = "\uc800\uc7a5\uacf5\uac04 %.1fGB \ub0a8\uc74c \u2014 \uacf7 \ub179\ud654\uac00 \uba48\ucd9c \uc218 \uc788\uc5b4\uc694" % disk
+    return st
+
+class _WebviewApi:
+    """JS \u2192 Python \ubc84\ud2bc \uc5f0\uacb0(window.pywebview.api.*)."""
+    def __init__(self, cfg, url, W, H_col, H_exp):
+        self.cfg = cfg; self.url = url; self.window = None
+        self._W = W; self._h_col = H_col; self._h_exp = H_exp
+    def gallery(self):
+        def _go():
+            u = self.url
+            try:
+                c = issue_login_code()
+                if c:
+                    u = self.url + "/#code=" + c; log("Opening gallery - auto-login ready.")
+                elif not (CFG.get("username") or (_identity_load() or {}).get("last_name")):
+                    log("\ub85c\uadf8\uc778 \uc5c6\uc774 \uac24\ub7ec\ub9ac\ub97c \uc5fd\ub2c8\ub2e4 - \uc544\uc9c1 \uacc4\uc815 \uc774\ub984\uc744 \ubaa8\ub985\ub2c8\ub2e4.")
+            except Exception as e:
+                log("login code skipped: %s" % e)
+            try: open_app(u)
+            except Exception: pass
+        threading.Thread(target=_go, daemon=True).start(); return True
+    def folder(self):
+        try:
+            if sys.platform == "win32": os.startfile(REC_DIR)
+        except Exception: pass
+        return True
+    def minimize(self):
+        try:
+            if self.window: self.window.minimize()
+        except Exception: pass
+        return True
+    def quit(self):
+        try:
+            if self.window: self.window.destroy()
+        except Exception: pass
+        os._exit(0)
+    def set_expanded(self, flag):
+        try:
+            if self.window: self.window.resize(self._W, self._h_exp if flag else self._h_col)
+        except Exception: pass
+        return True
+
+def run_gui_webview(cfg, url):
+    """\ub808\ucf54\ub354 \uc0c1\ud0dc\ucc3d\uc744 \ub9ac\ud038\ub4dc \uae00\ub798\uc2a4(pywebview)\ub85c \ud45c\uc2dc.
+    pywebview/\ubc31\uc5d4\ub4dc\uac00 \uc5c6\uc73c\uba74 \uc608\uc678\ub97c \uc62c\ub824 \uc0c1\uc704\uc5d0\uc11c tkinter \ucc3d\uc73c\ub85c \ud3f4\ubc31\ud55c\ub2e4."""
+    import webview
+    import json as _json
+    W = 520; H_COL = 184; H_EXP = 184 + 230
+    api = _WebviewApi(cfg, url, W, H_COL, H_EXP)
+    window = webview.create_window(
+        "ENCORE", html=_WEBVIEW_HTML, js_api=api,
+        width=W, height=H_COL, frameless=True, easy_drag=False, resizable=False,
+        on_top=bool(cfg.get("on_top", False)), background_color="#07070E", min_size=(420, 150))
+    api.window = window
+    _start_recloop_once(cfg)   # \ud30c\uc774\ud504\ub77c\uc778 1\ud68c \uae30\ub3d9(\ud3f4\ubc31\uacfc \uc911\ubcf5 \ubc29\uc9c0)
+
+    def _pump():
+        inited = {"v": False}
+        while True:
+            try:
+                if not inited["v"]:
+                    try:
+                        window.evaluate_js("window.setVersion(%s)" % _json.dumps("ENCORE v" + APP_VERSION))
+                        window.evaluate_js("window.setLog(%s)" % _json.dumps(list(LOG_BUF)[-60:]))
+                        inited["v"] = True
+                    except Exception: pass
+                while True:
+                    try: line = GUI_Q.get_nowait()
+                    except Exception: break
+                    try: window.evaluate_js("window.pushLog(%s)" % _json.dumps(line))
+                    except Exception: pass
+                try: window.evaluate_js("window.applyState(%s)" % _json.dumps(_webview_state(cfg)))
+                except Exception: pass
+            except Exception: pass
+            time.sleep(0.3)
+
+    webview.start(_pump, gui=None)
+    os._exit(0)
+
 def run_gui(cfg, url):
     """Ambient status bar: scene backdrop + status; settings/log expand on demand."""
     import tkinter as tk
@@ -4268,7 +4837,9 @@ def run_gui(cfg, url):
         try: threading.Thread(target=prebind_identity, daemon=True).start()  # 시작 시 로그인 미리 준비
         except Exception: pass
         recorder_loop(cfg)
-    threading.Thread(target=_prep_and_run, daemon=True).start()
+    if not _RECLOOP_STARTED["v"]:
+        _RECLOOP_STARTED["v"] = True
+        threading.Thread(target=_prep_and_run, daemon=True).start()
 
     # ---------- light pulse ----------
     def _pulse():
@@ -4712,6 +5283,17 @@ def main():
         # startup browser auto-open removed - gallery opens via button only
         # 보기 좋은 상태창(GUI). 윈도우 + tkinter 가능하면 GUI로, 아니면 콘솔로.
         if sys.platform == "win32" and (cfg.get("ui", "window") != "console"):
+            # 1) 리퀴드 글래스 상태창(pywebview) 우선 — 없으면 자동설치 시도, 실패 시 클래식 창으로 폴백
+            if cfg.get("ui", "window") != "classic":
+                try:
+                    try:
+                        import webview  # noqa: F401
+                    except ImportError:
+                        if not FROZEN:
+                            subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "pywebview"])
+                    run_gui_webview(cfg, url); return
+                except Exception as e:
+                    log(f"glass window unavailable ({e}) → classic window")
             try:
                 import tkinter  # noqa: F401  (가용성 확인)
                 run_gui(cfg, url); return

@@ -371,7 +371,9 @@ function parsePlayers(r){
 }
 function gameView(r){
   const players=parsePlayers(r), saver=r.saver, winner=r.winner;
-  const sp=players.find(p=>p.name===saver);
+  // saver 매칭: 대소문자·앞뒤공백 차이 흡수 (표기 불일치로 승패가 '기록됨'으로 새는 것 방지)
+  const _sv=(saver==null?"":String(saver)).trim().toLowerCase();
+  const sp=_sv?players.find(p=>String((p&&p.name)||"").trim().toLowerCase()===_sv):null;
   const won=(sp&&winner)?(sp.team===winner):null;
   return {map:r.map||"게임 영상",matchup:r.matchup||"",length:r.length||"",length_sec:r.length_sec||0,
     np:players.length||0,winner:winner,players:players,me:saver,won:won,
