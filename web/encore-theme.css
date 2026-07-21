@@ -185,3 +185,6 @@ body{background:radial-gradient(1200px 520px at 16% -160px,rgba(199,210,225,.09)
 /* 활성 칩·검색: 인셋 하이라이트 */
 .fchip.on{background:linear-gradient(180deg,#EAF0F8,#AEB9CB);border-color:transparent;color:#12151C;box-shadow:inset 0 1px 0 rgba(255,255,255,.35)}
 .srch{box-shadow:inset 0 1px 0 rgba(255,255,255,.03)}
+
+/* 모바일에선 로그인 불가(레코더 자동로그인은 PC 전용) — 로그인 버튼 숨김 */
+@media(max-width:760px){.eauth-login{display:none!important}}

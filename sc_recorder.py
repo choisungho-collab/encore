@@ -2604,9 +2604,11 @@ def _wl_video_dims(path):
     except Exception:
         return None
 
-def detect_screen_result(video_path, tail=2.5, want=5):
+def detect_screen_result(video_path, tail=6.0, want=9):
     """영상 끝 종료 점수판에서 저장자(POV)의 승패를 읽어 True(승)/False(패)/None(미상) 반환.
-    한글 클라이언트('승리!'/'패배!')에서만 동작. 점수판이 안 잡히거나 애매하면 None → screp 폴백."""
+    한글 클라이언트('승리!'/'패배!')에서만 동작. 점수판이 안 잡히거나 애매하면 None → screp 폴백.
+    tail 6초: 점수판을 빨리 클릭해 넘겨도 잡히도록 검사 구간 확대(2.5→6). 팀전에서 승자가 먼저 나가면
+    screp 이 살아남은 패배팀을 승자로 거꾸로 추측하는 사례(2026-07-21 실측)의 방어선."""
     if not FFMPEG or not video_path or not os.path.isfile(video_path): return None
     try:
         _np = _wl_np()
