@@ -736,16 +736,18 @@ svg{display:block}
 @media(max-width:600px){.hero{padding:12px 16px}.hvsrow{flex-direction:column;gap:6px;align-items:stretch}.hside,.hside.win,.hside.r{flex-direction:row;justify-content:flex-start;gap:8px;width:100%;align-items:flex-start;flex-wrap:nowrap;min-width:0}.hside .hpls,.hside.r .hpls{justify-content:flex-start;gap:3px 8px}.hpl{font-size:13px;gap:5px}.hrc{font-size:9px;padding:1px 4px}.hpl .hme,.hme{font-size:8px;padding:1px 4px}.hres{font-size:11px;gap:4px;flex:0 0 auto;padding-top:1px}.hres svg{width:12px;height:12px}.hvs{font-size:10.5px;letter-spacing:.18em;padding:2px 0;align-self:center;opacity:.65;color:var(--faint)}}
 @media(max-width:600px){
   /* hero 컴팩트: 버튼 가로 배치, 정보 헤더 한 줄, 간격 축소 */
-  .hero{margin:12px 0 0}
-  .htop{flex-direction:column;align-items:stretch;gap:11px;margin-bottom:11px}
-  .htopr{display:flex;gap:8px}
-  .htopr .hdl,.htopr .hbtn2{flex:1;justify-content:center;text-align:center;padding:9px 10px;font-size:12px}
-  .htopr .hdl-rep{display:none}   /* 모바일: 리플레이 다운로드 불필요 → 숨김 (PC는 유지) */
-  .hginfo{gap:6px;font-size:13px}
-  .hmap{font-size:15px}
+  .hero{margin:10px 0 0}
+  .htop{flex-direction:row;align-items:center;gap:10px;margin-bottom:0}
+  .hginfo{flex:1;min-width:0;flex-wrap:nowrap;overflow:hidden;gap:6px;font-size:12.5px}
+  .hginfo .hmap{font-size:13.5px;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto;min-width:0}
+  .hginfo .hmode,.hginfo .htime{font-size:12.5px}
+  .hbadge{font-size:11px;padding:2.5px 8px}
+  .htopr{flex:0 0 auto;display:flex;gap:8px}
+  .htopr .hdl{padding:8px 12px;font-size:11.5px;white-space:nowrap}
+  .htopr .hdl-rep{display:none}   /* 모바일: 리플레이 숨김 (PC 유지) */
   /* 타임라인 카드: hero 바로 뒤 간격 축소 */
-  .tlcard{margin-top:10px;padding:14px 16px 12px}
-  .tl{margin:4px 0}
+  .tlcard{margin-top:10px;padding:11px 14px 9px}
+  .tl{margin:2px 0;height:64px}
   /* 영상↔첫 카드 간격 */
   .vcol{gap:10px}
 }
@@ -770,16 +772,23 @@ svg{display:block}
 
 @media(max-width:600px){
   /* 시점 탭 행: 가로 스크롤 대신 세로로 자연스럽게 감싸고, 컨트롤은 아래 행으로 */
-  .povtabs{gap:7px;margin:12px 0 0;row-gap:8px}
-  .povlbl{width:100%;margin:0 0 2px;font-size:12px}
-  .povtab{font-size:12.5px;padding:7px 11px 7px 9px;gap:6px;flex:0 1 auto;min-width:0}
-  .povtab .pvnm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:110px}
-  .povdir{margin-left:0}
-  /* 단일/멀티·가로/세로 세그먼트: 다음 줄 전체폭 */
-  .modeseg,.dirseg{margin-left:0;margin-top:2px}
-  .modeseg{margin-left:auto}
-  /* 감독판 등 보조 버튼 축소 */
-  .povdir,.modebtn{font-size:12px;padding:7px 10px}
+  .povtabs{gap:6px;margin:10px 0 0;row-gap:7px}
+  .povlbl{width:auto;margin:0 2px 0 0;font-size:12px}
+  .povtab{font-size:12.5px;padding:6px 10px 6px 8px;gap:6px;flex:0 1 auto;min-width:0}
+  .povtab .pvnm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:96px}
+  .povdir{margin-left:0;font-size:12px;padding:6px 9px}
+  /* 단일/멀티·가로/세로: 아이콘만 남겨 같은 줄에 흡수 */
+  .modeseg{margin-left:auto;margin-top:0}
+  .dirseg{margin-top:0}
+  .modebtn{font-size:0;padding:7px 8px;gap:0}
+  .modebtn svg{width:15px;height:15px}
+  /* 코멘트: 여백·폼 압축, 등록은 우측 소형 */
+  .comm{margin-top:24px;padding-top:16px}
+  .comm-h{margin-bottom:10px}
+  .comm-h h2{font-size:16px}
+  .cform{grid-template-columns:1fr;gap:8px;margin-bottom:6px}
+  .ci,.ct{padding:10px 12px;font-size:13px}
+  .cs{justify-self:end;padding:9px 24px;font-size:13px}
 }
 @media(max-width:380px){
   .povtab .pvnm{max-width:82px}
@@ -1086,7 +1095,7 @@ function _heroSide(arr,t,right){const isWin=_won!=null&&String(t)===String(_won)
   const _pgA=document.body.classList.contains('pg-analysis');
   const xlink=_pgA?`<a class="hdl" href="match.html?id=${encodeURIComponent(MID)}">▶ 영상 보기</a>`
                :`<a class="hdl" href="analysis.html?id=${encodeURIComponent(MID)}">📊 상세 분석</a>`;
-  const he=document.getElementById('hero');if(he)he.innerHTML=`<div class="hbg"><div class="htg"></div><div class="hlg"></div><div class="hrg"></div></div><div class="hgrid"></div><div class="hct"><div class="htop"><div class="hginfo">${_won!=null?('<span class="hbadge '+(_myWin===true?'w':(_myWin===false?'l':'n'))+'">'+(_myWin===true?I.trophy+'승리':(_myWin===false?'패배':('TEAM '+_won+' 승')))+'</span>'):''}<span class="hmap">${esc(mapName(meta.map)||'리플레이')}</span><span class="hsep">·</span><span class="hmode">${mode} 물량전</span><span class="hsep">·</span><span class="htime">${esc(meta.length||'')}</span></div><div class="htopr">${xlink}${dl}</div></div></div>`;
+  const he=document.getElementById('hero');if(he)he.innerHTML=`<div class="hbg"><div class="htg"></div><div class="hlg"></div><div class="hrg"></div></div><div class="hgrid"></div><div class="hct"><div class="htop"><div class="hginfo">${_won!=null?('<span class="hbadge '+(_myWin===true?'w':(_myWin===false?'l':'n'))+'">'+(_myWin===true?I.trophy+'승리':(_myWin===false?'패배':('TEAM '+_won+' 승')))+'</span>'):''}<span class="hmap">${esc(mapName(meta.map)||'리플레이')}</span><span class="hsep">·</span><span class="hmode">${mode}</span><span class="hsep">·</span><span class="htime">${esc(meta.length||'')}</span></div><div class="htopr">${xlink}${dl}</div></div></div>`;
   var _mc=document.querySelector('.mucard');if(_mc)_mc.style.display='none';
 })();
 {const _muP=p=>'<div class="pl"><span class="rc '+({ran:'t',zerg:'z',toss:'p'}[p.race]||'')+'">'+RID(p.race)+'</span><span class="pn">'+esc(p.name||'—')+'</span>'+(p.name===meta.saver?'<span class="me">나</span>':'')+'</div>';
