@@ -9,11 +9,12 @@
 
 :root{
   /* 표면 — 더 깊은 그래파이트→블랙 */
-  --bg:#080a0f; --surface:#10131b; --surface2:#161b25; --hover:#1b212d; --well:#0c0f15;
+  /* 미드나잇 시프트 — 레코더(Living Pill)와 같은 블루-블랙 축으로 통일 */
+  --bg:#0a0c13; --surface:#12151f; --surface2:#171b28; --hover:#1c2130; --well:#0d1017;
   /* 텍스트 */
   --ink:#eaedf3; --ink2:#c5cad3; --dim:#8b93a3; --faint:#7c8598;
   /* 라인 */
-  --line:#202736; --line2:#2c3445;
+  --line:#222939; --line2:#2e374a;
   /* 애저 액센트(조금 더 밝게) */
   --acc:#5E6878; --acc-ink:#D7DFEA; --acc-soft:rgba(199,210,225,.12); --acc-line:rgba(199,210,225,.34);
   /* 결과/시맨틱 — 무녹색 유지 */
@@ -94,7 +95,7 @@ body{ background:radial-gradient(132% 82% at 82% -8%, #11151f 0%, #080a0f 54%) n
 .lnnm{font-family:var(--fd);font-size:12.5px;font-weight:600;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .lnteam.win .lnnm{color:var(--ink)}
 /* 승리팀 명시 칩 — 카드에서 어느 편이 이겼는지 즉시 보이도록 (저장자 미상이어도 팀 단위 승패는 표시) */
-.lnteam.win::before{content:"승리";font-family:var(--fm);font-size:9px;font-weight:700;letter-spacing:.1em;color:#F0CE7A;background:rgba(224,180,65,.13);border:1px solid rgba(224,180,65,.4);border-radius:5px;padding:1.5px 6px;align-self:flex-start;line-height:1.35}
+.lnteam.win::before{content:"승리";font-family:var(--fm);font-size:9px;font-weight:700;letter-spacing:.1em;color:var(--gold,#F0CE7A);background:rgba(224,180,65,.13);border:1px solid rgba(224,180,65,.4);border-radius:5px;padding:1.5px 6px;align-self:flex-start;line-height:1.35}
 .lnteam.r.win::before{align-self:flex-end}
 .lnvs{font-family:var(--fh);font-weight:700;font-size:11px;color:var(--faint);flex:none;letter-spacing:.03em}
 .lineup.comp{align-items:center}
@@ -188,3 +189,8 @@ body{background:radial-gradient(1200px 520px at 16% -160px,rgba(199,210,225,.09)
 
 /* 모바일에선 로그인 불가(레코더 자동로그인은 PC 전용) — 로그인 버튼 숨김 */
 @media(max-width:760px){.eauth-login{display:none!important}}
+
+/* 미리보기 영상이 없는 카드: hover 시 썸네일 슬로우 줌으로 살아있는 느낌 */
+.card .thumb{overflow:hidden}
+.card .thimg{transition:transform .6s cubic-bezier(.2,.6,.2,1)}
+.card[data-video=""]:hover .thimg{transform:scale(1.05)}
