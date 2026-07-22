@@ -975,7 +975,7 @@ def compute_highlights(a):
         else: clusters.append([L])
     for ci, cl in enumerate(clusters):
         rep = cl[0]; nm = rep.get("name") or "선수"        # 대표 = 첫 퇴장(=GG 콜 시점)
-        if ci == len(clusters) - 1: lbl = "GG — 경기 종료"
+        if ci == len(clusters) - 1: lbl = "GG"
         else: lbl = (f"{nm} 등 퇴장" if len(cl) > 1 else f"{nm} GG·퇴장")
         out.append({"sec": rep.get("sec", 0), "t": rep.get("t", ""), "label": lbl, "who": nm, "kind": "gg"})
     out.sort(key=lambda hh: hh["sec"])

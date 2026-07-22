@@ -683,7 +683,7 @@ svg{display:block}
 .modebtn svg{width:14px;height:14px}
 
 /* ═══════════ 타임라인 · 주요장면 재설계 ═══════════ */
-.tlcard{margin-top:14px;padding:19px 24px 17px}
+.tlcard{margin-top:14px;padding:17px 24px 13px}
 .ch{font-family:var(--fh);font-weight:700;font-size:13.5px;letter-spacing:.02em;color:var(--ink2);margin-bottom:4px}
 /* 레일 */
 .tl{height:92px;margin:9px 4px 0}
@@ -908,8 +908,6 @@ body.pg-analysis .wrap>.hero{order:1}
    <div class="stage" id="stage"></div>
    <div class="tlcard" id="tlcard">
     <div class="tl" id="tl"></div>
-    <div class="tl-times"><span>0:00</span><span id="tlend"></span></div>
-    <div class="legend" id="legend"></div>
    </div>
   </div>
   <div class="scol">
@@ -1894,20 +1892,17 @@ if(VIDEO){(async()=>{try{
   }
 }catch(_e){console.warn('pov tabs skipped',_e);}})();}
 
-// legend
-document.getElementById('legend').innerHTML=
- `<i class="kb">${I.swords}교전</i><i class="kt">${I.beaker}테크</i><i class="ke">${I.expand}확장</i><i class="kd">${I.download}드랍</i><i class="kg">${I.trophy}GG</i>`;
 document.getElementById('hlnote').innerHTML=I.info+'교전은 다수 선수 동시 활동과 적진 액션으로 추정해요. 테크·확장·드랍·GG는 실제 명령 기반이에요.';
 
 // timeline + moments
 const HL=augmentHL(DATA.highlights||[]);
-document.getElementById('tlend').textContent=meta.length||fmt(totalSec);
 if(HL.length){
  const tl=document.getElementById('tl');
  tl.innerHTML='<div class="tl-rail"><div class="tl-fill" id="tlfill"></div></div><div class="tl-head" id="tlhead" style="left:0"></div>';
  HL.forEach(h=>{const x=Math.max(.5,Math.min(99.5,h.sec/totalSec*100));
   const m=document.createElement('div');m.className='mk '+KCLASS[h.kind];m.style.left=x+'%';
-  m.innerHTML=`<div class="tip"><div class="tt">${KICON[h.kind]}<b>${h.t||fmt(h.sec)}</b></div><s>${h.label}${h.who?' · '+h.who:''}</s></div><div class="pin"></div><div class="stem"></div><div class="lab"><span class="lt">${h.t||fmt(h.sec)}</span><span class="ll">${esc(h.label||'')}</span></div>`;
+  const _lbl=(h.label||'').replace('GG — 경기 종료','GG');
+  m.innerHTML=`<div class="tip"><div class="tt">${KICON[h.kind]}<b>${h.t||fmt(h.sec)}</b></div><s>${_lbl}${h.who?' · '+h.who:''}</s></div><div class="pin"></div><div class="stem"></div><div class="lab"><span class="lt">${h.t||fmt(h.sec)}</span><span class="ll">${esc(_lbl)}</span></div>`;
   m.onclick=()=>seek(h.sec);tl.appendChild(m);});
  // 가장자리 마커 툴팁이 뷰포트를 넘어 가로 스크롤을 만드는 것 방지(모바일). 데스크탑은 넘치지 않아 no-op.
  function clampTips(){const de=document.documentElement,pad=6;
