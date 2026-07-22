@@ -1039,18 +1039,21 @@ var _metaEl=document.getElementById('meta');if(_metaEl)_metaEl.innerHTML=
 const _teams={};players.forEach(p=>{(_teams[p.team]=_teams[p.team]||[]).push(p);});
 const _won=meta.winner!=null?String(meta.winner):null;
 // 분석 페이지: 리포트 히어로 — 히어로 바로 아래에 '성적표' 카드
+window._renderRepHero=function(_rp){try{
+  if(!document.body.classList.contains('pg-analysis')||!_rp)return;
+  var _cr=((typeof COACH!=='undefined'&&COACH)||[]).find(function(c){return c.id===_rp.id;});
+  if(!_cr)return;
+  var _wv=(_won!=null&&String(_rp.team)===_won);
+  var _gc={S:'gS',A:'gA',B:'gB',C:'gC'};
+  var _re=document.querySelector('.rephero');
+  if(!_re){_re=document.createElement('section');_re.className='rephero';
+    var _hv=document.getElementById('hero');if(_hv&&_hv.parentNode)_hv.parentNode.insertBefore(_re,_hv.nextSibling);else return;}
+  _re.innerHTML='<div class="rh-top"><span class="rh-badge '+(_won==null?'n':(_wv?'w':'l'))+'">'+(_won==null?'결과 미상':(_wv?'승리':'패배'))+'</span><span class="rh-name">'+esc(_rp.name||'')+'</span><span class="rh-sub">'+esc(mapName(meta.map)||'')+' · '+esc(meta.length||'')+'</span></div>'
+    +(_cr.verdict?'<div class="cverdict"><span class="cvl">총평</span><span class="cvt">'+_cr.verdict+'</span></div>':'')
+    +((_cr.grades&&_cr.grades.length)?'<div class="cgrades">'+_cr.grades.map(function(g){return '<span class="cgrade '+(_gc[g.g]||'')+'"><i>'+g.k+'</i><b>'+g.g+'</b></span>';}).join('')+'</div>':'');
+}catch(_e){}};
 if(document.body.classList.contains('pg-analysis')){try{
-  var _rp=(players||[]).find(function(p){return p.name===meta.saver;})||players[0];
-  var _cr=_rp?((typeof COACH!=='undefined'&&COACH)||[]).find(function(c){return c.id===_rp.id;}):null;
-  if(_cr){
-    var _wv=(_won!=null&&_rp&&String(_rp.team)===_won);
-    var _gc={S:'gS',A:'gA',B:'gB',C:'gC'};
-    var _re=document.createElement('section');_re.className='rephero';
-    _re.innerHTML='<div class="rh-top"><span class="rh-badge '+(_won==null?'n':(_wv?'w':'l'))+'">'+(_won==null?'결과 미상':(_wv?'승리':'패배'))+'</span><span class="rh-name">'+esc(_rp.name||'')+'</span><span class="rh-sub">'+esc(mapName(meta.map)||'')+' · '+esc(meta.length||'')+'</span></div>'
-      +(_cr.verdict?'<div class="cverdict"><span class="cvl">총평</span><span class="cvt">'+_cr.verdict+'</span></div>':'')
-      +((_cr.grades&&_cr.grades.length)?'<div class="cgrades">'+_cr.grades.map(function(g){return '<span class="cgrade '+(_gc[g.g]||'')+'"><i>'+g.k+'</i><b>'+g.g+'</b></span>';}).join('')+'</div>':'');
-    var _hv=document.getElementById('hero');if(_hv&&_hv.parentNode)_hv.parentNode.insertBefore(_re,_hv.nextSibling);
-  }
+  window._renderRepHero((players||[]).find(function(p){return p.name===meta.saver;})||players[0]);
 }catch(_e){}}
 const _kick=t=>{const w=_won!=null&&String(t)===_won;return `<div class="vckick ${w?'won':''}">TEAM ${String(t).padStart(2,'0')}${w?'<span class="wb">WIN</span>':''}</div>`;};
 const _side=(t,arr,cls)=>`<div class="vcside ${cls}">${_kick(t)}`+arr.map(p=>`<div class="vcplayer"><div class="vcpn">${esc(p.name||'—')}</div><div class="vcpr r-${p.race||''}"><span class="rdot"></span>${RACE_EN[p.race]||''}</div></div>`).join('')+`</div>`;
@@ -1508,6 +1511,10 @@ if(VIDEO){(async()=>{try{
   if(!_all.some(c=>String(c.id)===String(MID)))_all.push({id:MID,video:VIDEO,thumb:__m.thumb,uploader:__m.uploader,saver:meta.saver,players:players,length_sec:__m.length_sec,map:__m.map,group_key:__m.group_key,lead:(__m.analysis&&__m.analysis.meta&&__m.analysis.meta.lead_sec!=null)?String(__m.analysis.meta.lead_sec):null});
   const _mine=clusterMatches(_all).find(g=>g.some(i=>String(_all[i].id)===String(MID)))||[];
   let views=_mine.map(i=>_all[i]).filter(v=>v.video);
+  // 같은 저장자(saver)의 중복 행(재업로드 사고) → 현재 매치 우선, 그다음 오래된 원본만 남김
+  {const _seen={};views=views.slice().sort((a,b)=>((String(b.id)===String(MID))-(String(a.id)===String(MID)))||String(a.id).localeCompare(String(b.id)))
+    .filter(v=>{const k=String(v.saver||v.uploader||('#'+v.id)).trim().toLowerCase();if(_seen[k])return false;_seen[k]=1;return true;});}
+
   try{_POV_PLAYERS=views.map(function(v){var ps=_pj(v),sp=ps.find(function(p){return p.name===v.saver;})||{};return {name:v.saver||v.uploader||'시점',race:sp.race,color:sp.color||'#8A93A0',team:sp.team};});}catch(e){}
   if(views.length>1){
     const lab=(v,ix)=>{const ps=_pj(v);const sv=ps.find(p=>p.name===v.saver)||{};const pid="pov"+ix+"_"+String(v.id);v._pid=pid;return{id:pid,gid:String(v.id),name:v.saver||v.uploader||"시점",color:sv.color||"#8A93A0",race:RID(sv.race),rk:(sv.race||''),team:(sv.team!=null?sv.team:9)};};
@@ -1963,7 +1970,7 @@ function coachBlock(p){
  const gr=(cr.grades&&cr.grades.length)?`<div class="cgrades">${cr.grades.map(g=>`<span class="cgrade ${GC[g.g]||''}"><i>${g.k}</i><b>${g.g}</b></span>`).join('')}</div>`:'';
  const vd=cr.verdict?`<div class="cverdict"><span class="cvl">총평</span><span class="cvt">${cr.verdict}</span></div>`:'';
  // 분석 페이지에선 최상단 성적표가 '나'의 총평·등급을 이미 보여줌 → 같은 선수 패널에선 중복 제거
- const _dupHero=document.body.classList.contains('pg-analysis')&&p.name===meta.saver;
+ const _dupHero=document.body.classList.contains('pg-analysis');   // 성적표(상단)가 선택 선수를 항상 비춤 → 패널 쪽은 상시 생략
  const cnt=n=>n?`<span class="ccln">${n}</span>`:'';
  return `<div class="coach"><div class="ch coachh">코치 리포트 <span class="cnote">실제 리플레이 기반 · 스타크래프트 기준</span></div>${_dupHero?'':gr}${_dupHero?'':vd}<div class="ccols"><div class="ccol"><div class="cclh good">잘한 점${cnt(gp.length)}</div>${gp.length?_wrap(gp,3,false):'<div class="cnone">—</div>'}</div><div class="ccol"><div class="cclh bad">아쉬운 점${cnt(bp.length)}</div>${bp.length?_wrap(bp,4,true):'<div class="cnone">개선할 점이 없어요 — 깔끔한 한 판!</div>'}</div></div></div>`;
 }
@@ -2011,7 +2018,9 @@ function detail(p){const s=p.summary;
 let cur=null;
 function sel(id){cur=id;document.querySelectorAll('.pchip').forEach(c=>c.classList.toggle('sel',+c.dataset.id===id));
  document.querySelectorAll('.cmpc').forEach(c=>c.classList.toggle('sel',+c.dataset.id===id));
- document.getElementById('panel').innerHTML=detail(players.find(x=>x.id===id));}
+ const _selP=players.find(x=>x.id===id);
+ document.getElementById('panel').innerHTML=detail(_selP);
+ if(window._renderRepHero)window._renderRepHero(_selP);}   // 분석 페이지: 상단 성적표도 선택 선수로
 document.querySelectorAll('.pchip').forEach(c=>c.onclick=()=>{sel(+c.dataset.id);view('one');});
 
 document.getElementById('cmp').innerHTML=[1,2].map(t=>players.filter(p=>p.team===t).map(p=>{const win=meta.winner===p.team;

@@ -1483,6 +1483,23 @@ def sb_insert_match(row):
     """경기 행 등록. service_key 직접 insert 대신 RPC.
        기기 신원이 있으면 upload_match(소유 등록), 없거나 실패하면 upload_match_anon(폴백)."""
     sv = (row.get("saver") or "").strip()
+    # ── 중복 업로드 방어: 같은 사람·같은 맵·같은 길이(±2초) 경기가 이미 클라우드에 있으면 스킵 ──
+    # (고아 클립 복구·재설치·폴더 재스캔이 같은 게임에 새 ID를 발급해 재업로드하는 사고 방지 — 2026-07-22 실측)
+    try:
+        _ls = row.get("length_sec"); _mp = row.get("map")
+        if sv and _mp and isinstance(_ls, (int, float)) and _ls > 0:
+            _q = (_sb_base() + "/rest/v1/matches?select=id&limit=2"
+                  + "&saver=ilike." + requests.utils.quote(sv, safe="")
+                  + "&map=eq." + requests.utils.quote(str(_mp), safe="")
+                  + "&length_sec=gte.%d&length_sec=lte.%d" % (int(_ls) - 2, int(_ls) + 2))
+            _rr = requests.get(_q, headers=_sb_h(), timeout=12)
+            if _rr.ok:
+                _dup = [m for m in (_rr.json() or []) if str(m.get("id")) != str(row.get("id"))]
+                if _dup:
+                    log("이미 올라간 경기와 동일(중복 감지: %s) — 재업로드 건너뜀" % _dup[0].get("id"))
+                    return
+    except Exception:
+        pass
     _claimed_pu = None
     if sv:
         row.setdefault("owner_puuid", sv.lower())   # (서버가 owner 를 다시 지정하지만 참고용으로 유지)

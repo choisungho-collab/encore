@@ -1,3 +1,14 @@
+/* ══ ENCORE 웹 버전 — 배포 확인용. 파일 전달 시마다 +1 ══ */
+window.ENCORE_WEB_VER = 'v001';
+try{console.info('%cENCORE web ' + window.ENCORE_WEB_VER, 'color:#8fa8d8;font-weight:600');}catch(e){}
+document.addEventListener('DOMContentLoaded', function(){try{
+  var by = document.querySelector('.ftr-by');
+  if(by && !by.querySelector('.webver')){
+    var sp = document.createElement('span'); sp.className = 'webver';
+    sp.textContent = window.ENCORE_WEB_VER; by.appendChild(sp);
+  }
+}catch(e){}});
+
 /* ENCORE 로그인/세션 모듈 — 모든 페이지에서 공통 사용.
  *  사용법:  <script src="encore-auth.js"></script>  로 불러오고
  *           const me = await EAuth.initAuth();   // #code 소비 + 토큰검증 → 세션 or null

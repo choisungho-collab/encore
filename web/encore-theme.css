@@ -194,3 +194,6 @@ body{background:radial-gradient(1200px 520px at 16% -160px,rgba(199,210,225,.09)
 .card .thumb{overflow:hidden}
 .card .thimg{transition:transform .6s cubic-bezier(.2,.6,.2,1)}
 .card[data-video=""]:hover .thimg{transform:scale(1.05)}
+
+/* 웹 버전 배지 (푸터) */
+.webver{margin-left:9px;font-family:var(--fm,monospace);font-size:10.5px;color:var(--faint,#525a6c);letter-spacing:.05em;vertical-align:1px}
