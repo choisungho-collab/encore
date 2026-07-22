@@ -597,7 +597,12 @@ svg{display:block}
 .hbg .hrg{position:absolute;inset:0;background:radial-gradient(58% 150% at 90% 110%,rgba(255,106,92,.11),transparent 60%)}
 .hgrid{position:absolute;inset:0;opacity:.3;background-image:linear-gradient(rgba(120,140,180,.05) 1px,transparent 1px),linear-gradient(90deg,rgba(120,140,180,.05) 1px,transparent 1px);background-size:42px 42px;mask-image:radial-gradient(130% 130% at 50% 0%,#000,transparent 82%)}
 .hct{position:relative}
-.htop{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:13px}
+.htop{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:0}
+.hbadge{display:inline-flex;align-items:center;gap:4px;font-family:var(--fd);font-size:12px;font-weight:800;padding:3px 10px;border-radius:7px;letter-spacing:.02em;white-space:nowrap}
+.hbadge .ic{width:13px;height:13px}
+.hbadge.w{color:var(--gold,#F0CE7A);background:rgba(224,180,65,.14);border:1px solid rgba(224,180,65,.42)}
+.hbadge.l{color:var(--loss,#e8694c);background:rgba(232,105,76,.12);border:1px solid rgba(232,105,76,.38)}
+.hbadge.n{color:var(--ink2);background:var(--well);border:1px solid var(--line)}
 .hginfo{display:flex;align-items:baseline;gap:8px;min-width:0;flex-wrap:wrap}
 .hginfo .hmap{font-family:var(--fh);font-size:13.5px;font-weight:600;color:var(--ink2);white-space:nowrap;letter-spacing:-.005em}
 .hginfo .hsep{color:var(--faint);font-size:12px}
@@ -735,6 +740,7 @@ svg{display:block}
   .htop{flex-direction:column;align-items:stretch;gap:11px;margin-bottom:11px}
   .htopr{display:flex;gap:8px}
   .htopr .hdl,.htopr .hbtn2{flex:1;justify-content:center;text-align:center;padding:9px 10px;font-size:12px}
+  .htopr .hdl-rep{display:none}   /* 모바일: 리플레이 다운로드 불필요 → 숨김 (PC는 유지) */
   .hginfo{gap:6px;font-size:13px}
   .hmap{font-size:15px}
   /* 타임라인 카드: hero 바로 뒤 간격 축소 */
@@ -1073,12 +1079,14 @@ function _heroSide(arr,t,right){const isWin=_won!=null&&String(t)===String(_won)
   const pls=arr.map(p=>{const me=p.name===meta.saver;return `<span class="hpl${me?' me':''}"><span class="hpd r-${p.race||''}"></span><span class="hpn">${esc(p.name||'—')}</span></span>`;}).join('');
   return `<div class="hside${right?' r':''}${isWin?' win':''}">${isWin?`<span class="hres">${I.trophy}승</span>`:''}<div class="hpls">${pls}</div></div>`;}
 (function(){const np=players.length;const mode=(np/2|0)+'v'+(np/2|0);
+  const _meP=players.find(p=>p.name===meta.saver);
+  const _myWin=(_won!=null&&_meP)?(String(_meP.team)===String(_won)):null;
   const body=_tk.length===2?`${_heroSide(_teams[_tk[0]],_tk[0],false)}<div class="hvs">VS</div>${_heroSide(_teams[_tk[1]],_tk[1],true)}`:_tk.map(t=>_heroSide(_teams[t],t,false)).join('<div class="hvs">VS</div>');
-  const dl=__m.replay?`<a class="hdl" href="${esc(__m.replay)}" download>↓ 리플레이</a>`:'';
+  const dl=__m.replay?`<a class="hdl hdl-rep" href="${esc(__m.replay)}" download>↓ 리플레이</a>`:'';
   const _pgA=document.body.classList.contains('pg-analysis');
   const xlink=_pgA?`<a class="hdl" href="match.html?id=${encodeURIComponent(MID)}">▶ 영상 보기</a>`
                :`<a class="hdl" href="analysis.html?id=${encodeURIComponent(MID)}">📊 상세 분석</a>`;
-  const he=document.getElementById('hero');if(he)he.innerHTML=`<div class="hbg"><div class="htg"></div><div class="hlg"></div><div class="hrg"></div></div><div class="hgrid"></div><div class="hct"><div class="htop"><div class="hginfo"><span class="hmap">${esc(mapName(meta.map)||'리플레이')}</span><span class="hsep">·</span><span class="hmode">${mode} 물량전</span><span class="hsep">·</span><span class="htime">${esc(meta.length||'')}</span>${meta.matchup&&meta.matchup!==mode?'<span class="hsep">·</span><span class="hmatchup">'+esc(meta.matchup)+'</span>':''}</div><div class="htopr">${xlink}${dl}</div></div><div class="hvsrow">${body}</div></div>`;
+  const he=document.getElementById('hero');if(he)he.innerHTML=`<div class="hbg"><div class="htg"></div><div class="hlg"></div><div class="hrg"></div></div><div class="hgrid"></div><div class="hct"><div class="htop"><div class="hginfo">${_won!=null?('<span class="hbadge '+(_myWin===true?'w':(_myWin===false?'l':'n'))+'">'+(_myWin===true?I.trophy+'승리':(_myWin===false?'패배':('TEAM '+_won+' 승')))+'</span>'):''}<span class="hmap">${esc(mapName(meta.map)||'리플레이')}</span><span class="hsep">·</span><span class="hmode">${mode} 물량전</span><span class="hsep">·</span><span class="htime">${esc(meta.length||'')}</span></div><div class="htopr">${xlink}${dl}</div></div></div>`;
   var _mc=document.querySelector('.mucard');if(_mc)_mc.style.display='none';
 })();
 {const _muP=p=>'<div class="pl"><span class="rc '+({ran:'t',zerg:'z',toss:'p'}[p.race]||'')+'">'+RID(p.race)+'</span><span class="pn">'+esc(p.name||'—')+'</span>'+(p.name===meta.saver?'<span class="me">나</span>':'')+'</div>';

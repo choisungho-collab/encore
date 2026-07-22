@@ -1,5 +1,5 @@
 /* ══ ENCORE 웹 버전 — 배포 확인용. 파일 전달 시마다 +1 ══ */
-window.ENCORE_WEB_VER = 'v006';
+window.ENCORE_WEB_VER = 'v008';
 try{console.info('%cENCORE web ' + window.ENCORE_WEB_VER, 'color:#8fa8d8;font-weight:600');}catch(e){}
 document.addEventListener('DOMContentLoaded', function(){try{
   var by = document.querySelector('.ftr-by');
