@@ -744,12 +744,8 @@ svg{display:block}
 .svpp,.svbtn{position:relative;overflow:visible}
 .svpp::after,.svbtn::after{content:'';position:absolute;inset:-6px}
 /* ===== 멀티뷰 = 세로 풀폭 스택(2~4 공통) — 각 패널을 최대 크기로 = 최대 선명도 ===== */
-.mvgrid,.mvgrid
-.mvgrid .mvcell{aspect-ratio:16/9}
 .mvwrap:fullscreen .mvcell,.mvwrap:-webkit-full-screen .mvcell{aspect-ratio:auto}
-.mvwrap:fullscreen .mvgrid.mv-3,.mvwrap:-webkit-full-screen 
 .mvwrap:fullscreen .mvgrid.mv-3 .mvcell:first-child{grid-column:1/-1}
-.mvwrap:fullscreen .mvgrid.mv-4,.mvwrap:-webkit-full-screen 
 .mvexit{font-family:var(--fd);font-size:12px;font-weight:700;padding:0 12px;white-space:nowrap}
 
 @media(max-width:600px){
@@ -839,7 +835,8 @@ html,body{overflow-x:hidden;max-width:100%}
 .povtab .pvrc{font-size:9px;padding:1px 4px}
 .povtabs .povlbl{font-size:11.5px}
 /* 페이지 분리: 시청(match)엔 분석 숨김, 분석(analysis)엔 영상·코멘트 숨김 */
-body.pg-watch section.analysis,body.pg-watch section.splitview{display:none!important}
+body.pg-watch section.analysis{display:none!important}
+/* 주의: #splitview 는 분석 섹션이 아니라 멀티뷰 영상 호스트(svHost)가 사는 곳 — 숨기면 멀티가 안 보임 */
 body.pg-analysis .main,body.pg-analysis section.comm{display:none!important}
 body.pg-analysis .wrap>.hero{order:1}
 .povmulti{font-size:12px;padding:6px 10px}
