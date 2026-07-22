@@ -799,7 +799,7 @@ svg{display:block}
 
   /* ══ 원점 재설계: 유튜브 문법 ══ */
   /* 영상 풀블리드 (좌우 화면 끝까지, 각 없이) */
-  .vcol .stage{margin-left:calc(50% - 50vw);margin-right:calc(50% - 50vw);border-radius:0;box-shadow:none}
+  .vcol .stage{width:100vw;max-width:100vw;margin-left:calc(50% - 50vw);margin-right:calc(50% - 50vw);border-radius:0;box-shadow:none}
   body.pg-watch .hero{display:none}   /* 시청 페이지: 클릭 전 이미 아는 정보 — 제거. 분석 진입은 순간 스트립의 📊 칩 */
   /* (분석 페이지 hero 언박스) */
   .hero{background:none;border:0;border-radius:0;box-shadow:none;margin:9px 0 0;padding:2px 0 10px;border-bottom:1px solid var(--line)}
@@ -819,14 +819,24 @@ svg{display:block}
   /* 타임라인: 점 그래프 숨기고 주요 순간 칩 스트립 */
   .tlcard{background:none;border:0;box-shadow:none;padding:0;margin-top:12px}
   .tlcard .tl{display:none}
-  .hlchips{display:flex;gap:18px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;
-    margin:0 calc(50% - 50vw);padding:4px 16px 6px;align-items:center}
-  .hlchips::-webkit-scrollbar{display:none}
-  .hlchip{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;font-family:var(--fd);font-size:12.5px;font-weight:600;
-    color:var(--ink2);background:none;border:0;border-radius:0;padding:6px 0;cursor:pointer;text-decoration:none}
-  .hlchip b{font-family:var(--fm);font-weight:700;font-size:12px;color:var(--ink)}
-  .hlchip.hla{gap:5px;font-size:12px;color:var(--acc-ink);border:1px solid var(--acc-line);background:var(--acc-soft);border-radius:999px;padding:6px 12px}
-  .hlchip.kb b{color:#f0a98e}.hlchip.kt b{color:#8fb7ff}.hlchip.ke b{color:#8fe3c0}.hlchip.kd b{color:#c9b3ff}.hlchip.kg b{color:var(--gold)}
+  .hlchips{display:flex;flex-direction:column;gap:9px;padding:6px 0 2px}
+  .hlrow{display:flex;align-items:center;gap:11px;min-width:0}
+  .hlrow.hlhead{justify-content:space-between;margin-bottom:1px}
+  .hlab{flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;font-family:var(--fd);font-size:12.5px;font-weight:700;font-style:normal;color:var(--ink2);min-width:44px}
+  .hlab::before{content:'';width:7px;height:7px;border-radius:50%;background:currentColor}
+  .hlab.hg{color:var(--gold);min-width:0}
+  .hlab.kb{color:#f0a98e}.hlab.kt{color:#8fb7ff}.hlab.ke{color:#8fe3c0}.hlab.kd{color:#c9b3ff}.hlab.kg{color:var(--gold)}
+  .hla{flex:0 0 auto;display:inline-flex;align-items:center;gap:5px;font-family:var(--fd);font-size:12px;font-weight:700;color:var(--acc-ink);border:1px solid var(--acc-line);background:var(--acc-soft);border-radius:999px;padding:6px 12px;text-decoration:none}
+  .hlrc{display:flex;gap:8px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;min-width:0;padding-bottom:1px}
+  .hlrc::-webkit-scrollbar{display:none}
+  .hlc{flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;font-weight:600;background:transparent;border:1px solid;border-radius:11px;padding:6px 11px;cursor:pointer}
+  .hlc b{font-family:var(--fm);font-weight:700;font-size:12.5px}
+  .hlc span{font-family:var(--fd);font-size:12px;color:var(--ink2)}
+  .hlc.kb{border-color:rgba(240,169,142,.45)}.hlc.kb b{color:#f0a98e}
+  .hlc.kt{border-color:rgba(143,183,255,.45)}.hlc.kt b{color:#8fb7ff}
+  .hlc.ke{border-color:rgba(143,227,192,.4)}.hlc.ke b{color:#8fe3c0}
+  .hlc.kd{border-color:rgba(201,179,255,.45)}.hlc.kd b{color:#c9b3ff}
+  .hlc.kg{border-color:rgba(224,180,65,.5)}.hlc.kg b{color:var(--gold)}
 }
 @media(max-width:380px){
   .povtab .pvnm{max-width:82px}
@@ -1972,10 +1982,17 @@ if(HL.length){
    const _tc=document.getElementById('tlcard');
    if(_tc&&!document.getElementById('hlchips')){
      const cw=document.createElement('div');cw.className='hlchips';cw.id='hlchips';
-     const _short=t=>String(t||'').replace('GG — 경기 종료','GG').replace(/^첫\s+/,'').replace('최대 교전','교전').replace('드랍 견제','드랍');
-     cw.innerHTML=`<a class="hlchip hla" href="analysis.html?id=${encodeURIComponent(MID)}">📊 분석</a>`
-       +HL.map(h=>`<button class="hlchip ${KCLASS[h.kind]}" data-s="${h.sec}"><b>${h.t||fmt(h.sec)}</b><span>${esc(_short(h.label))}</span></button>`).join('');
-     cw.querySelectorAll('button.hlchip').forEach(b=>b.onclick=()=>seek(+b.dataset.s));
+     const _short=t=>String(t||'').replace('GG — 경기 종료','GG').replace(/^첫\s+/,'').replace('드랍 견제','드랍');
+     const _KO={battle:'교전',tech:'테크',drop:'드랍',expand:'확장',gg:'GG'};
+     const _ORD=['battle','tech','drop','expand','gg'];
+     // 종류별 행: 색점 라벨 + 아웃라인 칩(행마다 가로 스크롤). 확장·GG 는 시간만.
+     let _rows=`<div class="hlrow hlhead"><i class="hlab hg">하이라이트</i><a class="hla" href="analysis.html?id=${encodeURIComponent(MID)}">📊 분석</a></div>`;
+     _ORD.forEach(k=>{const arr=HL.filter(h=>h.kind===k);if(!arr.length)return;
+       const chips=arr.map(h=>{const lb=_short(h.label);const showLb=(k==='battle'||k==='tech'||k==='drop')&&lb&&lb!==_KO[k];
+         return `<button class="hlc ${KCLASS[k]}" data-s="${h.sec}"><b>${h.t||fmt(h.sec)}</b>${showLb?`<span>${esc(lb)}</span>`:''}</button>`;}).join('');
+       _rows+=`<div class="hlrow"><i class="hlab ${KCLASS[k]}">${_KO[k]}</i><div class="hlrc">${chips}</div></div>`;});
+     cw.innerHTML=_rows;
+     cw.querySelectorAll('button.hlc').forEach(b=>b.onclick=()=>seek(+b.dataset.s));
      _tc.appendChild(cw);
    }
  }catch(_e){}
