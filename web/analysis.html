@@ -476,6 +476,7 @@ svg{display:block}
 /* 타임라인 카드 */
 .tlcard{margin-top:14px;background:var(--card);border:1px solid var(--line);border-radius:13px;padding:14px 20px 15px;box-shadow:var(--elev)}
 .tlcard .tl{margin:6px 4px 0}
+.hlchips{display:none}
 .tl-rail{height:3px}
 .tl-fill{opacity:1;background:linear-gradient(90deg,rgba(199,210,225,.5),var(--acc))}
 .mk .pin{width:10px;height:10px}
@@ -789,6 +790,31 @@ svg{display:block}
   .cform{grid-template-columns:1fr;gap:8px;margin-bottom:6px}
   .ci,.ct{padding:10px 12px;font-size:13px}
   .cs{justify-self:end;padding:9px 24px;font-size:13px}
+
+  /* ══ 원점 재설계: 유튜브 문법 ══ */
+  /* 영상 풀블리드 (좌우 화면 끝까지, 각 없이) */
+  .vcol .stage{margin-left:calc(50% - 50vw);margin-right:calc(50% - 50vw);border-radius:0;box-shadow:none}
+  /* hero 언박스: 카드·장식 제거 → 텍스트 한 줄 + 헤어라인 */
+  .hero{background:none;border:0;border-radius:0;box-shadow:none;margin:9px 0 0;padding:2px 0 10px;border-bottom:1px solid var(--line)}
+  .hero .hbg,.hero .hgrid{display:none}
+  .hginfo .hmode,.hginfo .hsep,.hginfo .hmap{display:none}   /* 배지·시간만 — 맵·인원은 분석에 있음 */
+  .hginfo .htime{color:var(--dim)}
+  /* 시점: 절대 줄바꿈 없는 가로 스크롤 한 줄 (감독판·모드 아이콘 포함) */
+  .povtabs{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;
+    margin:10px calc(50% - 50vw) 0;padding:0 16px 4px}
+  .povtabs::-webkit-scrollbar{display:none}
+  .povtab,.povdir,.modeseg,.dirseg{flex:0 0 auto}
+  .povtab .pvnm{max-width:none}
+  /* 타임라인: 점 그래프 숨기고 주요 순간 칩 스트립 */
+  .tlcard{background:none;border:0;box-shadow:none;padding:0;margin-top:12px}
+  .tlcard .tl{display:none}
+  .hlchips{display:flex;gap:8px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;
+    margin:0 calc(50% - 50vw);padding:2px 16px 6px}
+  .hlchips::-webkit-scrollbar{display:none}
+  .hlchip{flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;font-family:var(--fd);font-size:12px;font-weight:600;
+    color:var(--ink2);background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:8px 13px;cursor:pointer}
+  .hlchip b{font-family:var(--fm);font-weight:700;font-size:11.5px;color:var(--ink)}
+  .hlchip.kb b{color:#f0a98e}.hlchip.kt b{color:#8fb7ff}.hlchip.ke b{color:#8fe3c0}.hlchip.kd b{color:#c9b3ff}.hlchip.kg b{color:var(--gold)}
 }
 @media(max-width:380px){
   .povtab .pvnm{max-width:82px}
@@ -1931,6 +1957,17 @@ if(HL.length){
   const _lbl=(h.label||'').replace('GG — 경기 종료','GG');
   m.innerHTML=`<div class="tip"><div class="tt">${KICON[h.kind]}<b>${h.t||fmt(h.sec)}</b></div><s>${_lbl}${h.who?' · '+h.who:''}</s></div><div class="pin"></div><div class="stem"></div><div class="lab"><span class="lt">${h.t||fmt(h.sec)}</span><span class="ll">${esc(_lbl)}</span></div>`;
   m.onclick=()=>seek(h.sec);tl.appendChild(m);});
+ // 모바일 대체 UI: 점 타임라인 대신 '주요 순간' 칩 스트립 (가로 스크롤 · 탭=해당 장면)
+ try{
+   const _tc=document.getElementById('tlcard');
+   if(_tc&&!document.getElementById('hlchips')){
+     const cw=document.createElement('div');cw.className='hlchips';cw.id='hlchips';
+     cw.innerHTML=HL.map(h=>{const _l=(h.label||'').replace('GG — 경기 종료','GG');
+       return `<button class="hlchip ${KCLASS[h.kind]}" data-s="${h.sec}"><b>${h.t||fmt(h.sec)}</b><span>${esc(_l)}</span></button>`;}).join('');
+     cw.querySelectorAll('.hlchip').forEach(b=>b.onclick=()=>seek(+b.dataset.s));
+     _tc.appendChild(cw);
+   }
+ }catch(_e){}
  // 가장자리 마커 툴팁이 뷰포트를 넘어 가로 스크롤을 만드는 것 방지(모바일). 데스크탑은 넘치지 않아 no-op.
  function clampTips(){const de=document.documentElement,pad=6;
   const tlr=tl.getBoundingClientRect();
