@@ -818,11 +818,8 @@ html,body{overflow-x:hidden;max-width:100%}
   .vsstrs{grid-template-columns:1fr!important}
   .vsmn{max-width:none!important}
   /* ④ POV(시점) 탭: 넘치면 줄바꿈 + 본문 여백 확보 */
-  /* 모바일: 영상 먼저 → 경기 정보 → 나머지(분석·코멘트·푸터는 원래 순서 유지) */
-  .wrap{display:flex;flex-direction:column}
-  .wrap>*{order:3}
-  .wrap>.hero{order:2;margin-top:14px}
-  .wrap>.main{order:1}
+  /* 모바일도 PC와 동일한 순서(DOM 순서 그대로): 경기정보 → 영상 → 타임라인 → 분석 → 시점 → 코멘트 */
+  .wrap>.tlcard{margin-top:12px}
   .povtabs{flex-wrap:wrap;row-gap:8px}
   .povtabs>*{flex:0 0 auto}
   .wrap{padding-left:16px;padding-right:16px}
@@ -852,7 +849,7 @@ html,body{overflow-x:hidden;max-width:100%}
 body.pg-watch section.analysis{display:none!important}
 /* 주의: #splitview 는 분석 섹션이 아니라 멀티뷰 영상 호스트(svHost)가 사는 곳 — 숨기면 멀티가 안 보임 */
 body.pg-analysis .main,body.pg-analysis section.comm{display:none!important}
-body.pg-analysis .wrap>.hero{order:1}
+/* (분석 페이지도 PC와 동일 DOM 순서 사용) */
 .povmulti{font-size:12px;padding:6px 10px}
 /* 매치카드 라인업 라이트 */
 .hpl{font-size:13px}
@@ -920,9 +917,6 @@ body.pg-analysis .wrap>.hero{order:1}
  <div class="main">
   <div class="vcol">
    <div class="stage" id="stage"></div>
-   <div class="tlcard" id="tlcard">
-    <div class="tl" id="tl"></div>
-   </div>
   </div>
   <div class="scol">
    <div class="mucard" id="matchup"></div>
@@ -933,6 +927,8 @@ body.pg-analysis .wrap>.hero{order:1}
    </div>
   </div>
  </div>
+
+ <div class="tlcard" id="tlcard"><div class="tl" id="tl"></div></div>
 
  <section class="analysis">
   <div class="ahead"><h2>분석</h2></div>
