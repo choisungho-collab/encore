@@ -126,10 +126,16 @@ svg{display:block}
 .mvcell.mvseek::after{content:'';position:absolute;inset:0;background:linear-gradient(100deg,transparent 32%,rgba(214,224,238,.14) 50%,transparent 68%);background-size:220% 100%;animation:encShimmer 1.05s linear infinite;pointer-events:none;z-index:2}
 .mvcell.mvseek .mvsync{opacity:1}
 .mvsync{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);display:inline-flex;align-items:center;gap:8px;background:rgba(12,14,20,.62);color:#e6edff;font-family:var(--fd);font-size:12.5px;font-weight:600;padding:8px 15px;border-radius:999px;border:1px solid rgba(126,156,255,.22);-webkit-backdrop-filter:blur(7px);backdrop-filter:blur(7px);pointer-events:none;opacity:0;transition:opacity .2s;z-index:3}.mvsync::before{content:"";width:12px;height:12px;border-radius:50%;border:2px solid rgba(214,224,238,.26);border-top-color:#D7DFEA;animation:encSpin .68s linear infinite;flex:0 0 auto}@keyframes encSpin{to{transform:rotate(360deg)}}
-.vplay{position:absolute;inset:0;border:0;background:rgba(6,8,12,.2);display:grid;place-items:center;cursor:pointer;transition:opacity .4s ease,background .25s;padding:0}
-.vplay:hover{background:rgba(6,8,12,.1)}
-.vplay svg{width:74px;height:74px;color:#fff;background:rgba(199,210,225,.94);border-radius:50%;padding:24px;box-sizing:border-box;box-shadow:0 14px 44px -10px rgba(0,0,0,.7);transition:.2s;margin-left:3px;pointer-events:none}
-.vplay:hover svg{transform:scale(1.05)}
+/* 재생 전 화면: 시네마틱 스크림(상하 비네트+하단 그라디언트) — 재생 시 vplay 와 함께 사라짐 */
+.vplay{position:absolute;inset:0;border:0;display:grid;place-items:center;cursor:pointer;transition:opacity .4s ease;padding:0;
+  background:radial-gradient(130% 95% at 50% 110%,rgba(5,7,12,.58),transparent 55%),
+             radial-gradient(150% 105% at 50% -25%,rgba(5,7,12,.5),transparent 52%),
+             linear-gradient(180deg,rgba(5,7,12,.16),rgba(5,7,12,.04) 42%,rgba(5,7,12,.34))}
+.vplay:hover{filter:brightness(1.06)}
+.vplay svg{width:76px;height:76px;color:#fff;background:rgba(14,18,28,.55);border:1.5px solid rgba(255,255,255,.32);border-radius:50%;padding:24px;box-sizing:border-box;
+  -webkit-backdrop-filter:blur(10px) saturate(140%);backdrop-filter:blur(10px) saturate(140%);
+  box-shadow:0 18px 50px -12px rgba(0,0,0,.75),inset 0 1px 0 rgba(255,255,255,.22),0 0 0 8px rgba(255,255,255,.05);transition:.2s;margin-left:3px;pointer-events:none}
+.vplay:hover svg{transform:scale(1.06);border-color:rgba(255,255,255,.5);box-shadow:0 18px 50px -12px rgba(0,0,0,.75),inset 0 1px 0 rgba(255,255,255,.22),0 0 0 12px rgba(255,255,255,.07)}
 .vcard{text-align:center;padding:22px;pointer-events:none;width:100%;max-width:840px}
 .vctop{position:absolute;top:19px;left:24px;display:flex;align-items:center;gap:9px;font-family:var(--fh);font-weight:800;font-size:clamp(13px,1.9vw,18px);letter-spacing:.14em;color:#fff;text-shadow:0 2px 14px rgba(0,0,0,.8);z-index:2}
 .vctop svg{width:clamp(15px,2vw,19px);height:auto;color:#fff;filter:drop-shadow(0 2px 10px rgba(0,0,0,.6))}
@@ -794,26 +800,32 @@ svg{display:block}
   /* ══ 원점 재설계: 유튜브 문법 ══ */
   /* 영상 풀블리드 (좌우 화면 끝까지, 각 없이) */
   .vcol .stage{margin-left:calc(50% - 50vw);margin-right:calc(50% - 50vw);border-radius:0;box-shadow:none}
-  /* hero 언박스: 카드·장식 제거 → 텍스트 한 줄 + 헤어라인 */
+  body.pg-watch .hero{display:none}   /* 시청 페이지: 클릭 전 이미 아는 정보 — 제거. 분석 진입은 순간 스트립의 📊 칩 */
+  /* (분석 페이지 hero 언박스) */
   .hero{background:none;border:0;border-radius:0;box-shadow:none;margin:9px 0 0;padding:2px 0 10px;border-bottom:1px solid var(--line)}
   .hero .hbg,.hero .hgrid{display:none}
+  .hginfo::before{display:none}   /* 좌측 장식 바 제거 */
   .hginfo .hmode,.hginfo .hsep,.hginfo .hmap{display:none}   /* 배지·시간만 — 맵·인원은 분석에 있음 */
   .hginfo .htime{color:var(--dim)}
   /* 시점: 절대 줄바꿈 없는 가로 스크롤 한 줄 (감독판·모드 아이콘 포함) */
-  .povtabs{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;
+  .povtabs{flex-wrap:nowrap!important;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;
     margin:10px calc(50% - 50vw) 0;padding:0 16px 4px}
   .povtabs::-webkit-scrollbar{display:none}
   .povtab,.povdir,.modeseg,.dirseg{flex:0 0 auto}
-  .povtab .pvnm{max-width:none}
+  .povtab .pvnm{display:none}   /* 모바일: 아이디 숨김 — 색점+종족만 */
+  .povtab{padding:7px 10px;gap:6px}
+  .povtab .pvrc{font-size:11px;padding:2px 7px;margin:0}
+  .povtab .pvdot{width:9px;height:9px}
   /* 타임라인: 점 그래프 숨기고 주요 순간 칩 스트립 */
   .tlcard{background:none;border:0;box-shadow:none;padding:0;margin-top:12px}
   .tlcard .tl{display:none}
-  .hlchips{display:flex;gap:8px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;
-    margin:0 calc(50% - 50vw);padding:2px 16px 6px}
+  .hlchips{display:flex;gap:18px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;
+    margin:0 calc(50% - 50vw);padding:4px 16px 6px;align-items:center}
   .hlchips::-webkit-scrollbar{display:none}
-  .hlchip{flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;font-family:var(--fd);font-size:12px;font-weight:600;
-    color:var(--ink2);background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:8px 13px;cursor:pointer}
-  .hlchip b{font-family:var(--fm);font-weight:700;font-size:11.5px;color:var(--ink)}
+  .hlchip{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;font-family:var(--fd);font-size:12.5px;font-weight:600;
+    color:var(--ink2);background:none;border:0;border-radius:0;padding:6px 0;cursor:pointer;text-decoration:none}
+  .hlchip b{font-family:var(--fm);font-weight:700;font-size:12px;color:var(--ink)}
+  .hlchip.hla{gap:5px;font-size:12px;color:var(--acc-ink);border:1px solid var(--acc-line);background:var(--acc-soft);border-radius:999px;padding:6px 12px}
   .hlchip.kb b{color:#f0a98e}.hlchip.kt b{color:#8fb7ff}.hlchip.ke b{color:#8fe3c0}.hlchip.kd b{color:#c9b3ff}.hlchip.kg b{color:var(--gold)}
 }
 @media(max-width:380px){
@@ -858,11 +870,9 @@ html,body{overflow-x:hidden;max-width:100%}
   .pchip .pn{font-size:15px}
   .vsstrs{grid-template-columns:1fr!important}
   .vsmn{max-width:none!important}
-  /* ④ POV(시점) 탭: 넘치면 줄바꿈 + 본문 여백 확보 */
-  /* 모바일도 PC와 동일한 순서(DOM 순서 그대로): 경기정보 → 영상 → 타임라인 → 분석 → 시점 → 코멘트 */
+  /* 모바일도 PC와 동일한 순서(DOM 순서 그대로) */
   .wrap>.tlcard{margin-top:12px}
-  .povtabs{flex-wrap:wrap;row-gap:8px}
-  .povtabs>*{flex:0 0 auto}
+  /* (시점 줄바꿈 규칙 제거 — 아래 재설계 블록의 '가로 스크롤 한 줄'이 최종) */
   .wrap{padding-left:16px;padding-right:16px}
 }
 @media(max-width:380px){
@@ -1962,9 +1972,10 @@ if(HL.length){
    const _tc=document.getElementById('tlcard');
    if(_tc&&!document.getElementById('hlchips')){
      const cw=document.createElement('div');cw.className='hlchips';cw.id='hlchips';
-     cw.innerHTML=HL.map(h=>{const _l=(h.label||'').replace('GG — 경기 종료','GG');
-       return `<button class="hlchip ${KCLASS[h.kind]}" data-s="${h.sec}"><b>${h.t||fmt(h.sec)}</b><span>${esc(_l)}</span></button>`;}).join('');
-     cw.querySelectorAll('.hlchip').forEach(b=>b.onclick=()=>seek(+b.dataset.s));
+     const _short=t=>String(t||'').replace('GG — 경기 종료','GG').replace(/^첫\s+/,'').replace('최대 교전','교전').replace('드랍 견제','드랍');
+     cw.innerHTML=`<a class="hlchip hla" href="analysis.html?id=${encodeURIComponent(MID)}">📊 분석</a>`
+       +HL.map(h=>`<button class="hlchip ${KCLASS[h.kind]}" data-s="${h.sec}"><b>${h.t||fmt(h.sec)}</b><span>${esc(_short(h.label))}</span></button>`).join('');
+     cw.querySelectorAll('button.hlchip').forEach(b=>b.onclick=()=>seek(+b.dataset.s));
      _tc.appendChild(cw);
    }
  }catch(_e){}
