@@ -242,7 +242,7 @@ svg{display:block}
 .rteam .rt .w .ic{width:11px;height:11px}
 .pl{display:flex;align-items:center;gap:7px;white-space:nowrap}
 .plrow{display:flex;flex-wrap:wrap;gap:9px 16px;align-items:center}
-.pchip{display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:var(--r1);cursor:pointer;border:1px solid var(--line);background:var(--surface);transition:.13s;position:relative;flex:1 1 170px;min-width:0}
+.pchip{display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:var(--r1);cursor:pointer;border:1px solid var(--line);background:var(--surface);transition:.13s;position:relative;flex:1 1 215px;min-width:0}
 .pchip:hover{border-color:var(--line2)}
 .pchip.sel{background:var(--acc-soft);border-color:var(--acc-line)}
 .pchip.sel::before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:2.5px;border-radius:2px;background:var(--acc)}
@@ -252,6 +252,7 @@ svg{display:block}
 .rt.r-zerg{background:color-mix(in srgb,var(--r-zerg) 16%,transparent);color:var(--r-zerg)}
 .rt.r-toss{background:color-mix(in srgb,var(--r-toss) 16%,transparent);color:var(--r-toss)}
 .pchip .pn{font-family:var(--fd);font-weight:600;font-size:15px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink2)}
+.pchip .ap::after{content:"APM";font-family:var(--fd);font-size:8.5px;font-weight:600;color:var(--faint);margin-left:4px;letter-spacing:.04em}
 .pchip.sel .pn,.pchip:hover .pn{color:var(--ink)}
 .pchip.me .pn{font-weight:700}
 .pchip .meb{font-family:var(--fm);font-size:9px;letter-spacing:.06em;color:var(--acc-ink);background:var(--acc-soft);padding:2px 5px;border-radius:4px;flex-shrink:0}
@@ -269,6 +270,12 @@ svg{display:block}
 .stat .v.acc{color:var(--acc-ink)}
 .statsub{gap:20px 26px;padding-top:15px;margin-top:3px;border-top:1px solid var(--line)}.statsub .stat .v{font-size:18px}.statsub .stat .k{font-size:11px;margin-top:6px}
 .stat .k{font-family:var(--fh);font-weight:600;font-size:12px;letter-spacing:.01em;color:var(--dim);margin-top:8px}
+/* 스탯 밴드: 헤어라인으로 칸 구분 — 숫자 나열 대신 계기판 느낌 */
+.statline{gap:16px 0}
+.statline .stat{padding:0 22px;border-left:1px solid var(--line)}
+.statline .stat:first-child{border-left:0;padding-left:2px}
+.statline.statsub{gap:13px 0}
+.statline.statsub .stat{padding:0 18px}
 .cols{display:grid;grid-template-columns:1.08fr 1fr;border-top:1px solid var(--line)}
 .col{padding:22px 26px}.col.l{border-right:1px solid var(--line)}
 .ch{font-family:var(--fh);font-weight:700;font-size:13px;letter-spacing:.01em;color:var(--ink2);margin-bottom:15px;display:flex;align-items:center;gap:9px}
@@ -388,6 +395,10 @@ svg{display:block}
 .rh-badge.n{color:var(--ink2);background:var(--well);border:1px solid var(--line)}
 .rh-name{font-family:var(--fh);font-weight:800;font-size:19px;color:var(--ink)}
 .rh-sub{font-family:var(--fd);font-size:12.5px;color:var(--dim)}
+.rephero .cgrades{gap:10px;margin-top:15px}
+.rephero .cgrade{flex-direction:column;align-items:center;gap:4px;padding:11px 0 9px;border-radius:13px;flex:1 1 72px;max-width:110px}
+.rephero .cgrade i{font-size:11.5px}
+.rephero .cgrade b{font-size:22px;line-height:1}
 .cgrade{display:inline-flex;align-items:center;gap:7px;padding:6px 11px;border-radius:10px;background:var(--well);border:1px solid var(--line)}
 .cgrade i{font-style:normal;font-family:var(--fd);font-size:11.5px;color:var(--dim);font-weight:600}
 .cgrade b{font-family:var(--fm);font-size:13px;font-weight:800;color:var(--ink2)}
@@ -1954,8 +1965,10 @@ function coachBlock(p){
  const GC={S:'gS',A:'gA',B:'gB',C:'gC'};
  const gr=(cr.grades&&cr.grades.length)?`<div class="cgrades">${cr.grades.map(g=>`<span class="cgrade ${GC[g.g]||''}"><i>${g.k}</i><b>${g.g}</b></span>`).join('')}</div>`:'';
  const vd=cr.verdict?`<div class="cverdict"><span class="cvl">총평</span><span class="cvt">${cr.verdict}</span></div>`:'';
+ // 분석 페이지에선 최상단 성적표가 '나'의 총평·등급을 이미 보여줌 → 같은 선수 패널에선 중복 제거
+ const _dupHero=document.body.classList.contains('pg-analysis')&&p.name===meta.saver;
  const cnt=n=>n?`<span class="ccln">${n}</span>`:'';
- return `<div class="coach"><div class="ch coachh">코치 리포트 <span class="cnote">실제 리플레이 기반 · 스타크래프트 기준</span></div>${gr}${vd}<div class="ccols"><div class="ccol"><div class="cclh good">잘한 점${cnt(gp.length)}</div>${gp.length?_wrap(gp,3,false):'<div class="cnone">—</div>'}</div><div class="ccol"><div class="cclh bad">아쉬운 점${cnt(bp.length)}</div>${bp.length?_wrap(bp,4,true):'<div class="cnone">개선할 점이 없어요 — 깔끔한 한 판!</div>'}</div></div></div>`;
+ return `<div class="coach"><div class="ch coachh">코치 리포트 <span class="cnote">실제 리플레이 기반 · 스타크래프트 기준</span></div>${_dupHero?'':gr}${_dupHero?'':vd}<div class="ccols"><div class="ccol"><div class="cclh good">잘한 점${cnt(gp.length)}</div>${gp.length?_wrap(gp,3,false):'<div class="cnone">—</div>'}</div><div class="ccol"><div class="cclh bad">아쉬운 점${cnt(bp.length)}</div>${bp.length?_wrap(bp,4,true):'<div class="cnone">개선할 점이 없어요 — 깔끔한 한 판!</div>'}</div></div></div>`;
 }
 function factsBlock(p){
  const cr=(typeof COACH!=='undefined'?COACH:[]).find(c=>c.id===p.id);if(!cr||!cr.timings)return'';
