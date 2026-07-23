@@ -1607,7 +1607,7 @@ function _commit(v,silent){
 }
 if(VIDEO){(async()=>{try{
   let cand=[];
-  try{cand=await __get("matches?map=eq."+encodeURIComponent(__m.map||meta.map||"")+"&select=id,video,thumb,uploader,saver,players,length_sec,length,map,lead:analysis->meta->>lead_sec,hud:analysis->hud&limit=300");}catch(e){cand=[];}
+  try{cand=await __get("matches?map=eq."+encodeURIComponent(__m.map||meta.map||"")+"&select=id,video,thumb,uploader,saver,players,length_sec,length,map,lead:analysis->meta->>lead_sec&limit=300");}catch(e){cand=[];}
   const _pj=v=>{let p=v.players;if(typeof p==="string"){try{p=JSON.parse(p);}catch(e){p=[];}}return Array.isArray(p)?p:[];};
   const _all=cand.slice();
   if(!_all.some(c=>String(c.id)===String(MID)))_all.push({id:MID,video:VIDEO,thumb:__m.thumb,uploader:__m.uploader,saver:meta.saver,players:players,length_sec:__m.length_sec,map:__m.map,group_key:__m.group_key,lead:(__m.analysis&&__m.analysis.meta&&__m.analysis.meta.lead_sec!=null)?String(__m.analysis.meta.lead_sec):null});
@@ -1618,7 +1618,17 @@ if(VIDEO){(async()=>{try{
     .filter(v=>{const k=String(v.saver||v.uploader||('#'+v.id)).trim().toLowerCase();if(_seen[k])return false;_seen[k]=1;return true;});}
 
   try{_POV_PLAYERS=views.map(function(v){var ps=_pj(v),sp=ps.find(function(p){return p.name===v.saver;})||{};return {name:v.saver||v.uploader||'시점',race:sp.race,color:sp.color||'#8A93A0',team:sp.team};});}catch(e){}
-  window.__povViews=views;try{renderSupplyChart();}catch(_e){}   // 각 시점의 실측 hud 를 곡선에 병합
+  window.__povViews=views;try{renderSupplyChart();}catch(_e){}
+  // 실측 hud 는 별도 2차 조회로 병합 — 이 조회가 실패해도 멀티뷰 탭/재생은 영향 없음
+  try{
+    const _ids=views.map(v=>String(v.id||'')).filter(Boolean);
+    if(_ids.length){
+      const _hr=await __get("matches?id=in.("+_ids.map(encodeURIComponent).join(",")+")&select=id,hud:analysis->hud");
+      const _hm={};(_hr||[]).forEach(r=>{if(r&&r.hud)_hm[String(r.id)]=r.hud;});
+      let _got=0;views.forEach(v=>{const h=_hm[String(v.id)];if(h){v.hud=h;_got++;}});
+      if(_got)renderSupplyChart();
+    }
+  }catch(_e){}
   if(views.length>1){
     const lab=(v,ix)=>{const ps=_pj(v);const sv=ps.find(p=>p.name===v.saver)||{};const pid="pov"+ix+"_"+String(v.id);v._pid=pid;return{id:pid,gid:String(v.id),name:v.saver||v.uploader||"시점",color:sv.color||"#8A93A0",race:RID(sv.race),rk:(sv.race||''),team:(sv.team!=null?sv.team:9)};};
     const items=views.map((v,ix)=>({v,l:lab(v,ix)})).sort((a,b)=>(a.l.team-b.l.team)||a.l.name.localeCompare(b.l.name));
