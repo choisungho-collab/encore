@@ -155,7 +155,7 @@ import queue as _queue
 from collections import deque as _deque
 GUI_Q = _queue.Queue(maxsize=4000)
 LOG_BUF = _deque(maxlen=400)   # 로그창이 닫혀 있어도 최근 로그를 항상 보관(열면 즉시 채움)
-APP_VERSION = "1.9.3"
+APP_VERSION = "1.9.4"
 REC_STATE = {"recording": False, "encoder": "", "ready": False}
 LAST_ERR = {"msg": "", "t": 0.0}
 UP_DONE = {"t": 0.0, "shown": 0.0}
@@ -2762,6 +2762,20 @@ def reanalyze_all(log_fn=None):
             if _old_lead not in (None, ""):
                 try: a.setdefault("meta", {})["lead_sec"] = float(_old_lead)
                 except Exception: pass
+            # 영상 소급: 이 매치를 '내가 녹화'해 로컬 아카이브에 영상이 남아 있으면
+            # HUD 실측 OCR·오디오 교전 등급·종료 점수판까지 재분석에 포함(다운로드 불필요).
+            # 반드시 lead_sec 보존 '이후'에 실행 — 게임초↔영상초 매핑의 기준값이라서.
+            try:
+                _lv = None
+                for _bd in (REC_DIR, UPLOAD_DIR):
+                    _c2 = os.path.join(_bd, mid, "game.mp4")
+                    if os.path.isfile(_c2): _lv = _c2; break
+                if _lv:
+                    _t0 = time.time()
+                    enhance_highlights_with_audio(a, _lv)
+                    lg("  · 로컬 영상 실측 소급 ✓ %s (%.0fs)" % (mid, time.time() - _t0))
+            except Exception as _e:
+                lg("  · 영상 소급 스킵(%s): %s" % (mid, _e))
             players = meta.get("players") or []; saver = meta.get("saver"); winner = meta.get("winner")
             won = _compute_won(players, saver, winner)
             _patch_pv = {}

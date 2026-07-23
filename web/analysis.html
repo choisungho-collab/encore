@@ -1607,7 +1607,7 @@ function _commit(v,silent){
 }
 if(VIDEO){(async()=>{try{
   let cand=[];
-  try{cand=await __get("matches?map=eq."+encodeURIComponent(__m.map||meta.map||"")+"&select=id,video,thumb,uploader,saver,players,length_sec,length,map,lead:analysis->meta->>lead_sec&limit=300");}catch(e){cand=[];}
+  try{cand=await __get("matches?map=eq."+encodeURIComponent(__m.map||meta.map||"")+"&select=id,video,thumb,uploader,saver,players,length_sec,length,map,lead:analysis->meta->>lead_sec,hud:analysis->hud&limit=300");}catch(e){cand=[];}
   const _pj=v=>{let p=v.players;if(typeof p==="string"){try{p=JSON.parse(p);}catch(e){p=[];}}return Array.isArray(p)?p:[];};
   const _all=cand.slice();
   if(!_all.some(c=>String(c.id)===String(MID)))_all.push({id:MID,video:VIDEO,thumb:__m.thumb,uploader:__m.uploader,saver:meta.saver,players:players,length_sec:__m.length_sec,map:__m.map,group_key:__m.group_key,lead:(__m.analysis&&__m.analysis.meta&&__m.analysis.meta.lead_sec!=null)?String(__m.analysis.meta.lead_sec):null});
@@ -1618,6 +1618,7 @@ if(VIDEO){(async()=>{try{
     .filter(v=>{const k=String(v.saver||v.uploader||('#'+v.id)).trim().toLowerCase();if(_seen[k])return false;_seen[k]=1;return true;});}
 
   try{_POV_PLAYERS=views.map(function(v){var ps=_pj(v),sp=ps.find(function(p){return p.name===v.saver;})||{};return {name:v.saver||v.uploader||'시점',race:sp.race,color:sp.color||'#8A93A0',team:sp.team};});}catch(e){}
+  window.__povViews=views;try{renderSupplyChart();}catch(_e){}   // 각 시점의 실측 hud 를 곡선에 병합
   if(views.length>1){
     const lab=(v,ix)=>{const ps=_pj(v);const sv=ps.find(p=>p.name===v.saver)||{};const pid="pov"+ix+"_"+String(v.id);v._pid=pid;return{id:pid,gid:String(v.id),name:v.saver||v.uploader||"시점",color:sv.color||"#8A93A0",race:RID(sv.race),rk:(sv.race||''),team:(sv.team!=null?sv.team:9)};};
     const items=views.map((v,ix)=>({v,l:lab(v,ix)})).sort((a,b)=>(a.l.team-b.l.team)||a.l.name.localeCompare(b.l.name));
@@ -2016,18 +2017,22 @@ function renderSupplyChart(){
  for(let t=stp;t<gl;t+=stp) g+=`<line x1="${X(t)}" y1="${T2}" x2="${X(t)}" y2="${H-B}" class="sgx"/><text x="${X(t)}" y="${H-9}" class="sl" text-anchor="middle">${Math.round(t/60)}분</text>`;
  (HL||[]).forEach(h=>{if(h.kind!=='battle'&&h.kind!=='wipe')return;const wp=h.kind==='wipe';
    g+=`<line x1="${X(h.sec)}" y1="${T2}" x2="${X(h.sec)}" y2="${H-B}" stroke="${wp?'#ff8f8f':'#f0a98e'}" stroke-width="${wp?1.5:1}" ${wp?'':'stroke-dasharray="3 3"'} opacity=".6"/>`;});
- PS.forEach(p=>{const pts=p.supply_series.map((v,k)=>X(k*ST).toFixed(1)+','+Y(v).toFixed(1)).join(' ');
-   g+=`<polyline points="${pts}" fill="none" stroke="${p.color||'#9fb2d9'}" stroke-width="2" stroke-linejoin="round" opacity="${(DATA.hud&&DATA.hud.who===p.name)?'.35':'.92'}"/>`;});
- // 실측 오버레이 (녹화자): HUD OCR — 사망 반영된 진짜 인구
- const HD=DATA.hud&&DATA.hud.sup&&DATA.hud.sup.length>3?DATA.hud:null;
- if(HD){const sp2=(DATA.players||[]).find(p=>p.name===HD.who)||{};const c=sp2.color||'#e8eefc';
-   const st5=HD.step||5,ld=HD.lead||0;
-   const pts=HD.sup.map((v,k)=>{const t=k*st5-ld;return t<0?null:(X(t).toFixed(1)+','+Y(v).toFixed(1));}).filter(Boolean).join(' ');
-   g+=`<polyline points="${pts}" fill="none" stroke="rgba(255,255,255,.55)" stroke-width="4.2" stroke-linejoin="round"/>`;
-   g+=`<polyline points="${pts}" fill="none" stroke="${c}" stroke-width="2.4" stroke-linejoin="round"/>`;}
+ // 실측 병합: 내 hud + 멀티뷰 시점들의 hud — 녹화한 선수마다 '사망 반영' 곡선을 자기 색으로
+ const HUDS={};const _addH=h=>{if(h&&h.sup&&h.sup.length>3&&h.who&&!HUDS[h.who])HUDS[h.who]=h;};
+ _addH(DATA.hud);
+ (window.__povViews||[]).forEach(v=>{let h=v&&v.hud;if(typeof h==='string'){try{h=JSON.parse(h);}catch(_e){h=null;}}_addH(h);});
+ PS.forEach(p=>{if(HUDS[p.name])return;   // 실측 있는 선수는 평평한 생산 누적선 생략(실측이 진실)
+   const pts=p.supply_series.map((v,k)=>X(k*ST).toFixed(1)+','+Y(v).toFixed(1)).join(' ');
+   g+=`<polyline points="${pts}" fill="none" stroke="${p.color||'#9fb2d9'}" stroke-width="2" stroke-linejoin="round" opacity=".9"/>`;});
+ const _pcol=n=>((DATA.players||[]).find(p=>p.name===n)||{}).color||'#e8eefc';
+ Object.keys(HUDS).forEach(nm=>{const h=HUDS[nm],st5=h.step||5,ld=h.lead||0,c=_pcol(nm);
+   const pts=h.sup.map((v,k)=>{const t=k*st5-ld;return t<0?null:(X(t).toFixed(1)+','+Y(v).toFixed(1));}).filter(Boolean).join(' ');
+   g+=`<polyline points="${pts}" fill="none" stroke="rgba(255,255,255,.5)" stroke-width="4" stroke-linejoin="round"/>`;
+   g+=`<polyline points="${pts}" fill="none" stroke="${c}" stroke-width="2.4" stroke-linejoin="round"/>`;});
+ const HD=DATA.hud&&DATA.hud.sup&&DATA.hud.sup.length>3?DATA.hud:null;   // 자원 스파크라인은 내 시점 전용
  const mm=s2=>s2==null?'—':(Math.floor(s2/60)+':'+String(s2%60).padStart(2,'0'));
- const leg=PS.map(p=>`<span class="spl"><i style="background:${p.color||'#9fb2d9'}"></i>${esc(p.name||'—')}<em>200 ${p.supply200||'—'} · 일꾼50 ${mm(p.worker50_sec)}</em></span>`).join('')
-   +(HD?`<span class="spl"><i class="ihud" style="background:${((DATA.players||[]).find(p=>p.name===HD.who)||{}).color||'#e8eefc'}"></i>실측 인구(${esc(HD.who)}·사망 반영)</span>`:'');
+ const leg=PS.map(p=>{const m2=HUDS[p.name];
+   return `<span class="spl"><i style="background:${p.color||'#9fb2d9'};${m2?'height:5px;box-shadow:0 0 0 1.5px rgba(255,255,255,.5)':''}"></i>${esc(p.name||'—')}${m2?'<em style="color:var(--acc-ink)">실측</em>':''}<em>200 ${p.supply200||'—'} · 일꾼50 ${mm(p.worker50_sec)}</em></span>`;}).join('');
  let rsvg='';
  if(HD&&HD.mn&&HD.mn.length>3){const st5=HD.step||5,ld=HD.lead||0,H2=86,B2=18,T3=8;
    const mx=Math.max(1000,Math.ceil(Math.max(...HD.mn)/500)*500);
