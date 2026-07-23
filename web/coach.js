@@ -23,9 +23,11 @@ function _coach_race(r,unames){
 }
 function _coach_first(build,names){for(const b of build){if(names.has(b.name))return b.t;}return null;}
 function _s2(s){var q=(""+(s||"0:0")).split(":");return (+q[0])*60+(+q[1]||0);}
+function _mmss(s){s=Math.max(0,Math.round(s||0));return Math.floor(s/60)+":"+("0"+(s%60)).slice(-2);}
 function prodTarget(race,mins,maxSup){
   var t;
-  if(mins<5)       t={T:3,P:3,Z:4}[race];
+  if(mins<4)       t={T:2,P:2,Z:2}[race];   // 초반전: 3분대 게임에 해처리 4개 기준은 난센스
+  else if(mins<5)  t={T:3,P:3,Z:3}[race];
   else if(mins<7)  t={T:5,P:6,Z:6}[race];
   else if(mins<9)  t={T:7,P:8,Z:8}[race];
   else if(mins<13) t={T:9,P:10,Z:10}[race];
@@ -35,6 +37,8 @@ function prodTarget(race,mins,maxSup){
 }
 function coach_player(p,peers,mins,fast){
   mins=mins||0;
+  // 게임 단계: 0 초반전(<6분) · 1 단기(<10) · 2 중기(<15) · 3 장기 — 단계별로 요구하는 게 다르다
+  var ph=mins<6?0:(mins<10?1:(mins<15?2:3));
   var unames=(p.units||[]).map(function(u){return u.name;});
   var race=_coach_race(p.race,unames);var build=p.build||[];
   var units={};(p.units||[]).forEach(function(u){units[u.name]=u;});
@@ -59,7 +63,10 @@ function coach_player(p,peers,mins,fast){
 
   // 1. 생산기지·리맥스 (최우선)
   var tgt=prodTarget(race,mins,maxSup);
-  if(prodN>=tgt){
+  if(ph===0){
+    if(prodN>=tgt) T("good","prod",prodKo+" "+prodN+"개 — 초반전 기준 충분","~"+Math.round(mins)+"분 게임엔 이 정도가 정석 — 생산 수보다 빌드·타이밍이 승부였어.");
+    else if(prodN<2&&mins>=3.5) T("tip","prod",prodKo+" "+prodN+"개","초반전이라도 "+prodKo+" 2개는 있어야 러시를 받아치는 물량이 나와.");
+  }else if(prodN>=tgt){
     T("good","prod",prodKo+" "+prodN+"개 — 생산·리맥스 탄탄","권장 "+tgt+"개 이상 — 병력이 갈려도 바로 리맥스되는 구조야.");
   }else if(prodN<Math.max(2,tgt*0.6)){
     T("warn","prod",prodKo+" "+prodN+"개 — 생산기지 부족","기준 "+tgt+"개인데 "+prodN+"개 — 리맥스가 느려 한타 한 번에 무너져. 돈 남기 전에 "+prodKo+"부터.");
@@ -72,19 +79,23 @@ function coach_player(p,peers,mins,fast){
   if(units["Goliath"]&&mxlv<2) usyn=" 골리앗은 공2업이 생명.";
   else if(units["Marine"]&&mxlv===0) usyn=" 마린은 공1업만 돼도 확 달라져.";
   else if(race==="Z"&&(units["Hydralisk"]||units["Zergling"])&&mxlv<2) usyn=" 다수 유닛엔 공업 한 단계가 곱으로 들어가.";
-  if(haslv){
-    var ut="업그레이드 공"+A+"·방"+R;
-    if(mxlv===0)      T("warn","up",ut,"노업은 치명적 — 가스 오르면 공·방부터."+usyn,upsec);
-    else if(mxlv<=1) T("tip","up",ut,"공·방 3업이 한타를 가른다 — 병력 뽑으며 꾸준히."+usyn,upsec);
-    else if(mxlv>=3) T("good","up",ut,"3업 완성 — 업글 차이가 곧 한타 차이야.",upsec);
-    else             T("good","up",ut,"꾸준했어 — 3업까지 마저 채우자.",upsec);
-  }else if(up_n===0){
-    T("warn","up","업그레이드 없음","물량전은 풀업 싸움 — 가스 오르면 업글부터.");
+  if(mins>=7){
+    if(haslv){
+      var ut="업그레이드 공"+A+"·방"+R;
+      if(mxlv===0)      T("warn","up",ut,"노업은 치명적 — 가스 오르면 공·방부터."+usyn,upsec);
+      else if(mxlv<=1) T("tip","up",ut,"공·방 3업이 한타를 가른다 — 병력 뽑으며 꾸준히."+usyn,upsec);
+      else if(mxlv>=3) T("good","up",ut,"3업 완성 — 업글 차이가 곧 한타 차이야.",upsec);
+      else             T("good","up",ut,"꾸준했어 — 3업까지 마저 채우자.",upsec);
+    }else if(up_n===0){
+      T("warn","up","업그레이드 없음","물량전은 풀업 싸움 — 가스 오르면 업글부터.");
+    }
+  }else if(haslv&&mxlv>=1){
+    T("good","up","업그레이드 공"+A+"·방"+R+" — 초반부터 투자","짧은 게임인데도 업글을 굴렸네 — 게임이 길어졌으면 그대로 이득이었어.",upsec);
   }
 
   // 3. 종족별 결정타 (문서 금지사항 기반)
   if(race==="Z"){
-    if(!units["Lurker"]&&!units["Defiler"]) T("tip","comp","러커가 없음","럴커 라인이 있어야 수세에서 벗어나 — 히드라 다음은 럴커.");
+    if(mins>=8&&!units["Lurker"]&&!units["Defiler"]) T("tip","comp","러커가 없음","럴커 라인이 있어야 수세에서 벗어나 — 히드라 다음은 럴커.");
     var hiveTech=units["Defiler"]||units["Ultralisk"]||units["Guardian"];
     if(mins>=12&&!hiveTech) T("warn","comp","후반인데 하이브 카드가 없음","온리 히드라는 200 한타에서 녹아 — 하이브 올려 디파일러부터.");
     else if(mins>=9&&mins<12&&!hiveTech) T("tip","comp","하이브 전환 준비할 때","12분 전후 하이브 — 디파일러·가디언이 후반을 가른다.");
@@ -95,17 +106,25 @@ function coach_player(p,peers,mins,fast){
     if(marine>=12&&medic===0&&mins>=5) T("warn","comp","메딕 없이 마린만","마린 한 부대당 메딕 3~4기 — 없으면 럴커·스톰에 그냥 녹아.");
     else if(marine>=12&&enemyP>=2&&fbat===0) T("tip","comp","파벳이 없음 (상대 토스 "+enemyP+"명)","발업 질럿엔 파벳이 특효 — 부대에 3기만 섞자.");
   }else if(race==="P"){
-    if(!units["High Templar"]&&!units["Archon"]) T(mins>=7?"warn":"tip","comp","하템(스톰)이 없음","질드라만으론 덩어리를 못 지워 — 스톰 한 방이 한타를 뒤집어.");
-    if(units["Zealot"]&&!units["Dragoon"]) T("tip","comp","드라군 없이 질럿만","질럿만은 대공·사거리가 비어 — 드라군을 섞자.");
+    if(mins>=6&&!units["High Templar"]&&!units["Archon"]) T(mins>=8?"warn":"tip","comp","하템(스톰)이 없음","질드라만으론 덩어리를 못 지워 — 스톰 한 방이 한타를 뒤집어.");
+    if(mins>=5&&units["Zealot"]&&!units["Dragoon"]) T("tip","comp","드라군 없이 질럿만","질럿만은 대공·사거리가 비어 — 드라군을 섞자.");
     if(p.drops!=null&&(p.drops||0)<1&&!(p.atk_first&&_s2(p.atk_first)<=360)&&mins>=8) T("tip","harass","견제가 적었음","토스의 힘은 견제 — 10분 전엔 한타보다 견제로 이득.");
   }
   if(have_wt.length) T("good","tech","결정타 확보: "+have_wt.join(", "),"후반은 게임체인저 유무로 갈려 — 좋은 판단.");
 
   // 4. 감지
-  if(race==="P"&&!units["Observer"]&&!bnames.has("Photon Cannon")){
+  if(mins>=6&&race==="P"&&!units["Observer"]&&!bnames.has("Photon Cannon")){
     T("warn","det","감지 수단 없음","다크·러커·마인을 못 보면 그냥 녹아 — 옵저버 1~2기 필수.");
-  }else if(race==="T"&&!units["Science Vessel"]&&!bnames.has("Missile Turret")){
+  }else if(mins>=6&&race==="T"&&!units["Science Vessel"]&&!bnames.has("Missile Turret")){
     T("tip","det","감지 수단 부족","다크·클로킹·드랍 대비 터렛/베슬을 챙기자.");
+  }
+
+  // 5-0. 초반전(<6분) 전용 — 짧은 게임은 빌드·정찰·첫 교전 타이밍 싸움
+  if(ph===0){
+    if(p.atk_first&&_s2(p.atk_first)<=270) T("good","rush","이른 선공 "+p.atk_first,"초반전의 주도권은 먼저 때린 쪽 — 타이밍 감각이 좋았어.",_s2(p.atk_first));
+    var _oppA=(peers||[]).filter(function(pe){return pe&&pe.team!=null&&p.team!=null&&pe.team!==p.team;}).reduce(function(m,o){return Math.max(m,o.army||0);},0);
+    if(mins>=3&&_oppA>=Math.max(8,pyRound(army)*1.6)) T("tip","rush","초반 병력이 상대보다 얇았음","내 ~"+pyRound(army)+" vs 상대 ~"+_oppA+" 서플라이 — 초반전은 첫 교전 병력이 전부야. 일꾼·테크에 너무 투자하면 이 타이밍이 밀려.");
+    if(!fast&&workers>=Math.round(mins*9)+6) T("tip","rush","초반전치고 일꾼 투자가 많음","일꾼 "+workers+"기 — 그 자원이면 병력 몇 기가 더 나왔어. 상대 성향을 정찰로 확인한 뒤에 배를 째자.");
   }
 
   // 5. 멀티 (빨무에선 자원 무한이라 멀티 조언이 무의미 → 건너뜀)
@@ -143,7 +162,7 @@ function coach_player(p,peers,mins,fast){
   // 9. 정찰 (빨무에선 정찰 타이밍이 무의미 → 건너뜀)
   if(!fast&&p.scouted!=null){
     if(p.scouted===0||!p.scout_first){
-      T("tip","scout","정찰을 거의 안 함","정찰이 없으면 다크·올인을 모르고 당해 — 초반 한 번은 보자.");
+      T(ph===0?"warn":"tip","scout","정찰을 거의 안 함",ph===0?"초반전일수록 정찰이 생명 — 상대 올인·생략 빌드를 못 보면 그대로 끝나.":"정찰이 없으면 다크·올인을 모르고 당해 — 초반 한 번은 보자.");
     }else if(_s2(p.scout_first)<150){
       T("good","scout","초반 정찰 "+p.scout_first+(p.scouted>1?" ("+p.scouted+"곳)":""),"일찍 봤네 — 본 정보로 다음 수를 예측하자.",_s2(p.scout_first));
     }else if(_s2(p.scout_first)>240){
@@ -224,14 +243,73 @@ function coach_player(p,peers,mins,fast){
 
   // 15. 빠른무한(빨무) 전용 — 매판 같은 문구를 반복하지 않고, 조건이 걸릴 때만
   if(fast){
-    if(prodN<tgt||mxlv<2) T("tip","fast","빨무 핵심: 물량·업글·조합","남는 돈은 "+prodKo+"·업글·결정타로 — 조합된 물량이 전부야.");
-    if(workers>=26) T("tip","fast","일꾼이 너무 많음 (빨무)","12~20기면 충분 — 남는 인구는 병력으로.");
+    if(ph>0&&(prodN<tgt||mxlv<2)) T("tip","fast","빨무 핵심: 물량·업글·조합","남는 돈은 "+prodKo+"·업글·결정타로 — 조합된 물량이 전부야.");
+    // 일꾼 50 목표 — 빨무도 초반 일꾼 러시가 기본: 50기까지 쉼 없이, 그 뒤 전부 병력
+    var w50=(p.worker50_sec!=null)?p.worker50_sec:null;
+    if(w50!=null&&w50<=210) T("good","fast","일꾼 50기 "+_mmss(w50)+" 도달","빨무 정석 페이스 — 이 경제가 물량의 심장.");
+    else if(w50!=null&&w50<=330) T("tip","fast","일꾼 50기 "+_mmss(w50)+" — 조금 늦음","첫 2~3분은 일꾼에 올인해서 3분대 안에 50을 채우자.");
+    else if(w50!=null) T("tip","fast","일꾼 50기가 "+_mmss(w50)+"에야","너무 늦어 — 초반 일꾼 러시로 50기를 먼저, 병력은 그다음.");
+    else if(mins>=6&&workers<50) T("tip","fast","일꾼 "+workers+"기 — 50까지 채우자","빨무도 경제가 우선: 50기까지 쉼 없이 뽑고, 이후 전부 병력으로.");
     if(race==="P"&&mins>=8){
       if(!units["Shuttle"]&&!units["Reaver"]) T("tip","fast","셔틀 견제가 없음 (빨무)","셔틀 리버가 승리 공식 — 로보틱스부터.");
       else if(p.drops&&p.drops>=2) T("good","fast","셔틀 견제 운용 (빨무)","빨무 토스의 승리 공식 — 정면과 병행하면 더 강해.");
     }
     if(race==="T"&&mins>=8&&!(hasTankU&&units["Goliath"])) T("tip","fast","탱크+골리앗 축이 아직 (빨무)","넓게 펼친 탱크+골리앗으로 센터를 가르자.");
     if(race==="Z"&&oAny("Valkyrie")&&!units["Devourer"]) T("warn","fast","상대 발키리엔 디바우러 (빨무)","디바우러로 발키리를 걷어내야 화력이 살아.");
+  }
+
+  // 16. 물량 곡선 — 인구/일꾼 시계열 기반 (supply_series · worker50_sec · wipe 리필)
+  var SS=p.supply_series,STP=p.supply_step||15;
+  var t200s=p.supply200?_s2(p.supply200):null;
+  if(fast){
+    if(t200s!=null&&t200s<=420) T("good","fast","첫 200 "+p.supply200,"물량 엔진이 살아있어 — 한타 후에도 이 리필 속도가 승부를 가른다.");
+    else if(t200s!=null&&t200s>540) T("tip","fast","첫 200이 "+p.supply200+" — 늦음","생산 라인·라바 회전을 늘려 200 도달을 앞당기자. 빨무 승부는 200 리필 싸움.");
+    else if(t200s==null&&mins>=9) T("tip","fast","200을 못 채움 (최대 "+maxSup+")","자원은 무한 — 인구가 안 차는 건 생산 라인 문제. "+prodKo+"부터 점검.");
+  }
+  if(SS&&SS.length>8){
+    var _g0=-1,_gl=0,_best=null,_k;
+    for(_k=Math.max(1,Math.floor(120/STP));_k<SS.length;_k++){
+      if(SS[_k]-SS[_k-1]<0.5){if(_g0<0)_g0=_k-1;_gl=_k-_g0;}
+      else{if(_g0>=0&&_gl*STP>=60&&(!_best||_gl>_best.l))_best={s:_g0*STP,l:_gl};_g0=-1;_gl=0;}
+    }
+    if(_g0>=0&&_gl*STP>=60&&(!_best||_gl>_best.l))_best={s:_g0*STP,l:_gl};
+    if(_best&&_best.s<mins*60-45)
+      T("tip","prod","생산 공백 "+_mmss(_best.s)+"~"+_mmss(_best.s+_best.l*STP),
+        (fast?"빨무에선 치명적 — ":"")+Math.round(_best.l*STP)+"초 동안 생산이 멈췄어. 교전 중에도 생산 사이클은 계속 돌려야 물량이 유지돼.",_best.s);
+    (p._wipes||[]).slice(0,2).forEach(function(_ws){
+      var k0=Math.min(SS.length-1,Math.floor(_ws/STP)),k1=Math.min(SS.length-1,Math.floor((_ws+60)/STP));
+      if(k1<=k0)return;var _d=Math.max(0,SS[k1]-SS[k0]);
+      if(_d>=40) T("good","wipe","몰살 후 리필 +"+Math.round(_d)+" ("+_mmss(_ws)+")","병력을 크게 잃고 1분 만에 +"+Math.round(_d)+" 인구 재생산 — 빨무의 정답 그 자체.",_ws);
+      else T("tip","wipe",_mmss(_ws)+" 대량 손실 후 리필 저조","이후 1분 생산이 +"+Math.round(_d)+" 인구뿐 — 잃는 그 순간이 생산 최대 가동 타이밍이야.",_ws);
+    });
+  }
+
+  // 17. HUD 실측 (녹화자 전용) — 재-200 시간·200 회복 실패·자원 유휴는 화면에서 읽은 진짜 값
+  if(p._hud){
+    var HD=p._hud,st5=HD.step||5;
+    (HD.re200||[]).slice(0,2).forEach(function(rr){var dt=rr.t-rr.w;
+      if(dt<=50) T("good","wipe","재-200 "+_mmss(rr.t)+" — 몰살 후 "+dt+"초 (실측)","잃자마자 도로 꽉 채웠어. 이 리필 속도가 빨무의 체급이야.",rr.t);
+      else T("tip","wipe","재-200까지 "+dt+"초 ("+_mmss(rr.w)+"→"+_mmss(rr.t)+", 실측)","몰살 후 인구 복구가 느려 — 생산 라인 추가·예약 생산을 습관화하자.",rr.w);});
+    (HD.wipes||[]).forEach(function(wv){
+      if(!(HD.re200||[]).some(function(r){return r.w===wv;})&&(mins*60-wv)>60)
+        T("tip","wipe",_mmss(wv)+" 몰살 후 200 회복 실패 (실측)","경기 끝까지 인구를 못 되채웠어. 남는 자원부터 확인하고 생산에 전부 환원.",wv);});
+    if(HD.mn&&HD.mn.length>12){var hoard=0,hs=0,q;
+      for(q=12;q<HD.mn.length;q++){var m60=Math.min.apply(null,HD.mn.slice(q-12,q+1));
+        if(m60>hoard){hoard=m60;hs=Math.max(0,q*st5-(HD.lead||0));}}
+      var lim=fast?1500:800;
+      if(hoard>=lim) T("tip","fast","미네랄 "+hoard+" 유휴 — "+_mmss(hs)+" 부근 (실측)","1분 내내 이만큼이 안 쓰였어. "+(fast?"빨무에서 노는 미네랄 = 안 나온 병력.":"생산·확장에 즉시 환원하자."),hs);
+      else if(fast&&mins>=8) T("good","fast","자원 회전 우수 (실측)","미네랄 유휴가 "+lim+" 미만 — 캐는 족족 병력으로. 물량의 비결.");}
+  }
+
+  // 18. 종료 점수판 (실측) — 총점/자원 점수 상대 비교
+  if(p._es&&p._esAll){
+    var _nm2=Object.keys(p._esAll);
+    if(_nm2.length>=2){
+      var _tops=_nm2.reduce(function(m2,k2){return Math.max(m2,p._esAll[k2].t||0);},0);
+      var _topr=_nm2.reduce(function(m2,k2){return Math.max(m2,p._esAll[k2].r||0);},0);
+      if((p._es.t||0)===_tops&&_tops>0) T("good","score","점수판 총점 1위 ("+p._es.t+")","종료 점수판 실측 — 생산·파괴·채취 모두에서 판을 지배했어.");
+      if(_topr>0&&(p._es.r||0)<_topr*0.6) T("tip","score","자원 채취 열세 (점수판 "+p._es.r+" vs 최고 "+_topr+")","일꾼 가동이 밀렸단 뜻 — 일꾼 충원과 분산 채취부터.");
+    }
   }
 
   // 총평 (강점 + 1순위 개선 + 격려)
@@ -244,20 +322,22 @@ function coach_player(p,peers,mins,fast){
   if(p.drops&&p.drops>=3) strong.push("견제");
   var hasTank2=units["Siege Tank (Tank Mode)"]||units["Siege Tank (Siege Mode)"];
   var fixes=[];
-  if(mxlv===0&&(haslv||up_n===0)) fixes.push("공·방 업그레이드");
-  if(race==="P"&&!units["High Templar"]&&!units["Archon"]) fixes.push("하이템플러 스톰");
+  if(mins>=7&&mxlv===0&&(haslv||up_n===0)) fixes.push("공·방 업그레이드");
+  if(mins>=7&&race==="P"&&!units["High Templar"]&&!units["Archon"]) fixes.push("하이템플러 스톰");
   if(race==="Z"&&mins>=12&&!hiveTech) fixes.push("하이브 전환(디파일러)");
   if(race==="T"&&mins>=8&&!hasTank2) fixes.push("시즈탱크");
   if(race==="T"&&marine>=12&&medic===0) fixes.push("메딕 추가");
   if(prodN<Math.max(2,tgt*0.6)) fixes.push(prodKo+" 수 늘리기");
-  if(race==="Z"&&!units["Lurker"]&&!units["Defiler"]) fixes.push("럴커");
+  if(mins>=8&&race==="Z"&&!units["Lurker"]&&!units["Defiler"]) fixes.push("럴커");
   if(maxSup>=190&&!have_wt.length&&!fixes.length) fixes.push("결정타 유닛 전환");
   if(mxlv>0&&mxlv<3&&!fixes.length) fixes.push("3업까지");
+  if(ph===0&&!fast&&(p.scouted===0||!p.scout_first)) fixes.unshift("초반 정찰");
   var sstr=strong.length?strong.slice(0,3).join("·"):null;
   var verdict;
   if(!fixes.length) verdict=sstr?("이번 판은 군더더기 없이 탄탄해 — "+sstr+"까지 다 챙겼어. 이대로면 한타도 후반도 강해."):"무난하게 잘 풀어낸 한 판이야.";
   else if(fixes.length===1) verdict=(sstr?(sstr+"까진 잘 갖췄어. "):"")+"딱 하나, "+fixes[0]+"만 더 챙기면 한 단계 올라가.";
   else verdict=(sstr?("강점은 "+sstr+". "):"")+"개선 1순위는 "+fixes[0]+", 그다음 "+fixes[1]+" — 이 둘만 잡으면 확 달라져.";
+  if(ph===0) verdict="~"+Math.round(mins)+"분 초반전이라 긴 게임 지표(업글·조합·멀티)는 평가에서 뺐어. "+verdict;
 
   // 5축 등급 (S/A/B/C) — 리포트 상단 요약용
   var coreOK=race==="T"?!!hasTank2:(race==="P"?!!(units["High Templar"]||units["Archon"]):!!(units["Lurker"]||hiveTech));
@@ -265,8 +345,8 @@ function coach_player(p,peers,mins,fast){
   var g_har=(p.drops==null&&!p.atk_first)?null:((p.drops||0)>=3?"S":(p.drops||0)>=1?"A":(p.atk_first&&_s2(p.atk_first)<=420?"B":"C"));
   var grades=[
     {k:"생산",g:prodN>=tgt+2?"S":prodN>=tgt?"A":prodN>=Math.max(2,tgt*0.6)?"B":"C"},
-    {k:"업글",g:(!haslv&&up_n===0)?"C":(mxlv>=3?"S":mxlv===2?"A":mxlv===1?"B":"C")},
-    {k:"조합",g:have_wt.length>=2?"S":(have_wt.length?"A":(coreOK?"B":"C"))},
+    {k:"업글",g:ph===0?null:((!haslv&&up_n===0)?"C":(mxlv>=3?"S":mxlv===2?"A":mxlv===1?"B":"C"))},
+    {k:"조합",g:ph===0?null:(have_wt.length>=2?"S":(have_wt.length?"A":(coreOK?"B":"C")))},
     {k:"가동률",g:g_cont},
     {k:"견제",g:g_har}
   ].filter(function(x){return x.g;});
@@ -289,9 +369,14 @@ function coach_report(a){
       uset:new Set(Object.keys(units).filter(n=>units[n].n>0))});
   });
   var fast=/(빨무|빠무|무한|fastest)/i.test((a.meta&&a.meta.map)||"");
+  var _wmap={};((a.highlights)||[]).forEach(function(h){if(h&&h.kind==='wipe'&&h.who){(_wmap[h.who]=_wmap[h.who]||[]).push(h.sec||0);}});
   const out=[];
   (a.players||[]).forEach((p,i)=>{
     const peers=base.filter((b,j)=>j!==i);
+    p._wipes=_wmap[p.name]||[];
+    p._hud=(a.hud&&a.hud.who===p.name)?a.hud:null;
+    p._es=(a.endscore&&a.endscore[p.name])||null;
+    p._esAll=a.endscore||null;
     const r=coach_player(p,peers,mins,fast);
     out.push({id:p.id,name:p.name,race:p.race,timings:r[0],points:r[1],verdict:(fast?"[빠른무한 모드] ":"")+r[2],grades:r[3]||[]});
   });

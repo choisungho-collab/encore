@@ -385,6 +385,30 @@ svg{display:block}
 .thl span b{color:var(--acc-ink);font-weight:700;font-family:var(--fm);margin-right:3px}
 .thl{display:flex;flex-wrap:wrap;gap:7px;margin-top:11px}
 .thl span{font-family:var(--fm);font-size:12px;color:var(--dim);background:var(--well);border:1px solid var(--line);padding:5px 10px;border-radius:6px}.coach{margin-top:30px;border-top:1px solid var(--line);padding-top:24px}.coachh{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.cnote{font-family:var(--fd);font-size:11.5px;color:var(--dim);font-weight:500;letter-spacing:0}.cverdict{margin:14px 0 0;padding:14px 16px;border-radius:13px;background:var(--acc-soft);border:1px solid var(--acc-line);display:flex;gap:11px;align-items:flex-start}.cvl{flex:none;font-family:var(--fm);font-size:10.5px;letter-spacing:.12em;color:var(--acc-ink);background:rgba(199,210,225,.14);border:1px solid var(--acc-line);padding:3px 8px;border-radius:6px;margin-top:1px}.cvt{font-family:var(--fd);font-size:14.5px;line-height:1.6;color:var(--ink);font-weight:500}.ccard{border:1px solid var(--line);border-left-width:3px;border-radius:13px;padding:14px 16px;background:var(--surface)}.ccard .cct{display:flex;align-items:center;gap:9px;margin-bottom:7px}.ccard .cci{display:inline-flex;color:var(--dim)}.ccard .cci .ic{width:17px;height:17px}.ccard .cct b{font-weight:700;font-size:15.5px;color:var(--ink)}.ccard p{margin:0;font-size:14.5px;line-height:1.7;color:var(--ink2)}.ccard.cg{border-color:var(--acc-line);background:var(--acc-soft);border-left-color:var(--acc)}.ccard.cg .cci{color:var(--acc-ink)}.ccard.cg .cct b{color:var(--acc-ink)}.ccard.cw{border-color:rgba(232,105,76,.42);background:rgba(232,105,76,.09);border-left-color:var(--loss)}.ccard.ct{border-color:rgba(231,167,63,.34);background:rgba(231,167,63,.07);border-left-color:var(--gold)}.ccard.ct .cci{color:var(--gold)}.ccard.ct .cct b{color:var(--gold)}.cpri{margin-left:auto;font-family:var(--fm);font-size:9px;font-weight:700;letter-spacing:.05em;color:var(--loss);background:rgba(232,105,76,.14);border:1px solid rgba(232,105,76,.4);border-radius:6px;padding:2px 6px;flex:none}.ccln{font-family:var(--fm);font-size:10px;font-weight:700;color:var(--faint);background:var(--well);border:1px solid var(--line);border-radius:6px;padding:1px 6px;margin-left:2px}.ccard.cw .cci{color:var(--loss)}.ccard.cw .cct b{color:var(--loss)}.cnone{color:var(--faint);font-size:13px;padding:6px 2px}
+/* 인구 곡선 카드 — 생산 누적 기준, 교전(점선 코랄)/몰살(실선 레드) 세로 마커 */
+.supcard{margin:4px 0 18px;padding:16px 18px 14px;border:1px solid var(--line);border-radius:var(--r1);background:var(--surface)}
+.supcard .ch{margin-bottom:10px}
+.supsvg{width:100%;height:auto;display:block}
+.supsvg .sg{stroke:var(--line);stroke-width:1}
+.supsvg .sgx{stroke:var(--line);opacity:.45;stroke-dasharray:2 4}
+.supsvg .sl{font-family:var(--fm);font-size:10px;fill:var(--faint)}
+.supleg{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:11px}
+.spl{display:inline-flex;align-items:center;gap:7px;font-family:var(--fd);font-size:12.5px;font-weight:600;color:var(--ink2)}
+.spl i{width:12px;height:3px;border-radius:2px;flex:0 0 auto}
+.spl em{font-style:normal;font-family:var(--fm);font-size:11px;font-weight:600;color:var(--dim)}
+.spl .ihud{height:5px;box-shadow:0 0 0 1.5px rgba(255,255,255,.5)}
+.supcard .chsub{margin:14px 0 8px}
+.escard table{width:100%;border-collapse:collapse;font-family:var(--fm)}
+.escard th{font-size:10.5px;font-weight:700;letter-spacing:.08em;color:var(--faint);text-align:right;padding:4px 8px;border-bottom:1px solid var(--line)}
+.escard th:first-child{text-align:left}
+.escard td{font-size:13px;color:var(--ink2);text-align:right;padding:7px 8px;border-bottom:1px solid var(--line)}
+.escard tr:last-child td{border-bottom:0}
+.escard td.pn2{text-align:left;font-family:var(--fd);font-weight:600;color:var(--ink);display:flex;align-items:center;gap:8px}
+.escard td.pn2 i{width:9px;height:9px;border-radius:50%;flex:0 0 auto}
+.escard td.tt{font-weight:700;color:var(--ink)}
+.escard tr.top td.tt{color:var(--gold)}
+@media(max-width:600px){.escard td,.escard th{padding:6px 5px;font-size:12px}}
+@media(max-width:600px){.supcard{padding:13px 13px 11px}.supleg{gap:6px 12px}.spl{font-size:12px}.spl em{font-size:10.5px}}
 .ccols{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:4px}
 .ccol{display:grid;gap:11px;align-content:start}
 .cclh{font-family:var(--fh);font-weight:800;font-size:13px;letter-spacing:.01em;padding:0 0 4px;display:flex;align-items:center;gap:7px}
@@ -664,7 +688,7 @@ svg{display:block}
 .mlabel{display:block;font-weight:600;font-size:13px;color:var(--ink);line-height:1.25}
 .mwho{font-family:var(--fd);font-size:11.5px;color:var(--dim);margin-top:0}
 .tl-rail{height:3px;background:var(--line2);top:45px}
-.mk.kb{color:#ff9d7a}.mk.kt{color:var(--acc-ink)}.mk.ke{color:#7ad0c0}.mk.kd{color:#c4a0ff}.mk.kg{color:#f0c574}
+.mk.kb{color:#ff9d7a}.mk.kt{color:var(--acc-ink)}.mk.ke{color:#7ad0c0}.mk.kd{color:#c4a0ff}.mk.kg{color:#f0c574}.mk.kw{color:#ff8f8f}
 .mk .pin{width:9px;height:9px;border-width:2px}
 .mk:hover .pin{transform:scale(1.25)}
 .legend{gap:8px 14px;font-size:11px;color:var(--faint)}
@@ -799,7 +823,8 @@ svg{display:block}
 
   /* ══ 원점 재설계: 유튜브 문법 ══ */
   /* 영상 풀블리드 (좌우 화면 끝까지, 각 없이) */
-  .vcol .stage{width:100vw;max-width:100vw;margin-left:calc(50% - 50vw);margin-right:calc(50% - 50vw);border-radius:0;box-shadow:none}
+  /* 풀블리드: 87행 .stage:not(.mvon):not(:fullscreen){width:100%} 의 특이성(0,3,0)을 이겨야 함 → !important */
+  .vcol .stage:not(:fullscreen){width:100vw!important;max-width:100vw;margin-left:calc(50% - 50vw);margin-right:calc(50% - 50vw);border-radius:0;box-shadow:none}
   body.pg-watch .hero{display:none}   /* 시청 페이지: 클릭 전 이미 아는 정보 — 제거. 분석 진입은 순간 스트립의 📊 칩 */
   /* (분석 페이지 hero 언박스) */
   .hero{background:none;border:0;border-radius:0;box-shadow:none;margin:9px 0 0;padding:2px 0 10px;border-bottom:1px solid var(--line)}
@@ -821,7 +846,6 @@ svg{display:block}
   .tlcard .tl{display:none}
   .hlchips{display:flex;flex-direction:column;gap:9px;padding:6px 0 2px}
   .hlrow{display:flex;align-items:center;gap:11px;min-width:0}
-  .hlrow.hlhead{justify-content:space-between;margin-bottom:1px}
   .hlab{flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;font-family:var(--fd);font-size:12.5px;font-weight:700;font-style:normal;color:var(--ink2);min-width:44px}
   .hlab::before{content:'';width:7px;height:7px;border-radius:50%;background:currentColor}
   .hlab.hg{color:var(--gold);min-width:0}
@@ -837,6 +861,7 @@ svg{display:block}
   .hlc.ke{border-color:rgba(143,227,192,.4)}.hlc.ke b{color:#8fe3c0}
   .hlc.kd{border-color:rgba(201,179,255,.45)}.hlc.kd b{color:#c9b3ff}
   .hlc.kg{border-color:rgba(224,180,65,.5)}.hlc.kg b{color:var(--gold)}
+  .hlc.kw{border-color:rgba(255,122,122,.55)}.hlc.kw b{color:#ff9b9b}.hlc.kw span{color:#ffb4b4}
 }
 @media(max-width:380px){
   .povtab .pvnm{max-width:82px}
@@ -993,6 +1018,8 @@ body.pg-analysis .main,body.pg-analysis section.comm{display:none!important}
 
  <section class="analysis">
   <div class="ahead"><h2>분석</h2></div>
+  <div class="supcard" id="supcard" hidden></div>
+  <div class="supcard escard" id="endscard" hidden></div>
   <div class="seg"><button class="on" data-v="one">선수별 상세</button><button data-v="cmp">전체 빌드 비교</button></div>
   <div id="oneview"><div class="split"><div class="rail" id="rail"></div><div class="panel" id="panel"></div></div></div>
   <div id="cmpview" hidden><div id="vsbox"></div><div class="cmp" id="cmp"></div></div>
@@ -1081,7 +1108,7 @@ const I={
  info:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>'
 };
 const KICON={battle:I.swords,tech:I.beaker,expand:I.expand,drop:I.download,gg:I.trophy};
-const KCLASS={battle:'kb',tech:'kt',expand:'ke',drop:'kd',gg:'kg'};
+const KCLASS={battle:'kb',tech:'kt',expand:'ke',drop:'kd',gg:'kg',wipe:'kw'};
 const RACE={ran:'테란',zerg:'저그',toss:'프로토스'};
 const RACE_EN={ran:'TERRAN',zerg:'ZERG',toss:'PROTOSS'};
 const RID=r=>({ran:'T',zerg:'Z',toss:'P'}[r]||(r||'?').slice(0,1).toUpperCase());
@@ -1969,6 +1996,59 @@ document.getElementById('hlnote').innerHTML=I.info+'교전은 다수 선수 동�
 
 // timeline + moments
 const HL=augmentHL(DATA.highlights||[]);
+// ── 인구 곡선 (생산 누적) — 첫 200 도달·생산 공백이 그래프로, 교전/몰살은 세로 마커로
+function renderSupplyChart(){
+ const el=document.getElementById('supcard'); if(!el) return;
+ const PS=(DATA.players||[]).filter(p=>p.supply_series&&p.supply_series.length>2);
+ if(!PS.length){el.remove();return;}
+ el.hidden=false;
+ const ST=PS[0].supply_step||15;
+ const gl=Math.max(...PS.map(p=>(p.supply_series.length-1)*ST));
+ const W=680,H=192,L=34,R=10,T2=12,B=26,pw=W-L-R,ph2=H-T2-B;
+ const X=t=>L+pw*Math.min(1,t/gl), Y=v=>T2+ph2*(1-Math.min(200,v)/200);
+ let g='';
+ [0,100,200].forEach(v=>{g+=`<line x1="${L}" y1="${Y(v)}" x2="${W-R}" y2="${Y(v)}" class="sg"/><text x="${L-6}" y="${Y(v)+3.5}" class="sl" text-anchor="end">${v}</text>`;});
+ const stp=gl>12*60?300:120;
+ for(let t=stp;t<gl;t+=stp) g+=`<line x1="${X(t)}" y1="${T2}" x2="${X(t)}" y2="${H-B}" class="sgx"/><text x="${X(t)}" y="${H-9}" class="sl" text-anchor="middle">${Math.round(t/60)}분</text>`;
+ (HL||[]).forEach(h=>{if(h.kind!=='battle'&&h.kind!=='wipe')return;const wp=h.kind==='wipe';
+   g+=`<line x1="${X(h.sec)}" y1="${T2}" x2="${X(h.sec)}" y2="${H-B}" stroke="${wp?'#ff8f8f':'#f0a98e'}" stroke-width="${wp?1.5:1}" ${wp?'':'stroke-dasharray="3 3"'} opacity=".6"/>`;});
+ PS.forEach(p=>{const pts=p.supply_series.map((v,k)=>X(k*ST).toFixed(1)+','+Y(v).toFixed(1)).join(' ');
+   g+=`<polyline points="${pts}" fill="none" stroke="${p.color||'#9fb2d9'}" stroke-width="2" stroke-linejoin="round" opacity="${(DATA.hud&&DATA.hud.who===p.name)?'.35':'.92'}"/>`;});
+ // 실측 오버레이 (녹화자): HUD OCR — 사망 반영된 진짜 인구
+ const HD=DATA.hud&&DATA.hud.sup&&DATA.hud.sup.length>3?DATA.hud:null;
+ if(HD){const sp2=(DATA.players||[]).find(p=>p.name===HD.who)||{};const c=sp2.color||'#e8eefc';
+   const st5=HD.step||5,ld=HD.lead||0;
+   const pts=HD.sup.map((v,k)=>{const t=k*st5-ld;return t<0?null:(X(t).toFixed(1)+','+Y(v).toFixed(1));}).filter(Boolean).join(' ');
+   g+=`<polyline points="${pts}" fill="none" stroke="rgba(255,255,255,.55)" stroke-width="4.2" stroke-linejoin="round"/>`;
+   g+=`<polyline points="${pts}" fill="none" stroke="${c}" stroke-width="2.4" stroke-linejoin="round"/>`;}
+ const mm=s2=>s2==null?'—':(Math.floor(s2/60)+':'+String(s2%60).padStart(2,'0'));
+ const leg=PS.map(p=>`<span class="spl"><i style="background:${p.color||'#9fb2d9'}"></i>${esc(p.name||'—')}<em>200 ${p.supply200||'—'} · 일꾼50 ${mm(p.worker50_sec)}</em></span>`).join('')
+   +(HD?`<span class="spl"><i class="ihud" style="background:${((DATA.players||[]).find(p=>p.name===HD.who)||{}).color||'#e8eefc'}"></i>실측 인구(${esc(HD.who)}·사망 반영)</span>`:'');
+ let rsvg='';
+ if(HD&&HD.mn&&HD.mn.length>3){const st5=HD.step||5,ld=HD.lead||0,H2=86,B2=18,T3=8;
+   const mx=Math.max(1000,Math.ceil(Math.max(...HD.mn)/500)*500);
+   const Y2=v=>T3+(H2-T3-B2)*(1-Math.min(mx,v)/mx);
+   let r2=`<line x1="${L}" y1="${Y2(0)}" x2="${W-R}" y2="${Y2(0)}" class="sg"/><text x="${L-6}" y="${Y2(mx)+3.5}" class="sl" text-anchor="end">${mx>=1000?(mx/1000)+'k':mx}</text><text x="${L-6}" y="${Y2(0)+3.5}" class="sl" text-anchor="end">0</text>`;
+   const mp=HD.mn.map((v,k)=>{const t=k*st5-ld;return t<0?null:(X(t).toFixed(1)+','+Y2(v).toFixed(1));}).filter(Boolean).join(' ');
+   r2+=`<polyline points="${mp}" fill="none" stroke="#d9c07a" stroke-width="1.8" stroke-linejoin="round"/>`;
+   if(HD.gs){const gp=HD.gs.map((v,k)=>{const t=k*st5-ld;return t<0?null:(X(t).toFixed(1)+','+Y2(v).toFixed(1));}).filter(Boolean).join(' ');
+     r2+=`<polyline points="${gp}" fill="none" stroke="#79c8b4" stroke-width="1.4" opacity=".85"/>`;}
+   rsvg=`<div class="ch chsub">자원 잔량 <span class="cnote">실측(녹화자) · <span style="color:#d9c07a">미네랄</span>/<span style="color:#79c8b4">가스</span> — 쌓이면 생산 부족</span></div><svg viewBox="0 0 ${W} ${H2}" class="supsvg" preserveAspectRatio="xMidYMid meet">${r2}</svg>`;}
+ el.innerHTML=`<div class="ch">인구 곡선 <span class="cnote">얇은 선=생산 누적 · 굵은 선=실측 · 세로선 <span style="color:#f0a98e">교전</span>/<span style="color:#ff8f8f">몰살</span></span></div><svg viewBox="0 0 ${W} ${H}" class="supsvg" preserveAspectRatio="xMidYMid meet">${g}</svg><div class="supleg">${leg}</div>${rsvg}`;
+}
+try{renderSupplyChart();}catch(_e){}
+function renderEndScore(){
+ const el=document.getElementById('endscard'); if(!el) return;
+ const ES=DATA.endscore; const nm=ES?Object.keys(ES):[];
+ if(!nm.length){el.remove();return;}
+ el.hidden=false;
+ const col=n=>((DATA.players||[]).find(p=>p.name===n)||{}).color||'#9fb2d9';
+ const top=nm.reduce((m2,k)=>Math.max(m2,ES[k].t||0),0);
+ const rows=nm.sort((a2,b2)=>(ES[b2].t||0)-(ES[a2].t||0)).map(n=>{const v=ES[n];
+  return `<tr class="${(v.t||0)===top?'top':''}"><td class="pn2"><i style="background:${col(n)}"></i>${esc(n)}</td><td>${v.u??'—'}</td><td>${v.s??'—'}</td><td>${v.r??'—'}</td><td class="tt">${v.t??'—'}</td></tr>`;}).join('');
+ el.innerHTML=`<div class="ch">종료 점수판 <span class="cnote">실측 OCR · 유닛+건물+자원=총점 체크섬 검증</span></div><table><thead><tr><th>플레이어</th><th>유닛</th><th>건물</th><th>자원</th><th>총점</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+try{renderEndScore();}catch(_e){}
 if(HL.length){
  const tl=document.getElementById('tl');
  tl.innerHTML='<div class="tl-rail"><div class="tl-fill" id="tlfill"></div></div><div class="tl-head" id="tlhead" style="left:0"></div>';
@@ -1982,16 +2062,12 @@ if(HL.length){
    const _tc=document.getElementById('tlcard');
    if(_tc&&!document.getElementById('hlchips')){
      const cw=document.createElement('div');cw.className='hlchips';cw.id='hlchips';
-     const _short=t=>String(t||'').replace('GG — 경기 종료','GG').replace(/^첫\s+/,'').replace('드랍 견제','드랍');
-     const _KO={battle:'교전',tech:'테크',drop:'드랍',expand:'확장',gg:'GG'};
-     const _ORD=['battle','tech','drop','expand','gg'];
-     // 종류별 행: 색점 라벨 + 아웃라인 칩(행마다 가로 스크롤). 확장·GG 는 시간만.
-     let _rows=`<div class="hlrow hlhead"><i class="hlab hg">하이라이트</i><a class="hla" href="analysis.html?id=${encodeURIComponent(MID)}">📊 분석</a></div>`;
-     _ORD.forEach(k=>{const arr=HL.filter(h=>h.kind===k);if(!arr.length)return;
-       const chips=arr.map(h=>{const lb=_short(h.label);const showLb=(k==='battle'||k==='tech'||k==='drop')&&lb&&lb!==_KO[k];
-         return `<button class="hlc ${KCLASS[k]}" data-s="${h.sec}"><b>${h.t||fmt(h.sec)}</b>${showLb?`<span>${esc(lb)}</span>`:''}</button>`;}).join('');
-       _rows+=`<div class="hlrow"><i class="hlab ${KCLASS[k]}">${_KO[k]}</i><div class="hlrc">${chips}</div></div>`;});
-     cw.innerHTML=_rows;
+     const _short=t=>String(t||'').replace('GG — 경기 종료','GG').replace('병력 대량 손실','몰살').replace(/^첫\s+/,'');
+     // 하이라이트 한 줄: 교전·드랍(+마무리 GG)만 — 테크·확장은 분석 페이지 몫
+     const _keep=HL.filter(h=>h.kind==='battle'||h.kind==='drop'||h.kind==='gg'||h.kind==='wipe');
+     const _chips=_keep.map(h=>{const lb=_short(h.label);const showLb=(h.kind==='battle'||h.kind==='wipe')&&lb;
+       return `<button class="hlc ${KCLASS[h.kind]}" data-s="${h.sec}"><b>${h.t||fmt(h.sec)}</b>${showLb?`<span>${esc(lb)}</span>`:(h.kind==='gg'?'<span>GG</span>':'')}</button>`;}).join('');
+     cw.innerHTML=`<div class="hlrow"><i class="hlab hg">하이라이트</i><div class="hlrc">${_chips}</div><a class="hla" href="analysis.html?id=${encodeURIComponent(MID)}">📊 분석</a></div>`;
      cw.querySelectorAll('button.hlc').forEach(b=>b.onclick=()=>seek(+b.dataset.s));
      _tc.appendChild(cw);
    }

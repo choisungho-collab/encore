@@ -155,7 +155,7 @@ import queue as _queue
 from collections import deque as _deque
 GUI_Q = _queue.Queue(maxsize=4000)
 LOG_BUF = _deque(maxlen=400)   # 로그창이 닫혀 있어도 최근 로그를 항상 보관(열면 즉시 채움)
-APP_VERSION = "1.7.10"
+APP_VERSION = "1.9.1"
 REC_STATE = {"recording": False, "encoder": "", "ready": False}
 LAST_ERR = {"msg": "", "t": 0.0}
 UP_DONE = {"t": 0.0, "shown": 0.0}
@@ -723,6 +723,7 @@ def extract_analysis(rep_path):
             "cmd_mix": Counter(), "hotkey_n": 0, "groups": set(), "drops": 0, "pings": 0,
             "scout_bases": set(), "scout_first_fr": None, "atk_first_fr": None, "drop_first_fr": None,
             "aggr_series": [0]*nbins, "train_frames": [], "combat_fine": [0]*cf_n,
+            "cf_x": [0.0]*cf_n, "cf_y": [0.0]*cf_n, "cf_p": [0]*cf_n, "_th_pos": [],
             "start": ((pd.get("StartLocation") or {}).get("X"), (pd.get("StartLocation") or {}).get("Y"))}
         order.append(pid)
     NEAR2 = 800*800   # 적 본진 반경^2 (정찰/공격 판정)
@@ -742,6 +743,8 @@ def extract_analysis(rep_path):
             pl["combat_fine"][min(cf_n-1, int(f/FPS_GAME//CF_STEP))] += 1
             _ps = c.get("Pos") or {}; _x = _ps.get("X"); _y = _ps.get("Y")
             if _x is not None:
+                _kc = min(cf_n-1, int(f/FPS_GAME//CF_STEP))   # 팀 무게중심 계산용 좌표 누적
+                pl["cf_x"][_kc] += _x; pl["cf_y"][_kc] += _y; pl["cf_p"][_kc] += 1
                 for (_ex, _ey) in enemy_starts.get(pid, []):
                     if _ex is not None and (_x-_ex)**2 + (_y-_ey)**2 <= NEAR2:
                         _mf = f/FPS_GAME/60
@@ -756,8 +759,9 @@ def extract_analysis(rep_path):
             pl["hotkey_n"] += 1; _g = c.get("Group")
             if (c.get("HotkeyType") or {}).get("Name") == "Assign" and _g is not None: pl["groups"].add(_g)
         elif tn == "Unload":
-            pl["drops"] += 1; pl.setdefault("drop_frames", []).append(f)
-            if pl["drop_first_fr"] is None: pl["drop_first_fr"] = f
+            _ps = c.get("Pos") or {}
+            pl["drops"] += 1
+            pl.setdefault("drop_frames", []).append((f, _ps.get("X"), _ps.get("Y")))
         elif tn == "Minimap Ping": pl["pings"] += 1
         uname = (c.get("Unit") or {}).get("Name")
         if tn == "Build":
@@ -768,7 +772,9 @@ def extract_analysis(rep_path):
                 _bs.add(_bk)
                 pl["build"].append({"t": mmss(f), "name": uname, "cat": "building"})
                 pl["cost_events"].append((f,)+BUILD_MG.get(uname,(0,0)))
-                if uname in TOWN_HALLS: pl["townhalls"].append({"t": mmss(f), "name": uname})
+                if uname in TOWN_HALLS:
+                    pl["townhalls"].append({"t": mmss(f), "name": uname})
+                    pl["_th_pos"].append((f, _bx if _bx is not None else None, _by if _by is not None else None))
         elif tn == "Building Morph":
             pl["build"].append({"t": mmss(f), "name": uname, "cat": "morph"})
             pl["cost_events"].append((f,)+BUILD_MG.get(uname,(0,0)))
@@ -785,6 +791,7 @@ def extract_analysis(rep_path):
             if uname and ik == 0:  # 유효 명령만 집계(대기열 넘침 연타 제외)
                 pl["units"][uname] += 1
                 if uname in ("Probe","SCV","Drone"): pl.setdefault("worker_fr", []).append(f)
+                if uname == "Overlord": pl.setdefault("ovie_fr", []).append(f)
                 pl["cost_events"].append((f,)+UNIT_MG.get(uname,(0,0)))
                 if uname not in pl["unit_first"]: pl["unit_first"][uname] = mmss(f)
                 if tn == "Train" or (tn == "Unit Morph" and uname not in MORPH_FROM_UNIT):
@@ -800,12 +807,18 @@ def extract_analysis(rep_path):
         _cap_sup = sum(pl["units"].get(k, 0) * UNIT_SUPPLY.get(k, 1)
                        for k in pl["units"] if k not in MORPH_FROM_UNIT)
         _sr = (_cap_sup / _eff_sup) if _eff_sup else 1.0
+        pl["_sup_raw"] = list(pl["supply_events"])   # HUD 앵커 예측용 원본(정수) 보존
         pl["supply_events"] = [(fr, sp * _sr) for fr, sp in pl["supply_events"]]
         us = sorted(pl["units"].items(), key=lambda kv: -kv[1])
         ev = sorted(pl["supply_events"]); cum = 0; t200 = None
         for fr, sup in ev:
             cum += sup
             if t200 is None and cum >= 200: t200 = mmss(fr)
+        _ss, _ws, _w50 = _supply_worker_series(ev, pl.get("worker_fr", []), frames, FPS_GAME)
+        _hz = min([p2["atk_first_fr"] for p2 in players.values() if p2.get("atk_first_fr") is not None]
+                  or [int(240 * FPS_GAME)])
+        _hz = max(int(40 * FPS_GAME), min(_hz - int(5 * FPS_GAME), int(240 * FPS_GAME)))
+        _anch = _hud_anchor_series(rl, pl.get("_sup_raw"), pl["build"], pl.get("ovie_fr"), _hz, FPS_GAME)
         prodn = sum(1 for b in pl["build"] if b["cat"] in ("building", "morph") and b["name"] in PROD_BUILDINGS)
         rl = pl.get("rl") if pl.get("rl") in ("P","T","Z") else _coach_race(pl["race"], list(pl["units"]))
         atk_lv = max([_upgrade_level(pl["up_fr"].get(n, [])) for n in GND_ATK.get(rl, [])] or [0])
@@ -825,11 +838,15 @@ def extract_analysis(rep_path):
         sup_cap = sup_bld * 8 + 9   # 대략적 인구 한도 (본진 보급 + 서플건물/오버로드 ×8)
         mp_name, mp_ko = MAIN_PROD.get(rl, ("Gateway", "생산건물"))
         mp_n = sum(1 for b in pl["build"] if b["name"] == mp_name)
-        _drf = sorted(pl.get("drop_frames", [])); _dsec = []
-        for _fr in _drf:
-            _s = int(max(0, _fr)/FPS_GAME)
-            if not _dsec or _s - _dsec[-1] >= 12: _dsec.append(_s)   # ~12초 내 연속 언로드 = 한 번의 드랍
+        # 드랍 좌표 검증: 적 스타트/적 타운홀 반경(1200px) 안에서 내린 Unload 만 '드랍 견제'.
+        # (자기 본진에 짐 내리는 수송·회군은 제외. 좌표 없는 구형 데이터는 관대하게 통과.)
+        _eanch = list(enemy_starts.get(pl["id"], []))
+        for _o in order:
+            if players[_o]["team"] != pl["team"]:
+                _eanch.extend((_tx2, _ty2) for (_tf2, _tx2, _ty2) in players[_o]["_th_pos"] if _tx2 is not None)
+        _dsec, pl["drop_first_fr"] = _valid_drop_secs(pl.get("drop_frames", []), _eanch, FPS_GAME)
         res.append({"id": pl["id"], "name": pl["name"], "race": pl["race"], "rl": rl, "team": pl["team"],
+            "start": ([pl["start"][0], pl["start"][1]] if pl["start"][0] is not None else None),
             "color": pl["color"], "apm": pl["apm"], "eapm": pl["eapm"], "build": pl["build"],
             "units": [{"name": k, "n": v, "first": pl["unit_first"].get(k)} for k, v in us],
             "townhalls": pl["townhalls"], "apm_series": pl["apm_series"], "aggr_series": pl["aggr_series"],
@@ -842,6 +859,8 @@ def extract_analysis(rep_path):
             "prod_active": (round(100*len(set(int(x/FPS_GAME//60) for x in tf))/max(1,(max(set(int(x/FPS_GAME//60) for x in tf))-min(set(int(x/FPS_GAME//60) for x in tf))+1))) if tf else 0),
             "cmd_mix": dict(pl["cmd_mix"]), "combat_fine": pl["combat_fine"],
             "max_supply": min(cum, 200), "total_supply": cum, "supply200": t200, "prod": prodn, "resource_series": resource_series,
+            "supply_series": _ss, "supply_step": SS_STEP, "worker_series": _ws, "worker50_sec": _w50,
+            "sup_anchor": (_anch if len(_anch) >= 6 else None),
             "up_timed": _ut, "worker_ms": _wms, "worker_ko": WORKER_KO.get(rl, "일꾼"),
             "atk_lv": atk_lv, "arm_lv": arm_lv, "supply_bld": sup_bld, "supply_cap": sup_cap, "supply_ko": sup_ko,
             "main_prod_n": mp_n, "main_prod_ko": mp_ko,
@@ -859,12 +878,18 @@ def extract_analysis(rep_path):
                       or _identity_saver_fallback([p.get("Name") for p in (h.get("Players") or [])]))}
     leave_list = sorted([{"sec": int(max(0, fr)/FPS_GAME), "t": mmss(fr), "name": (players.get(pid) or {}).get("name")}
                          for fr, pid in leaves], key=lambda x: x["sec"])
-    team_fine = {}
+    team_fine = {}; team_cx = {}; team_cy = {}; team_cp = {}
     for pid in order:
         _t = players[pid]["team"]; _cf = players[pid]["combat_fine"]
         _tf = team_fine.setdefault(_t, [0]*cf_n)
-        for _k in range(cf_n): _tf[_k] += _cf[_k]
-    combat_fine = {"step": CF_STEP, "n": cf_n, "teams": {str(_t): _v for _t, _v in team_fine.items()}}
+        _tcx = team_cx.setdefault(_t, [0.0]*cf_n); _tcy = team_cy.setdefault(_t, [0.0]*cf_n); _tcp = team_cp.setdefault(_t, [0]*cf_n)
+        _pcx = players[pid]["cf_x"]; _pcy = players[pid]["cf_y"]; _pcp = players[pid]["cf_p"]
+        for _k in range(cf_n):
+            _tf[_k] += _cf[_k]; _tcx[_k] += _pcx[_k]; _tcy[_k] += _pcy[_k]; _tcp[_k] += _pcp[_k]
+    combat_fine = {"step": CF_STEP, "n": cf_n, "teams": {str(_t): _v for _t, _v in team_fine.items()},
+                   "tx": {str(_t): [round(_x2, 1) for _x2 in _v] for _t, _v in team_cx.items()},
+                   "ty": {str(_t): [round(_y2, 1) for _y2 in _v] for _t, _v in team_cy.items()},
+                   "tp": {str(_t): _v for _t, _v in team_cp.items()}}
     return {"meta": meta, "players": res, "leaves": leave_list, "combat_fine": combat_fine}
 
 # 임팩트 유닛(테크 마일스톤용) → 한글
@@ -876,6 +901,81 @@ TECH_UNITS = {
 def _mmss_to_sec(t):
     try: m, s = str(t).split(":"); return int(m)*60 + int(s)
     except Exception: return 0
+# HUD 인구 표기 예측: 시작값 + 보급 건물/오버로드 완성(+건설시간) — 첫 교전 전엔 표시값과 일치
+_SUP_START = {"T": (4, 10), "P": (4, 9), "Z": (4, 9)}          # (사용, 최대)
+_SUP_PROVIDER = {"Supply Depot": (600, 8), "Pylon": (450, 8),   # (건설 프레임, +최대)
+                 "Command Center": (1800, 10), "Nexus": (1800, 9), "Hatchery": (1800, 1)}
+_OVIE_BUILD_FR = 600
+
+def _hud_anchor_series(rl, sup_raw, build, ovie_fr, horizon_fr, fps, step=4):
+    """[(게임초, 사용, 최대)] — horizon(첫 공격) 이전 4초 간격. 표시 캡 200 반영."""
+    u0, m0 = _SUP_START.get(rl, (4, 9))
+    uses = sorted((fr, int(sp)) for fr, sp in (sup_raw or []) if sp)
+    provs = []
+    for b in (build or []):
+        bt = _SUP_PROVIDER.get(b.get("name"))
+        if bt: provs.append((_s2f(b.get("t")) * fps + bt[0], bt[1]))
+    for f0 in (ovie_fr or []): provs.append((f0 + _OVIE_BUILD_FR, 8))
+    provs.sort()
+    out = []; ui = mi = 0; cu = u0; cm = m0
+    for sec in range(0, max(0, int(horizon_fr / fps)) + 1, step):
+        fr = sec * fps
+        while ui < len(uses) and uses[ui][0] <= fr: cu += uses[ui][1]; ui += 1
+        while mi < len(provs) and provs[mi][0] <= fr: cm += provs[mi][1]; mi += 1
+        out.append([sec, int(min(200, cu)), int(min(200, cm))])
+    return out
+
+def _s2f(t):
+    try:
+        q = str(t or "0:0").split(":"); return int(q[0]) * 60 + int(q[1] or 0)
+    except Exception:
+        return 0
+
+SS_STEP = 15   # 인구/일꾼 곡선 해상도(초) — 웹 그래프·코치 지표 공용
+
+def _supply_worker_series(supply_events, worker_frames, total_frames, fps):
+    """생산 명령 기반 시계열: (인구 누적 곡선, 일꾼 누적 곡선, 일꾼50 도달초|None).
+    리플레이엔 사망이 없으므로 '생산 누적'이다 — 첫 200 도달·생산 공백·리필 속도 측정용.
+    (한타 손실 반영 현재 인구는 wipe 하이라이트 마커와 조합해 해석)"""
+    n = max(1, int(max(0, total_frames) / fps // SS_STEP) + 1)
+    ss = [0.0] * n
+    cum = 0.0
+    for fr, sup in sorted(supply_events or []):
+        cum += sup
+        k = min(n - 1, int(max(0, fr) / fps // SS_STEP))
+        ss[k] = max(ss[k], cum)
+    run = 0.0
+    for k in range(n):
+        run = max(run, ss[k]); ss[k] = round(run, 1)
+    ws = [0] * n
+    for wf in (worker_frames or []):
+        k = min(n - 1, int(max(0, wf) / fps // SS_STEP)); ws[k] += 1
+    for k in range(1, n): ws[k] += ws[k - 1]
+    w50 = None
+    for k in range(n):
+        if ws[k] >= 50: w50 = k * SS_STEP; break
+    return ss, ws, w50
+
+
+def _valid_drop_secs(drop_frames, enemy_anchors, fps):
+    """Unload 프레임들을 '진짜 드랍'만 남겨 초 단위 클러스터로.
+    (f,x,y) 튜플 목록: 적 스타트/적 타운홀 반경 1200px 내 좌표만 인정. 좌표 None(구형)은 통과.
+    반환: (드랍 초 리스트[12초 클러스터], 첫 유효 드랍 프레임|None)"""
+    R2 = 1200 * 1200
+    anch = [(ax, ay) for (ax, ay) in (enemy_anchors or []) if ax is not None]
+    def _ok(dx, dy):
+        if dx is None: return True
+        return any((dx - ax) ** 2 + (dy - ay) ** 2 <= R2 for (ax, ay) in anch)
+    secs = []; first = None
+    for it in sorted(drop_frames or [], key=lambda t: (t[0] if isinstance(t, tuple) else t)):
+        fr, dx, dy = it if isinstance(it, tuple) else (it, None, None)
+        if not _ok(dx, dy): continue
+        if first is None: first = fr
+        s = int(max(0, fr) / fps)
+        if not secs or s - secs[-1] >= 12: secs.append(s)   # ~12초 내 연속 언로드 = 한 번의 드랍
+    return secs, first
+
+
 def compute_highlights(a):
     """리플레이 명령 기반 하이라이트. 교전은 분 단위로 후보를 고른 뒤
     정밀 교전 빈(combat_fine)으로 양 팀이 동시에 가장 활발한 '실제 클래시 초'를 짚는다."""
@@ -890,16 +990,24 @@ def compute_highlights(a):
     cf_teams = [v for v in (cf.get("teams") or {}).values() if v]
     cf_n = max((len(v) for v in cf_teams), default=0)
 
-    # --- 교전: 양 팀이 동시에 폭증하는 '상호 교전' 피크를 정밀 빈에서 직접 탐지 ---
-    # (한 팀만 활발한 드랍/견제, 양 팀 다 한가한 베이스라인은 자동 배제)
+    # --- 교전: 양 팀이 '동시에 + 같은 곳에서' 폭증하는 상호 교전 피크 탐지 ---
+    # (한 팀만 활발한 드랍/견제, 양 팀 다 한가한 베이스라인, 서로 다른 곳에서 각자 바쁜
+    #  순간(A팀 수비 + B팀 딴곳 건설)은 공간 게이트로 배제)
+    _teams_d = {k2: v2 for k2, v2 in ((cf.get("teams") or {}).items()) if v2}
+    _txd = cf.get("tx") or {}; _tyd = cf.get("ty") or {}; _tpd = cf.get("tp") or {}
     if len(cf_teams) >= 2 and cf_n >= 3:
         W = 1                                          # 평활 반경 ±1빈(≈±4초)
         def _sm(s, k): return sum((s[j] if 0 <= j < len(s) else 0) for j in range(k-W, k+W+1))
-        g = [0]*cf_n; tot = [0]*cf_n
+        def _cent(tid, k):
+            # 해당 팀의 ±1빈 명령 무게중심 (표본 3개 미만이면 신뢰 불가 → None)
+            sx = _sm(_txd.get(tid) or [], k); sy = _sm(_tyd.get(tid) or [], k); sp = _sm(_tpd.get(tid) or [], k)
+            return (sx/sp, sy/sp) if sp >= 3 else (None, None)
+        R_CLASH2 = 1000*1000                           # 두 팀 무게중심 거리 임계(px)
+        g = [0]*cf_n; tot = [0]*cf_n; pair = [None]*cf_n
         for k in range(cf_n):
-            vals = sorted((_sm(s, k) for s in cf_teams), reverse=True)
-            a1 = vals[0]; a2 = vals[1] if len(vals) > 1 else 0
-            g[k] = a2; tot[k] = a1 + a2                # a2 = 둘째로 활발한 팀 = 상호 교전 강도
+            it = sorted(((_sm(s2, k), t2) for t2, s2 in _teams_d.items()), reverse=True)
+            a1, t1 = it[0]; a2, t2 = (it[1] if len(it) > 1 else (0, None))
+            g[k] = a2; tot[k] = a1 + a2; pair[k] = (t1, t2)   # a2 = 둘째로 활발한 팀 = 상호 교전 강도
         gmax = max(g) if g else 0
         if gmax > 0:
             posv = sorted(x for x in g if x > 0)
@@ -912,10 +1020,26 @@ def compute_highlights(a):
             peaks.sort(reverse=True)
             keep = []
             for sc, k in peaks:
+                t1, t2 = pair[k]
+                c1 = _cent(t1, k); c2 = _cent(t2, k)
+                _cx = _cy = None
+                if c1[0] is not None and c2[0] is not None:
+                    if (c1[0]-c2[0])**2 + (c1[1]-c2[1])**2 > R_CLASH2:
+                        continue                        # 동시에 바쁘지만 다른 곳 → 교전 아님
+                    _cx = (c1[0]+c2[0])/2; _cy = (c1[1]+c2[1])/2
                 sec = int(k*cf_step + cf_step/2)
-                if all(abs(sec - s2) >= 40 for _, s2 in keep): keep.append((sc, sec))
+                if all(abs(sec - s2) >= 40 for _, s2, _x3, _y3 in keep): keep.append((sc, sec, _cx, _cy))
                 if len(keep) >= 3: break
             kmax = keep[0][0] if keep else 0
+            # 교전 위치 라벨: 어느 선수 스타트 반경(800px) 안이면 그 진영, 아니면 중앙
+            _starts = [(p.get("name"), p.get("start")) for p in players if p.get("start")]
+            def _near_start(x, y):
+                if x is None: return None
+                best = None; bd = 800*800
+                for nm, st in _starts:
+                    d = (x-st[0])**2 + (y-st[1])**2
+                    if d <= bd: bd = d; best = nm
+                return best
             def _battle_who(sec):
                 # 교전 순간(±1빈 평활)에 개인 교전 명령이 가장 많은 선수 = 그 싸움의 주역
                 k = int(sec / cf_step); bnm, bv = None, -1
@@ -925,10 +1049,14 @@ def compute_highlights(a):
                     _v = sum(_cfp[j] for j in range(k-1, k+2) if 0 <= j < len(_cfp))
                     if _v > bv: bv, bnm = _v, _p.get("name")
                 return bnm
-            for sc, sec in sorted(keep, key=lambda x: x[1]):
-                out.append({"sec": sec, "t": _ts(sec),
-                            "label": ("최대 교전" if sc == kmax else "주요 교전"),
-                            "who": _battle_who(sec), "kind": "battle"})
+            for sc, sec, _cx, _cy in sorted(keep, key=lambda x: x[1]):
+                _at = _near_start(_cx, _cy)
+                _h = {"sec": sec, "t": _ts(sec),
+                      "label": ("최대 교전" if sc == kmax else "주요 교전"),
+                      "who": _battle_who(sec), "kind": "battle"}
+                if _cx is not None: _h["x"] = int(_cx); _h["y"] = int(_cy)
+                if _at: _h["at"] = _at                 # "누구 진영에서 붙었나" (웹은 몰라도 무해)
+                out.append(_h)
 
     # 게임체인저 테크 — 임팩트 유닛 첫 등장 (프레임 기반, 이미 정밀)
     firsts = {}
@@ -980,6 +1108,510 @@ def compute_highlights(a):
         out.append({"sec": rep.get("sec", 0), "t": rep.get("t", ""), "label": lbl, "who": nm, "kind": "gg"})
     out.sort(key=lambda hh: hh["sec"])
     return out
+
+
+# ===================== 오디오 기반 교전 강도 (영상 후처리) =====================
+# BW 리플레이엔 킬/데스 이벤트가 없다. 대신 우리에겐 녹화 '소리'가 있다 —
+# 전투 사운드 폭발은 실제 교전의 가장 정직한 증거다. 오디오 RMS 곡선으로
+# ①교전 시각 보정(±6초) ②규모 등급(대규모 한타/치열한 교전) ③지속시간(dur)을 얻어
+# 명령 기반 highlights 를 업그레이드한다. 게임초→영상초 = +meta.lead_sec.
+# 어떤 단계가 실패해도 원본 highlights 를 그대로 두는 순수 가산(additive) 설계.
+
+def _audio_rms_curve(video_path, sr=8000):
+    """영상 오디오 → 1초 해상도 RMS 곡선(numpy 1D). 실패 시 None."""
+    if not FFMPEG or not video_path or not os.path.isfile(video_path): return None
+    try:
+        p = subprocess.run([FFMPEG, "-v", "error", "-i", video_path, "-vn",
+                            "-ac", "1", "-ar", str(sr), "-f", "s16le", "-"],
+                           capture_output=True, timeout=240)
+        raw = p.stdout
+        if not raw or len(raw) < sr * 2 * 5: return None      # 5초 미만이면 무의미
+        np = _wl_np()
+        x = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
+        n = (len(x) // sr) * sr
+        if n <= 0: return None
+        x = x[:n].reshape(-1, sr)
+        return np.sqrt((x * x).mean(axis=1))
+    except Exception:
+        return None
+
+
+def _grade_battles(E, highlights, lead, game_len):
+    """순수 계산부(테스트 가능): RMS 곡선 E(영상초 인덱스)로 battle 항목을
+    보정·등급·지속시간 부여. 반환 (highlights, 오디오단독 교전 후보 게임초 리스트)."""
+    if E is None or highlights is None: return highlights, []
+    try:
+        np = _wl_np(); E = np.asarray(E, dtype=float)
+    except Exception:
+        return highlights, []
+    n = int(len(E))
+    if n < 10 or not highlights: return highlights, []
+    base = max(float(np.percentile(E, 30)), 1.0)              # 평상시 소음 수준
+    for h in highlights:
+        if h.get("kind") != "battle": continue
+        vs = int(round(h.get("sec", 0) + lead))
+        a = max(0, vs - 6); b = min(n, vs + 7)
+        if b <= a: continue
+        pk = int(a + int(np.argmax(E[a:b])))
+        if float(E[pk] / base) >= 1.8 and abs(pk - vs) <= 6:  # 소리 근거가 있으면 그 피크로 스냅
+            h["sec"] = max(0, int(round(pk - lead)))
+            h["t"] = "%d:%02d" % (h["sec"] // 60, h["sec"] % 60)
+            vs = pk
+        vs = min(max(vs, 0), n - 1)
+        thr = max(base * 1.6, float(E[vs]) * 0.35)            # 교전 구간 = 피크 좌우 연속 임계 초과
+        s0 = e0 = vs
+        while s0 - 1 >= 0 and E[s0 - 1] >= thr and (vs - (s0 - 1)) <= 60: s0 -= 1
+        while e0 + 1 < n and E[e0 + 1] >= thr and ((e0 + 1) - vs) <= 60: e0 += 1
+        dur = max(1, e0 - s0 + 1)
+        inten = float(E[s0:e0 + 1].mean() / base)
+        h["dur"] = int(min(90, dur)); h["ai"] = round(inten, 2)
+        if inten >= 3.2 and dur >= 12: h["label"] = "대규모 한타"
+        elif inten >= 2.1 and str(h.get("label", "")).endswith("교전"): h["label"] = "치열한 교전"
+    # 명령 피크가 놓친 '오디오 단독 폭발' — 보수적으로 후보 1개만
+    solo = []
+    try:
+        occupied = [int(round(h.get("sec", 0) + lead)) for h in highlights
+                    if h.get("kind") in ("battle", "drop", "gg")]
+        hi = min(n - 2, int(game_len + lead) - 2) if game_len else (n - 2)
+        best = None
+        for t in range(3, max(4, hi)):
+            r = float(E[t] / base)
+            if r < 4.0: continue
+            if any(abs(t - o) < 25 for o in occupied): continue
+            if best is None or r > best[1]: best = (t, r)
+        if best: solo.append(int(round(best[0] - lead)))
+    except Exception:
+        pass
+    return highlights, [s2 for s2 in solo if s2 and s2 > 0]
+
+
+def _supply_change_curve(video_path, fps=2.0):
+    """④ 우상단 인구 HUD ROI 의 픽셀 변화율 곡선(1/fps 초 간격). 실패 시 None.
+    숫자를 읽지 않는다(OCR 불요) — '얼마나 자주/크게 바뀌는가'만 본다.
+    평소: 생산 때마다 가끔 변화. 병력 몰살: 몇 초 동안 숫자가 폭주 → 변화율 스파이크."""
+    if not FFMPEG or not video_path or not os.path.isfile(video_path): return None
+    try:
+        np = _wl_np()
+        W, H = 128, 32                                    # 크롭 후 고정 스케일(해상도 무관)
+        # 인구 카운터 분수 박스: 가로 88.5%~98.5%, 세로 0.4%~4.5% (BW:R 자원바 우측 끝, 넉넉하게)
+        vf = ("fps=%s,crop=iw*0.10:ih*0.041:iw*0.885:ih*0.004,"
+              "scale=%d:%d,format=gray") % (fps, W, H)
+        p = subprocess.run([FFMPEG, "-v", "error", "-i", video_path, "-vf", vf,
+                            "-f", "rawvideo", "-pix_fmt", "gray", "-"],
+                           capture_output=True, timeout=420)
+        raw = p.stdout; fsz = W * H
+        n = len(raw) // fsz
+        if n < 10: return None
+        fr = np.frombuffer(raw[:n * fsz], dtype=np.uint8).reshape(n, H, W).astype(np.int16)
+        d = np.abs(fr[1:] - fr[:-1])
+        return (d > 24).mean(axis=(1, 2))                 # 스텝별 '바뀐 픽셀 비율'
+    except Exception:
+        return None
+
+
+def _detect_wipes(C, E, lead, game_len, fps=2.0):
+    """순수 계산부(테스트 가능): 인구 변화율 곡선 C + 오디오 RMS E 교차검증으로
+    '병력 대량 손실' 게임초 리스트(최대 2, 보수적). 빨무처럼 생산이 상시 빠른 게임은
+    베이스라인이 함께 올라가 적응형 임계가 오탐을 누른다."""
+    try:
+        np = _wl_np(); C = np.asarray(C, dtype=float)
+    except Exception:
+        return []
+    if C is None or len(C) < int(fps * 60): return []
+    pos = C[C > 0.001]
+    base = float(np.percentile(pos, 60)) if len(pos) > 20 else 0.004
+    base = max(base, 0.003)
+    thr = max(base * 3.0, 0.05)                           # 평소 3배 & 절대 5% 픽셀 요동
+    need = int(round(fps * 2.5))                          # 2.5초 이상 지속해야 몰살
+    Eb = None
+    if E is not None:
+        try: Eb = max(float(np.percentile(np.asarray(E, dtype=float), 30)), 1.0)
+        except Exception: Eb = None
+    out = []; i = 0; n = len(C)
+    while i < n:
+        if C[i] >= thr:
+            j = i
+            while j + 1 < n and C[j + 1] >= thr * 0.6: j += 1
+            if (j - i + 1) >= need:
+                vsec = i / fps
+                gsec = int(round(vsec - lead))
+                ok_a = True                               # 오디오 없으면 통과(단독 신호 허용)
+                if E is not None and Eb:
+                    a = max(0, int(vsec) - 6); b = min(len(E), int(vsec) + 7)
+                    ok_a = b > a and float(np.max(np.asarray(E[a:b], dtype=float)) / Eb) >= 1.8
+                if ok_a and gsec >= 180 and (not game_len or gsec <= game_len - 5)                    and all(abs(gsec - o) >= 60 for o in out):
+                    out.append(gsec)
+                    if len(out) >= 2: break
+            i = j + 1
+        else:
+            i += 1
+    return out
+
+
+# ===================== HUD 숫자 자가학습 OCR (녹화자 시점 인구/자원 실측) =====================
+# 우상단 HUD 엔 미네랄·가스·인구(사용/최대)가 상시 표기된다. 문제는 폰트 — 해법은 자가학습:
+# 첫 교전 전엔 리플레이 생산 명령만으로 표시 인구를 '정확히' 예측할 수 있다(sup_anchor).
+# 그 구간에서 예측 문자열과 글리프를 짝지어 숫자 템플릿을 그 영상에서 학습하고,
+# 학습된 템플릿으로 나머지 전체(전투 후 = 사망 반영 실측)를 판독한다.
+# 같은 폰트라 미네랄·가스도 함께 읽힌다. 실패 시 조용히 None — 전부 가산 설계.
+
+_HUD_BAND = (0.74, 0.002, 0.258, 0.048)   # 우상단 자원 밴드 (x,y,w,h 분수)
+_HUD_W, _HUD_H = 560, 30
+_GW, _GH = 12, 18                          # 글리프 정규화 크기
+
+def _hud_band_frames(video_path, fps=1.0):
+    if not FFMPEG or not video_path or not os.path.isfile(video_path): return None
+    try:
+        np = _wl_np()
+        bx, by, bw, bh = _HUD_BAND
+        vf = ("fps=%s,crop=iw*%s:ih*%s:iw*%s:ih*%s,scale=%d:%d,format=gray"
+              % (fps, bw, bh, bx, by, _HUD_W, _HUD_H))
+        p = subprocess.run([FFMPEG, "-v", "error", "-i", video_path, "-vf", vf,
+                            "-f", "rawvideo", "-pix_fmt", "gray", "-"],
+                           capture_output=True, timeout=420)
+        raw = p.stdout; fsz = _HUD_W * _HUD_H
+        n = len(raw) // fsz
+        if n < 20: return None
+        return np.frombuffer(raw[:n * fsz], dtype=np.uint8).reshape(n, _HUD_H, _HUD_W)
+    except Exception:
+        return None
+
+def _hud_glyph_groups(img):
+    """한 밴드 프레임 → [ [glyph(12x18 float), ...] , ...] 클러스터(좌→우). 밝은 글자 가정."""
+    np = _wl_np()
+    g = img.astype(np.float32)
+    thr = max(140.0, float(g.mean() + 2.0 * g.std()))
+    b = g > thr
+    col = b.sum(axis=0)
+    segs = []; x0 = None
+    for x in range(len(col) + 1):
+        on = x < len(col) and col[x] > 0
+        if on and x0 is None: x0 = x
+        elif not on and x0 is not None:
+            if x - x0 >= 2: segs.append((x0, x))
+            x0 = None
+    if len(segs) < 3: return []
+    rows = b.any(axis=1).nonzero()[0]
+    if not len(rows): return []
+    y0, y1 = int(rows[0]), int(rows[-1]) + 1
+    if y1 - y0 < 5: return []
+    def _norm(x0, x1):
+        c = g[y0:y1, x0:x1]
+        yi = (np.arange(_GH) * (c.shape[0] - 1) / max(1, _GH - 1)).astype(int)
+        xi = (np.arange(_GW) * (c.shape[1] - 1) / max(1, _GW - 1)).astype(int)
+        c = c[yi][:, xi]
+        c = c - c.mean(); nr = float(np.sqrt((c * c).sum())) or 1.0
+        return c / nr
+    gaps = [segs[i + 1][0] - segs[i][1] for i in range(len(segs) - 1)]
+    med = sorted(gaps)[len(gaps) // 2] if gaps else 2
+    groups = [[]]; pos = [[segs[0]]]
+    groups[0].append(_norm(*segs[0]))
+    for i in range(1, len(segs)):
+        if segs[i][0] - segs[i - 1][1] > max(6, med * 2.6):
+            groups.append([]); pos.append([])
+        groups[-1].append(_norm(*segs[i])); pos[-1].append(segs[i])
+    return groups
+
+def _hud_learn_templates(frames, anchors, lead):
+    """anchors=[(게임초,사용,최대)] → 문자('0'-'9','/') 템플릿 dict. 최소 조건 미달 시 None."""
+    np = _wl_np()
+    bank = {}
+    for sec, u, m in anchors:
+        fi = int(round(sec + lead))
+        if fi < 0 or fi >= len(frames): continue
+        want = "%d/%d" % (u, m)
+        groups = _hud_glyph_groups(frames[fi])
+        if not groups: continue
+        gl = groups[-1]                       # 인구 = 최우측 클러스터
+        if len(gl) != len(want): continue
+        for ch, gy in zip(want, gl):
+            bank.setdefault(ch, []).append(gy)
+    if "/" not in bank or sum(len(v) for k, v in bank.items() if k.isdigit()) < 8: return None
+    tpl = {}
+    for ch, arr in bank.items():
+        if len(arr) < 2 and ch.isdigit() and len(bank) > 4: 
+            pass                              # 표본 1개도 허용(희귀 숫자) — 평균이 곧 자신
+        m = np.mean(np.stack(arr), axis=0)
+        m = m - m.mean(); nr = float(np.sqrt((m * m).sum())) or 1.0
+        tpl[ch] = m / nr
+    return tpl if len([k for k in tpl if k.isdigit()]) >= 5 else None
+
+def _hud_read_all(frames, tpl):
+    """전 프레임 판독 → (sup_used, sup_max, minerals, gas) 초당 리스트 (None=결측)."""
+    np = _wl_np()
+    keys = list(tpl.keys()); T = np.stack([tpl[k] for k in keys])
+    def _cls(gy):
+        sc = (T * gy).sum(axis=(1, 2))
+        i = int(np.argmax(sc))
+        return keys[i] if sc[i] >= 0.55 else None
+    def _num(gl, maxd):
+        chs = [_cls(g2) for g2 in gl]
+        if any(c is None for c in chs): return None
+        t = "".join(chs)
+        return int(t) if t.isdigit() and 1 <= len(t) <= maxd else None
+    su = []; sm = []; mn = []; gs = []
+    for f in frames:
+        groups = _hud_glyph_groups(f)
+        u = m = a = b2 = None
+        if groups:
+            chs = [_cls(g2) for g2 in groups[-1]]
+            if all(c is not None for c in chs):
+                t = "".join(chs)
+                if "/" in t:
+                    L, _, R = t.partition("/")
+                    if L.isdigit() and R.isdigit() and len(L) <= 3 and len(R) <= 3:
+                        u, m = int(L), int(R)
+            if len(groups) >= 3:
+                a = _num(groups[-3], 5); b2 = _num(groups[-2], 5)
+            elif len(groups) == 2:
+                a = _num(groups[-2], 5)
+        su.append(u); sm.append(m); mn.append(a); gs.append(b2)
+    return su, sm, mn, gs
+
+def _hud_clean(seq, lo, hi, max_jump=None):
+    """범위 필터 + 결측 전방채움 + (선택) 비정상 점프 제거. 반환은 int 리스트(초기 결측은 첫 유효값)."""
+    out = []; last = None
+    for v in seq:
+        if v is not None and lo <= v <= hi:
+            if max_jump is not None and last is not None and abs(v - last) > max_jump and not (v < last):
+                v = None                       # 급증만 의심(급감=몰살은 실제상황이라 통과)
+        else:
+            v = None
+        if v is not None: last = v
+        out.append(last)
+    fv = next((x for x in out if x is not None), 0)
+    return [fv if x is None else x for x in out]
+
+def extract_hud_series(analysis, video_path):
+    """녹화자 실측 HUD 시계열 → analysis['hud'] 저장 + 실측 몰살/재-200 도출. 실패 시 None."""
+    try:
+        meta = analysis.get("meta") or {}
+        saver = meta.get("saver")
+        sp = next((p for p in (analysis.get("players") or []) if p.get("name") == saver), None)
+        anchors = (sp or {}).get("sup_anchor")
+        if not saver or not anchors: return None
+        lead = 0.0
+        try: lead = float(meta.get("lead_sec") or 0.0)
+        except Exception: pass
+        frames = _hud_band_frames(video_path)
+        if frames is None: return None
+        tpl = _hud_learn_templates(frames, anchors, lead)
+        if tpl is None: return None
+        global _HUD_TPL_CACHE; _HUD_TPL_CACHE = tpl   # 같은 게임 파이프라인 내 재사용(점수판 OCR)
+        su, sm, mn, gs = _hud_read_all(frames, tpl)
+        conf = sum(1 for v in su if v is not None) / max(1, len(su))
+        if conf < 0.55: return None
+        su = _hud_clean(su, 0, 200, max_jump=40)
+        sm = _hud_clean(sm, 1, 200, max_jump=40)
+        mn = _hud_clean(mn, 0, 99999); gs = _hud_clean(gs, 0, 99999)
+        n = len(su)
+        # 실측 몰살: 6초 창에서 인구 -25 이상 급락 (3분 이후, 45초 간격, 최대 3)
+        # 시점은 감지창 시작이 아니라 '실제 급락이 시작된 초'로 보고한다.
+        wipes = []
+        t = int(max(0, 180 + lead))
+        while t < n - 3:
+            w = su[t:t + 7]
+            base0 = w[0]
+            if base0 - min(w) >= 25:
+                k0 = next((ii for ii, vv in enumerate(w) if vv <= base0 - 10), 0)
+                gsec = int(round(t + k0 - lead))
+                if all(abs(gsec - o) >= 45 for o in wipes):
+                    wipes.append(gsec)
+                    if len(wipes) >= 3: break
+                t = t + k0 + 45
+            else:
+                t += 1
+        # 실측 재-200: 급락 '바닥' 이후 처음으로 (사용>=196 & 최대>=199)
+        re200 = []
+        for w2 in wipes:
+            vw = min(n - 1, max(0, int(round(w2 + lead))))
+            lo = min(range(vw, min(n, vw + 10)), key=lambda ii: su[ii])
+            for t2 in range(lo + 1, n):
+                if su[t2] >= 196 and sm[t2] >= 199:
+                    re200.append({"w": w2, "t": int(round(t2 - lead))}); break
+        stp = 5
+        hud = {"who": saver, "step": stp, "conf": round(conf, 2),
+               "sup": su[::stp], "smax": sm[::stp], "mn": mn[::stp], "gs": gs[::stp],
+               "wipes": wipes, "re200": re200, "lead": lead}
+        analysis["hud"] = hud
+        try: log("  HUD 실측 OCR 성공 (신뢰도 %d%%, 몰살 %d)" % (int(conf * 100), len(wipes)))
+        except Exception: pass
+        return hud
+    except Exception:
+        return None
+
+
+# ===================== 종료 점수판 OCR (영상 꼬리) =====================
+# 승/패 화면 아래 표: 플레이어별 유닛/건물/자원/총점. 좌표 하드코딩 없이
+# ① 밝기 행 투영으로 행 분리 ② 행 내 글리프 클러스터 → 숫자열 판독(HUD 학습 템플릿 재사용,
+#    정규화 매칭이라 폰트 '크기' 무관) ③ BW 점수 공식 '유닛+건물+자원=총점' 을 체크섬으로
+#    자기검증 ④ 이름 텍스트의 '색' 을 플레이어 컬러와 대조해 행↔선수 매핑.
+
+_HUD_TPL_CACHE = None
+_BW_COLOR_NAMES = {"red": (244, 4, 4), "blue": (12, 72, 204), "teal": (44, 180, 148),
+                   "purple": (136, 64, 156), "orange": (248, 140, 20), "brown": (112, 48, 20),
+                   "white": (204, 224, 208), "yellow": (252, 252, 56)}
+
+def _pcolor_rgb(c):
+    try:
+        c = str(c or "").strip().lower()
+        if c.startswith("#") and len(c) >= 7:
+            return (int(c[1:3], 16), int(c[3:5], 16), int(c[5:7], 16))
+        if c in _BW_COLOR_NAMES: return _BW_COLOR_NAMES[c]
+    except Exception:
+        pass
+    return None
+
+def _score_tail_frames(video_path, tail=8.0, fps=2.0):
+    """영상 꼬리 → (rgb 스택 (n,540,960,3), gray 스택). 실패 시 (None,None)."""
+    if not FFMPEG or not video_path or not os.path.isfile(video_path): return None, None
+    try:
+        np = _wl_np()
+        p = subprocess.run([FFMPEG, "-v", "error", "-sseof", "-%s" % tail, "-i", video_path,
+                            "-vf", "fps=%s,scale=960:540" % fps,
+                            "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                           capture_output=True, timeout=180)
+        raw = p.stdout; fsz = 960 * 540 * 3
+        n = len(raw) // fsz
+        if n < 2: return None, None
+        rgb = np.frombuffer(raw[:n * fsz], dtype=np.uint8).reshape(n, 540, 960, 3)
+        gray = (rgb.astype(np.float32) @ np.array([0.299, 0.587, 0.114], dtype=np.float32)).astype(np.uint8)
+        return rgb, gray
+    except Exception:
+        return None, None
+
+def _score_rows(gray):
+    """밝은 텍스트의 세로 투영으로 행 밴드 [(y0,y1)]."""
+    np = _wl_np()
+    g = gray.astype(np.float32)
+    b = g > max(150.0, float(g.mean() + 2.2 * g.std()))
+    rp = b.sum(axis=1)
+    rows = []; y0 = None
+    for y in range(len(rp) + 1):
+        on = y < len(rp) and rp[y] >= 6
+        if on and y0 is None: y0 = y
+        elif not on and y0 is not None:
+            if y - y0 >= 9: rows.append((y0, y))
+            y0 = None
+    return rows
+
+def _read_score_frame(rgb, gray, tpl, pcolor_list):
+    """한 프레임 → [(y0, (u,s,r,t), 매핑이름|None)]. 체크섬(u+s+r==t) 통과 행만."""
+    np = _wl_np()
+    keys = list(tpl.keys()); T = np.stack([tpl[k] for k in keys])
+    def _cls(gy):
+        sc = (T * gy).sum(axis=(1, 2))
+        i = int(np.argmax(sc))
+        return keys[i] if sc[i] >= 0.55 else None
+    out = []
+    for (y0, y1) in _score_rows(gray):
+        groups = _hud_glyph_groups(gray[max(0, y0 - 1):y1 + 1])
+        if len(groups) < 4: continue
+        nums = []
+        for gl in groups:
+            chs = [_cls(g2) for g2 in gl]
+            if all(c is not None and c.isdigit() for c in chs) and 1 <= len(chs) <= 6:
+                nums.append(int("".join(chs)))
+        # 체크섬 창 스캔: 연속 4개 (a,b,c,d) 중 a+b+c==d
+        picked = None
+        for k in range(len(nums) - 3):
+            a, b2, c2, d = nums[k:k + 4]
+            if a + b2 + c2 == d and d > 0: picked = (a, b2, c2, d); break
+        if not picked: continue
+        # 행 색: '채도 있는' 픽셀(이름 텍스트는 플레이어 컬러) 평균 → 가장 가까운 선수
+        band = rgb[y0:y1].astype(np.float32)
+        sat = band.max(axis=2) - band.min(axis=2)
+        cmask = (sat > 45) & (band.max(axis=2) > 70)
+        best = None
+        if int(cmask.sum()) >= 15:
+            avg = band[cmask].mean(axis=0)
+            bd = 95.0 ** 2
+            for nm, pc in pcolor_list:
+                if pc is None: continue
+                d2 = float(((avg - np.array(pc, dtype=np.float32)) ** 2).mean())
+                if d2 < bd: bd = d2; best = nm
+        out.append((y0, picked, best))
+    return out
+
+def extract_end_score(analysis, video_path):
+    """종료 점수판 → analysis['endscore'] = {이름:{u,s,r,t}}. 실패 시 None (가산 설계)."""
+    try:
+        tpl = _HUD_TPL_CACHE
+        if tpl is None: return None
+        pl = analysis.get("players") or []
+        pcolor_list = [(p.get("name"), _pcolor_rgb(p.get("color"))) for p in pl if p.get("name")]
+        if not any(pc for _, pc in pcolor_list): return None
+        rgb, gray = _score_tail_frames(video_path)
+        if rgb is None: return None
+        agg = {}; loose = None
+        for fi in range(len(gray) - 1, -1, -1):       # 뒤(가장 안정된 화면)부터
+            rows = _read_score_frame(rgb[fi], gray[fi], tpl, pcolor_list)
+            if not rows: continue
+            for _, v, nm in rows:
+                if nm and nm not in agg: agg[nm] = v
+            if loose is None: loose = rows
+            if len(agg) >= len(pcolor_list): break
+        # 색 매핑이 모자라면: 체크섬 통과 행 수 == 선수 수일 때 행 순서(위→아래)=슬롯 순서 폴백
+        if loose and len(agg) < len(pcolor_list) and len(loose) == len(pcolor_list):
+            for (y0, v, nm), (pn, _pc) in zip(sorted(loose, key=lambda r: r[0]), pcolor_list):
+                agg.setdefault(nm or pn, v)
+        if not agg: return None
+        es = {nm: {"u": v[0], "s": v[1], "r": v[2], "t": v[3]} for nm, v in agg.items()}
+        analysis["endscore"] = es
+        try: log("  종료 점수판 OCR — %d명 판독" % len(es))
+        except Exception: pass
+        return es
+    except Exception:
+        return None
+
+
+def enhance_highlights_with_audio(analysis, video_path):
+    """녹화 오디오로 하이라이트 업그레이드. 어떤 실패에도 조용히 원본 유지."""
+    try:
+        if not analysis: return
+        hl = analysis.get("highlights")
+        if not hl: return
+        meta = analysis.get("meta") or {}
+        lead = 0.0
+        try: lead = float(meta.get("lead_sec") or 0.0)
+        except Exception: lead = 0.0
+        gl = 0
+        try:
+            for _x2 in str(meta.get("length") or "0:0").split(":"): gl = gl * 60 + int(_x2 or 0)
+        except Exception: gl = 0
+        E = _audio_rms_curve(video_path)
+        if E is None: return
+        hl2, solo = _grade_battles(E, hl, lead, gl)
+        for s2 in solo[:1]:
+            if gl and not (2 <= s2 <= gl - 2): continue
+            hl2.append({"sec": s2, "t": "%d:%02d" % (s2 // 60, s2 % 60),
+                        "label": "교전", "who": None, "kind": "battle", "ai_only": 1})
+        # ④ 인구 급감 = 병력 대량 손실 — 1순위: HUD 실측 OCR, 폴백: ROI 변화율(추정)
+        try:
+            _saver = (meta.get("saver") or None)
+            H = extract_hud_series(analysis, video_path)
+            try: extract_end_score(analysis, video_path)
+            except Exception: pass
+            if H and isinstance(H.get("wipes"), list):
+                for s3 in H["wipes"]:
+                    if any(abs(h.get("sec", -999) - s3) < 30 and h.get("kind") == "wipe" for h in hl2): continue
+                    hl2.append({"sec": s3, "t": "%d:%02d" % (s3 // 60, s3 % 60),
+                                "label": "병력 대량 손실", "who": _saver, "kind": "wipe", "hud": 1})
+            else:
+                C = _supply_change_curve(video_path)
+                if C is not None:
+                    for s3 in _detect_wipes(C, E, lead, gl):
+                        if any(abs(h.get("sec", -999) - s3) < 30 and h.get("kind") == "wipe" for h in hl2): continue
+                        hl2.append({"sec": s3, "t": "%d:%02d" % (s3 // 60, s3 % 60),
+                                    "label": "병력 대량 손실", "who": _saver, "kind": "wipe"})
+        except Exception:
+            pass
+        hl2.sort(key=lambda h: h.get("sec", 0))
+        analysis["highlights"] = hl2
+        try: log("  오디오 교전 분석 반영 — battle 등급/지속시간 업데이트")
+        except Exception: pass
+    except Exception:
+        pass
 
 
 # ===================== 코치 리포트 (규칙 기반, extract_analysis 출력 사용) =====================
@@ -2772,6 +3404,9 @@ def ingest(video_path, rep_path, uploader=None, t0=None, rep_mtime=None):
                 if analysis is not None and _screen_won is not None:
                     try: analysis.setdefault("meta", {})["winner"] = meta.get("winner")
                     except Exception: pass
+                if analysis is not None:
+                    try: enhance_highlights_with_audio(analysis, video_path)   # ③오디오 교전 강도
+                    except Exception: pass
         except Exception as e:
             log(f"Analysis failed (continuing): {e}")
         _tt = None
@@ -3699,6 +4334,9 @@ def _cloud_send(video, rep):
         if _sw is not None:
             meta["winner"] = _winner_from_screen(meta.get("players") or [], meta.get("saver"), _sw, meta.get("winner"))
             if analysis is not None: analysis.setdefault("meta", {})["winner"] = meta.get("winner")
+    except Exception: pass
+    try:
+        if analysis is not None: enhance_highlights_with_audio(analysis, video)   # ③오디오 교전 강도
     except Exception: pass
     players = meta.get("players") or []; saver = meta.get("saver"); winner = meta.get("winner")
     won = _compute_won(players, saver, winner)
