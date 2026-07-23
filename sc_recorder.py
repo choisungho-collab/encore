@@ -155,7 +155,7 @@ import queue as _queue
 from collections import deque as _deque
 GUI_Q = _queue.Queue(maxsize=4000)
 LOG_BUF = _deque(maxlen=400)   # 로그창이 닫혀 있어도 최근 로그를 항상 보관(열면 즉시 채움)
-APP_VERSION = "1.9.2"
+APP_VERSION = "1.9.3"
 REC_STATE = {"recording": False, "encoder": "", "ready": False}
 LAST_ERR = {"msg": "", "t": 0.0}
 UP_DONE = {"t": 0.0, "shown": 0.0}
@@ -2069,32 +2069,43 @@ def sb_upload(local, path, ctype, track=False):
     _do_track = bool(track and size > 4 * 1048576)   # 4MB 초과일 때만 진행률(썸네일 등 소형 제외)
     if _do_track: _pipe_pct(0.0)
     _signed_err = None
-    if pu:   # 표준 경로: 서명 업로드
-        try:
-            pr = _post_storage({"action": "sign-upload", "puuid": pu, "secret": secret,
-                                "paths": [path], "bytes": size}, timeout=30)
-            if pr.status_code == 429:
-                raise RuntimeError("upload limit reached: " + (pr.text or "")[:120])
-            if pr.status_code in (401, 403):
-                raise RuntimeError("기기 인증 거부(HTTP %s) — 갤러리에서 로그인/기기 등록 확인. 응답: %s"
-                                   % (pr.status_code, (pr.text or "")[:140]))
-            pr.raise_for_status()
-            items = (pr.json() or {}).get("items") or []
-            if items and items[0].get("uploadUrl"):
-                up = items[0]["uploadUrl"]; pub = items[0].get("publicUrl") or ""
-                with open(local, "rb") as f:
-                    body = _ProgressReader(f, size, _pipe_pct) if _do_track else f
-                    ur = requests.put(up, data=body, headers={"Content-Type": ctype}, timeout=(10, 3600))
-                if _do_track: _pipe_pct(1.0)
-                if ur.status_code in (200, 201):
-                    return pub or ("%s/storage/v1/object/public/%s/%s" % (_sb_base(), _sb_bucket(), path))
-                raise RuntimeError("서명 PUT 실패 %s: %s" % (ur.status_code, (ur.text or "")[:160]))
-            # 200인데 items 가 비어있음 = 함수가 서명 URL 을 못 만듦(서버측 SUPABASE_SERVICE_KEY 문제 가능성)
-            raise RuntimeError("서명 URL 응답 비어있음 — Netlify 함수의 SUPABASE_SERVICE_KEY 설정/권한 확인. 응답: %s"
-                               % (str(pr.json() if pr.headers.get('content-type','').startswith('application/json') else pr.text)[:140]))
-        except Exception as e:
-            _signed_err = str(e)
-            log("⚠ 클라우드 업로드 실패: %s" % _signed_err)   # 진짜 원인을 표면에 남김(스크롤로 안 묻히게)
+    if pu:   # 표준 경로: 서명 업로드 — 일시 오류(5xx/타임아웃)는 백오프 재시도 (연속 업로드 폭주 시 Netlify 502 흡수)
+        import time as _t
+        for _try in range(3):
+            _hard = False
+            try:
+                pr = _post_storage({"action": "sign-upload", "puuid": pu, "secret": secret,
+                                    "paths": [path], "bytes": size}, timeout=30)
+                if pr.status_code == 429:
+                    _hard = True
+                    raise RuntimeError("upload limit reached: " + (pr.text or "")[:120])
+                if pr.status_code in (401, 403):
+                    _hard = True
+                    raise RuntimeError("기기 인증 거부(HTTP %s) — 갤러리에서 로그인/기기 등록 확인. 응답: %s"
+                                       % (pr.status_code, (pr.text or "")[:140]))
+                pr.raise_for_status()
+                items = (pr.json() or {}).get("items") or []
+                if items and items[0].get("uploadUrl"):
+                    up = items[0]["uploadUrl"]; pub = items[0].get("publicUrl") or ""
+                    with open(local, "rb") as f:
+                        body = _ProgressReader(f, size, _pipe_pct) if _do_track else f
+                        ur = requests.put(up, data=body, headers={"Content-Type": ctype}, timeout=(10, 3600))
+                    if _do_track: _pipe_pct(1.0)
+                    if ur.status_code in (200, 201):
+                        return pub or ("%s/storage/v1/object/public/%s/%s" % (_sb_base(), _sb_bucket(), path))
+                    raise RuntimeError("서명 PUT 실패 %s: %s" % (ur.status_code, (ur.text or "")[:160]))
+                # 200인데 items 가 비어있음 = 함수가 서명 URL 을 못 만듦(서버측 SUPABASE_SERVICE_KEY 문제 가능성)
+                _hard = True
+                raise RuntimeError("서명 URL 응답 비어있음 — Netlify 함수의 SUPABASE_SERVICE_KEY 설정/권한 확인. 응답: %s"
+                                   % (str(pr.json() if pr.headers.get('content-type','').startswith('application/json') else pr.text)[:140]))
+            except Exception as e:
+                _signed_err = str(e)
+                if _hard or _try >= 2:
+                    log("⚠ 클라우드 업로드 실패: %s" % _signed_err)   # 진짜 원인을 표면에 남김(스크롤로 안 묻히게)
+                    break
+                _wt = 1.2 * (2 ** _try)
+                log("  · 업로드 일시 오류 → %.1f초 후 재시도 (%d/3): %s" % (_wt, _try + 2, _signed_err[:90]))
+                _t.sleep(_wt)
     # 레거시 폴백: config 에 service_key 가 있을 때만 (구 배포 호환). 없으면 실패.
     k = (sb_cfg().get("service_key") or "").strip()
     if not k:
@@ -2773,6 +2784,7 @@ def reanalyze_all(log_fn=None):
                 "owner_puuid": ((saver or "").strip().lower() or None),
                 "np": len(players), "players": players, "won": won, "analysis": a})
             done += 1; lg(f"  · reanalyzed ✓ {meta.get('map') or mid}")
+            time.sleep(0.5)   # 연속 클라우드 쓰기 버스트 완화(Netlify 함수 502 예방)
         except Exception as e:
             failed += 1; lg(f"  · reanalysis failed({mid}): {e}")
         finally:
