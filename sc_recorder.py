@@ -155,7 +155,7 @@ import queue as _queue
 from collections import deque as _deque
 GUI_Q = _queue.Queue(maxsize=4000)
 LOG_BUF = _deque(maxlen=400)   # 로그창이 닫혀 있어도 최근 로그를 항상 보관(열면 즉시 채움)
-APP_VERSION = "1.9.1"
+APP_VERSION = "1.9.2"
 REC_STATE = {"recording": False, "encoder": "", "ready": False}
 LAST_ERR = {"msg": "", "t": 0.0}
 UP_DONE = {"t": 0.0, "shown": 0.0}
@@ -815,12 +815,12 @@ def extract_analysis(rep_path):
             cum += sup
             if t200 is None and cum >= 200: t200 = mmss(fr)
         _ss, _ws, _w50 = _supply_worker_series(ev, pl.get("worker_fr", []), frames, FPS_GAME)
+        prodn = sum(1 for b in pl["build"] if b["cat"] in ("building", "morph") and b["name"] in PROD_BUILDINGS)
+        rl = pl.get("rl") if pl.get("rl") in ("P","T","Z") else _coach_race(pl["race"], list(pl["units"]))
         _hz = min([p2["atk_first_fr"] for p2 in players.values() if p2.get("atk_first_fr") is not None]
                   or [int(240 * FPS_GAME)])
         _hz = max(int(40 * FPS_GAME), min(_hz - int(5 * FPS_GAME), int(240 * FPS_GAME)))
         _anch = _hud_anchor_series(rl, pl.get("_sup_raw"), pl["build"], pl.get("ovie_fr"), _hz, FPS_GAME)
-        prodn = sum(1 for b in pl["build"] if b["cat"] in ("building", "morph") and b["name"] in PROD_BUILDINGS)
-        rl = pl.get("rl") if pl.get("rl") in ("P","T","Z") else _coach_race(pl["race"], list(pl["units"]))
         atk_lv = max([_upgrade_level(pl["up_fr"].get(n, [])) for n in GND_ATK.get(rl, [])] or [0])
         arm_lv = max([_upgrade_level(pl["up_fr"].get(n, [])) for n in GND_ARM.get(rl, [])] or [0])
         _ut = [{"ko": ko, "lv": _up_level_times(pl["up_fr"].get(nm, []))} for (nm, ko) in COMBAT_UP.get(rl, []) if pl["up_fr"].get(nm)]

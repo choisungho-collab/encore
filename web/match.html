@@ -1541,18 +1541,22 @@ function switchPov(v){
   vid.style.visibility='hidden';                      // 전환 중 첫(로비) 프레임을 가림
   vid.src=v.video;vid.removeAttribute('poster');OFF=0;
   try{vid.load();}catch(e){}
+  // 이어재생 핵심: play() 를 '클릭 제스처 스택 안'에서 즉시 개시해야 자동재생 정책을 통과한다.
+  // (seeked 콜백에서 부르면 조용히 거부돼 정지된 채 남음.) 시킹 전 초반 프레임 소리는 임시 음소거로 차단.
+  const _prevMuted=vid.muted;
+  if(wasPlaying){vid.muted=true;vid.play().catch(()=>{});}
   let _shown=false;const _reveal=()=>{if(_shown)return;_shown=true;if(_mySeq===_switchSeq)vid.style.visibility='';};
   vid.addEventListener('loadedmetadata',function _sw(){
     try{vid.playbackRate=_keepRate;}catch(e){}
     if(vid.duration&&isFinite(vid.duration))OFF=_povOff(v,vid.duration);
     const target=(wasPlaying||gt>1)?Math.max(0,Math.min((vid.duration||1e9),gt+OFF)):0;  // 같은 순간으로 맞춤
-    const go=()=>{if(wasPlaying){hideOverlay();vid.play().catch(()=>{});}};
+    const go=()=>{vid.muted=_prevMuted;if(wasPlaying){hideOverlay();if(vid.paused)vid.play().catch(()=>{});}else{try{vid.pause();}catch(e){}}};
     if(target>0.1){
       vid.addEventListener('seeked',function _sk(){_reveal();go();},{once:true});
       try{vid.currentTime=target;}catch(e){_reveal();go();}
     }else{_reveal();go();}
   },{once:true});
-  setTimeout(()=>{_reveal();if(vid)vid.style.visibility='';},1500);  // 안전장치: 무슨 일이 있어도 현재 영상은 표시
+  setTimeout(()=>{_reveal();if(vid){vid.style.visibility='';vid.muted=_prevMuted;if(wasPlaying&&vid.paused)vid.play().catch(()=>{});}},1500);  // 안전장치: 표시+이어재생 보장
 }
 // ── 웜-스왑: 다음 시점을 숨긴 채 미리 디코딩 → 클릭 시 소스 교체 없이 즉시 승격(검은 화면 없음) ──
 let _warmEl=null,_warmV=null,_warmOff=0;
@@ -1595,7 +1599,7 @@ function _commit(v,silent){
     hideOverlay();
     requestAnimationFrame(()=>{requestAnimationFrame(()=>{newEl.style.opacity='1';});});  // 크로스페이드(더블 rAF로 트랜지션 보장)
     setTimeout(()=>{if(oldEl!==vid&&oldEl===_warmEl){oldEl.style.visibility='hidden';oldEl.style.opacity='';oldEl.style.zIndex='';}},320);
-    if(wasPaused){try{newEl.pause();}catch(e){}}else{newEl.play().catch(()=>{});}
+    if(wasPaused){try{newEl.pause();}catch(e){}}else{newEl.play().catch(()=>{});if(newEl.paused)newEl.addEventListener('canplay',function(){if(newEl===vid&&newEl.paused)newEl.play().catch(()=>{});},{once:true});}
     if(!silent){try{stage.scrollIntoView({behavior:'smooth',block:'center'});}catch(e){}}
     return;
   }
