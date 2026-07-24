@@ -1613,9 +1613,9 @@ if(VIDEO){(async()=>{try{
   if(!_all.some(c=>String(c.id)===String(MID)))_all.push({id:MID,video:VIDEO,thumb:__m.thumb,uploader:__m.uploader,saver:meta.saver,players:players,length_sec:__m.length_sec,map:__m.map,group_key:__m.group_key,lead:(__m.analysis&&__m.analysis.meta&&__m.analysis.meta.lead_sec!=null)?String(__m.analysis.meta.lead_sec):null});
   const _mine=clusterMatches(_all).find(g=>g.some(i=>String(_all[i].id)===String(MID)))||[];
   let views=_mine.map(i=>_all[i]).filter(v=>v.video);
-  // 같은 저장자(saver)의 중복 행(재업로드 사고) → 현재 매치 우선, 그다음 오래된 원본만 남김
+  // 완전 동일 '영상'만 중복 제거(재업로드 사고) — 같은 saver 라도 영상이 다르면 실제 별도 시점이므로 보존
   {const _seen={};views=views.slice().sort((a,b)=>((String(b.id)===String(MID))-(String(a.id)===String(MID)))||String(a.id).localeCompare(String(b.id)))
-    .filter(v=>{const k=String(v.saver||v.uploader||('#'+v.id)).trim().toLowerCase();if(_seen[k])return false;_seen[k]=1;return true;});}
+    .filter(v=>{const k=String(v.video||('#'+v.id)).trim();if(_seen[k])return false;_seen[k]=1;return true;});}
 
   try{_POV_PLAYERS=views.map(function(v){var ps=_pj(v),sp=ps.find(function(p){return p.name===v.saver;})||{};return {name:v.saver||v.uploader||'시점',race:sp.race,color:sp.color||'#8A93A0',team:sp.team};});}catch(e){}
   window.__povViews=views;try{renderSupplyChart();}catch(_e){}
@@ -1633,6 +1633,10 @@ if(VIDEO){(async()=>{try{
     const lab=(v,ix)=>{const ps=_pj(v);const sv=ps.find(p=>p.name===v.saver)||{};const pid="pov"+ix+"_"+String(v.id);v._pid=pid;return{id:pid,gid:String(v.id),name:v.saver||v.uploader||"시점",color:sv.color||"#8A93A0",race:RID(sv.race),rk:(sv.race||''),team:(sv.team!=null?sv.team:9)};};
     const items=views.map((v,ix)=>({v,l:lab(v,ix)})).sort((a,b)=>(a.l.team-b.l.team)||a.l.name.localeCompare(b.l.name));
     items.forEach((it,ix)=>{if(it.l.name==='시점'){it.l.name='시점 '+(ix+1);try{console.warn('[ENCORE] saver/uploader 누락 매치:',it.l.id);}catch(e){}}});
+    {const _nc={};items.forEach(it=>{_nc[it.l.name]=(_nc[it.l.name]||0)+1;});   // 같은 이름 탭 충돌 → 업로더로 구분
+     const _ni={};items.forEach(it=>{if(_nc[it.l.name]>1){_ni[it.l.name]=(_ni[it.l.name]||0)+1;
+       const up=(it.v.uploader&&String(it.v.uploader).trim().toLowerCase()!==String(it.l.name).trim().toLowerCase())?String(it.v.uploader):('#'+_ni[it.l.name]);
+       it.l.name=it.l.name+' · '+up;}});}
     const tabs=document.createElement('div');tabs.className='povtabs';
     tabs.innerHTML='<span class="povlbl">시점</span>'+items.map(({l})=>`<button class="povtab${l.gid===String(MID)?' on':''}" data-id="${esc(l.id)}" style="--tc:${esc(l.color)}"><i class="pvdot" style="background:${esc(l.color)}"></i><span class="pvnm">${esc(l.name)}</span>${l.race?`<span class="pvrc r-${esc(l.rk||'')}">${esc(l.race)}</span>`:''}</button>`).join('');
     if(stage&&stage.parentNode){stage.insertAdjacentElement('afterend',tabs);var _svm=document.getElementById('splitview');if(_svm)stage.insertAdjacentElement('afterend',_svm);}

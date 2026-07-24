@@ -155,7 +155,7 @@ import queue as _queue
 from collections import deque as _deque
 GUI_Q = _queue.Queue(maxsize=4000)
 LOG_BUF = _deque(maxlen=400)   # 로그창이 닫혀 있어도 최근 로그를 항상 보관(열면 즉시 채움)
-APP_VERSION = "1.9.4"
+APP_VERSION = "1.9.5"
 REC_STATE = {"recording": False, "encoder": "", "ready": False}
 LAST_ERR = {"msg": "", "t": 0.0}
 UP_DONE = {"t": 0.0, "shown": 0.0}
@@ -474,15 +474,16 @@ def parse_rep(path):
     _winner = _wt if (_wt in _teams_present and len(_teams_present) >= 2) else None
     meta.update({"map": clean(h.get("Map")), "length": "%d:%02d" % (secs // 60, secs % 60),
                  "type": (h.get("Type") or {}).get("Name"), "winner": _winner,
-                 "saver": (next((p.get("Name") for p in (h.get("Players") or [])
+                 "saver": (_identity_saver_fallback([p.get("Name") for p in (h.get("Players") or [])])
+                           # 1순위: 이 기기 주인 계정이 플레이어 명단에 있으면 그가 시점의 주인 —
+                           # 친구가 공유해 준 rep(RepSaver=타인)이 폴더에 있어도 영상 POV 는 이 기기 플레이어다.
+                           or next((p.get("Name") for p in (h.get("Players") or [])
                                 if p.get("ID") == comp.get("RepSaverPlayerID")), None)
                            # RepSaver 매칭 실패(컴퓨터전·옵저버 등) 폴백: 인간 플레이어가 정확히 1명이면 그 사람
                            or next(iter([p.get("Name") for p in (h.get("Players") or [])
                                          if ((p.get("Type") or {}).get("Name") == "Human")]
                                         if sum(1 for p in (h.get("Players") or [])
-                                               if (p.get("Type") or {}).get("Name") == "Human") == 1 else []), None)
-                           # 최후 폴백: 내 계정 이름이 플레이어 중에 있으면 그가 저장자 (다인전 RepSaver 매칭 실패 대비)
-                           or _identity_saver_fallback([p.get("Name") for p in (h.get("Players") or [])])),
+                                               if (p.get("Type") or {}).get("Name") == "Human") == 1 else []), None)),
                  "players": players,
                  "matchup": (f"{t1} vs {t2}" if t1 and t2 else None)})
     return meta
@@ -874,8 +875,8 @@ def extract_analysis(rep_path):
     secs = frames / FPS_GAME
     meta = {"map": clean(h.get("Map")), "length": f"{int(secs//60)}:{int(secs%60):02d}",
             "winner": comp.get("WinnerTeam"),
-            "saver": (next((p.get("Name") for p in (h.get("Players") or []) if p.get("ID") == comp.get("RepSaverPlayerID")), None)
-                      or _identity_saver_fallback([p.get("Name") for p in (h.get("Players") or [])]))}
+            "saver": (_identity_saver_fallback([p.get("Name") for p in (h.get("Players") or [])])
+                      or next((p.get("Name") for p in (h.get("Players") or []) if p.get("ID") == comp.get("RepSaverPlayerID")), None))}
     leave_list = sorted([{"sec": int(max(0, fr)/FPS_GAME), "t": mmss(fr), "name": (players.get(pid) or {}).get("name")}
                          for fr, pid in leaves], key=lambda x: x["sec"])
     team_fine = {}; team_cx = {}; team_cy = {}; team_cp = {}

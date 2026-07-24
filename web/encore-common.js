@@ -39,13 +39,22 @@ function baseKeyOf(m){
   return "h:" + ((m && m.map) || "") + "|" + names;
 }
 // 두 매치가 같은 경기인가
+function _idTs(m){const x=/^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/.exec(String((m&&m.id)||""));
+  return x?Date.UTC(+x[1],+x[2]-1,+x[3],+x[4],+x[5],+x[6])/1000:null;}
 function sameGame(a, b){
   if (a && b && a.group_key && b.group_key) return String(a.group_key) === String(b.group_key);
   if (baseKeyOf(a) !== baseKeyOf(b)) return false;
-  const sa = a && a.saver, sb = b && b.saver;
-  if (sa && sb && sa === sb) return false;   // 한 판 = 한 저장자: 같은 사람이 저장한 두 행은 서로 다른 판
+  // 1순위 판별자: id 에 박힌 녹화 시작시각 — 같은 판의 시점들은 몇 초 차이, 리매치는 게임 길이만큼 벌어짐.
+  // (같은 saver 라도 시작이 붙어 있으면 한 판: 이중 인제스트/식별 꼬임까지 한 카드로 흡수)
+  const ta = _idTs(a), tb = _idTs(b);
   const la = _len(a), lb = _len(b);
-  if (!la || !lb) return false;   // 길이 불명이면 같은 경기로 단정하지 않음(다른 경기 뒤섞임 방지)
+  if (ta != null && tb != null){
+    if (Math.abs(ta - tb) > 180) return false;          // 시작 3분 이상 차이 = 다른 판(리매치)
+    return (!la || !lb) ? true : Math.abs(la - lb) <= 20;  // POV 별 트리밍 오차 흡수
+  }
+  const sa = a && a.saver, sb = b && b.saver;
+  if (sa && sb && sa === sb) return false;   // (시각 불명일 때만) 같은 저장자 두 행 = 다른 판
+  if (!la || !lb) return false;
   return Math.abs(la - lb) <= 6;
 }
 // 매치 배열 → 같은 경기끼리 묶은 인덱스 그룹들의 배열
