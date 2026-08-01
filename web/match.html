@@ -103,9 +103,9 @@ svg{display:block}
 .svctl.show{opacity:1;transform:none;pointer-events:auto}
 /* 전체화면: 멀티뷰와 동일한 부유 글래스 필 */
 .stage.fs-on .svctl{left:0;right:0;bottom:0;width:auto;border-radius:0;border:0;background:linear-gradient(0deg,rgba(0,0,0,.85) 0%,rgba(0,0,0,.4) 60%,rgba(0,0,0,0) 100%);padding:24px 18px 10px;box-shadow:none;-webkit-backdrop-filter:none;backdrop-filter:none}
-.svmini{position:absolute;left:0;right:0;bottom:0;height:3px;z-index:6;background:rgba(255,255,255,.14);pointer-events:none;opacity:0;transition:opacity .3s ease}
+.svmini{position:absolute;left:0;right:0;bottom:0;height:2.5px;z-index:6;background:rgba(255,255,255,.22);pointer-events:none;opacity:0;transition:opacity .3s ease}
 .svmini.on{opacity:1}
-.svmini i{display:block;height:100%;width:var(--mp,0%);background:var(--acc);box-shadow:0 0 7px var(--acc)}
+.svmini i{display:block;height:100%;width:var(--mp,0%);background:#ff0033;box-shadow:none}
 .svctl.show ~ .svmini{opacity:0!important}
 .svspin{position:absolute;top:50%;left:50%;width:54px;height:54px;margin:-27px 0 0 -27px;z-index:6;border:3px solid rgba(255,255,255,.2);border-top-color:var(--acc);border-radius:50%;opacity:0;pointer-events:none;transition:opacity .18s ease}
 .svspin.on{opacity:1;animation:svspin .8s linear infinite}
@@ -988,6 +988,7 @@ html,body{overflow-x:hidden;max-width:100%}
 .povtabs .povlbl{font-size:11.5px}
 /* 페이지 분리: 시청(match)엔 분석 숨김, 분석(analysis)엔 영상·코멘트 숨김 */
 body.pg-watch section.analysis{display:none!important}
+body.pg-watch.an-open section.analysis{display:block!important}
 /* 주의: #splitview 는 분석 섹션이 아니라 멀티뷰 영상 호스트(svHost)가 사는 곳 — 숨기면 멀티가 안 보임 */
 body.pg-analysis .main,body.pg-analysis section.comm{display:none!important}
 /* (분석 페이지도 PC와 동일 DOM 순서 사용) */
@@ -1077,6 +1078,29 @@ body.pg-analysis .main,body.pg-analysis section.comm{display:none!important}
   .clipshare{top:6px;right:104px;padding:0;width:42px;height:42px;justify-content:center;background:transparent;border:0;-webkit-backdrop-filter:none;backdrop-filter:none}
   .clipshare span{display:none}
   .clipshare svg{width:22px;height:22px}
+}
+
+/* ── 분석 컴팩트 모드 ── */
+.analysis .ahead{margin-bottom:8px}
+.analysis .supcard{padding:12px 14px 10px;margin:2px 0 12px}
+.analysis .supleg{margin-top:8px;gap:6px 12px}
+.analysis .kstats{margin:10px 0 4px;gap:8px}
+.analysis .kst{padding:10px 11px 8px}
+.analysis .kst b{font-size:20px}
+.analysis .dstats summary{padding:9px 12px;font-size:12px}
+.analysis .coach{margin-top:16px;padding-top:14px}
+.analysis .ccard{padding:10px 12px;border-radius:11px}
+.analysis .ccard .cct{gap:7px;margin-bottom:4px}
+.analysis .ccard .cct b{font-size:13.5px}
+.analysis .ccard p{font-size:12.5px;line-height:1.55}
+.analysis .cverdict{margin-top:10px;padding:10px 12px}
+.analysis .cvt{font-size:13px;line-height:1.5}
+.analysis .cols{margin-top:18px;gap:18px}
+.analysis .bo,.analysis .units{max-height:250px;overflow:auto;overscroll-behavior:contain;padding-right:4px}
+@media(max-width:600px){
+  .analysis .ccard p{font-size:12px}
+  .analysis .bo,.analysis .units{max-height:210px}
+  .analysis .escard td,.analysis .escard th{padding:5px 4px;font-size:11.5px}
 }
 </style>
 </head><body class="pg-watch">
@@ -1270,7 +1294,7 @@ function _heroSide(arr,t,right){const isWin=_won!=null&&String(t)===String(_won)
   const dl=__m.replay?`<a class="hdl hdl-rep" href="${esc(__m.replay)}" download>↓ 리플레이</a>`:'';
   const _pgA=document.body.classList.contains('pg-analysis');
   const xlink=_pgA?`<a class="hdl" href="match.html?id=${encodeURIComponent(MID)}">▶ 영상 보기</a>`
-               :`<a class="hdl" href="analysis.html?id=${encodeURIComponent(MID)}">📊 상세 분석</a>`;
+               :`<a class="hdl an-toggle" href="analysis.html?id=${encodeURIComponent(MID)}">📊 상세 분석</a>`;
   const he=document.getElementById('hero');if(he)he.innerHTML=`<div class="hbg"><div class="htg"></div><div class="hlg"></div><div class="hrg"></div></div><div class="hgrid"></div><div class="hct"><div class="htop"><div class="hginfo">${_won!=null?('<span class="hbadge '+(_myWin===true?'w':(_myWin===false?'l':'n'))+'">'+(_myWin===true?I.trophy+'승리':(_myWin===false?'패배':('TEAM '+_won+' 승')))+'</span>'):''}<span class="hmap">${esc(mapName(meta.map)||'리플레이')}</span><span class="hsep">·</span><span class="hmode">${mode}</span><span class="hsep">·</span><span class="htime">${esc(meta.length||'')}</span></div><div class="htopr">${xlink}${dl}</div></div></div>`;
   var _mc=document.querySelector('.mucard');if(_mc)_mc.style.display='none';
 })();
@@ -2278,7 +2302,7 @@ if(HL.length){
      const _keep=HL.filter(h=>h.kind==='battle'||h.kind==='drop'||h.kind==='gg'||h.kind==='wipe');
      const _chips=_keep.map(h=>{const lb=_short(h.label);const showLb=(h.kind==='battle'||h.kind==='wipe')&&lb;
        return `<button class="hlc ${KCLASS[h.kind]}" data-s="${h.sec}"><b>${h.t||fmt(h.sec)}</b>${showLb?`<span>${esc(lb)}</span>`:(h.kind==='gg'?'<span>GG</span>':'')}</button>`;}).join('');
-     cw.innerHTML=`<div class="hlrow"><i class="hlab hg">하이라이트</i><div class="hlrc">${_chips}</div><a class="hla" href="analysis.html?id=${encodeURIComponent(MID)}">📊 분석</a></div>`;
+     cw.innerHTML=`<div class="hlrow"><i class="hlab hg">하이라이트</i><div class="hlrc">${_chips}</div><a class="hla an-toggle" href="analysis.html?id=${encodeURIComponent(MID)}">📊 분석</a></div>`;
      cw.querySelectorAll('button.hlc').forEach(b=>b.onclick=()=>seek(+b.dataset.s));
      _tc.appendChild(cw);
    }
@@ -2398,6 +2422,16 @@ function detail(p){const s=p.summary;
     <div class="ch" style="margin-top:30px">생산기지 타이밍</div>${prodBlock}
     <div class="ch" style="margin-top:30px">${wko} 타이밍 <span class="chsub">생산 능력 기준 추정</span></div>${workBlock}
     ${th?'<div class="ch" style="margin-top:30px">타운홀 타이밍</div>'+th:''}</div></div>`;}
+// 분석 인라인 토글: 시청 페이지에서 새 페이지 이동 없이 아래로 펼침
+document.addEventListener('click',function(e){
+  const a=e.target&&e.target.closest?e.target.closest('.an-toggle'):null;
+  if(!a||!document.body.classList.contains('pg-watch'))return;
+  e.preventDefault();
+  const open=document.body.classList.toggle('an-open');
+  a.textContent=open?'📊 분석 접기':'📊 분석';
+  if(open){const sec=document.querySelector('section.analysis');
+    if(sec)setTimeout(()=>{try{sec.scrollIntoView({behavior:'smooth',block:'start'});}catch(_e){}},30);}
+});
 let cur=null;
 function sel(id){cur=id;document.querySelectorAll('.pchip').forEach(c=>c.classList.toggle('sel',+c.dataset.id===id));
  document.querySelectorAll('.cmpc').forEach(c=>c.classList.toggle('sel',+c.dataset.id===id));
