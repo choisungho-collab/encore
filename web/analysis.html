@@ -1031,6 +1031,23 @@ body.pg-analysis .main,body.pg-analysis section.comm{display:none!important}
   #mnav.mnav{left:auto;right:8px;width:min(258px,80vw);border:1px solid var(--line,#23262d);border-radius:13px;margin-top:8px;padding:7px;overflow:hidden;box-shadow:0 20px 46px rgba(0,0,0,.55);background:var(--surface,#16181d)}
   #mnav.mnav a{border-radius:9px}
 }
+
+/* ── 유튜브 모바일 배치 (터치 기기): 시간 좌하단 · 전체화면 우하단 · 배속/음량 우상단 · 바 최하단 풀블리드 ── */
+@media(pointer:coarse){
+  .svctl{top:0;bottom:0;left:0;right:0;height:auto;padding:0;background:none;display:block}
+  .svctl::after{content:'';position:absolute;left:0;right:0;bottom:0;height:112px;
+    background:linear-gradient(0deg,rgba(0,0,0,.78) 0%,rgba(0,0,0,.32) 55%,rgba(0,0,0,0) 100%);pointer-events:none}
+  .svctl>*{position:absolute;z-index:2;margin:0}
+  .svsc{left:0;right:0;bottom:0;flex:none;order:0}
+  .svrange{height:3px;display:block}
+  .svrange:active{height:5px}
+  .svtime{left:14px;bottom:16px;font-size:12.5px;text-shadow:0 1px 3px rgba(0,0,0,.7)}
+  .svctl .svbtn[aria-label="전체화면"]{right:6px;bottom:6px;height:44px;min-width:44px}
+  .svctl .svbtn[aria-label="재생 속도"]{top:6px;right:54px;height:42px}
+  .svctl .svbtn[aria-label="음소거"]{top:6px;right:6px;height:42px;min-width:42px}
+  .svctl .svbtn{opacity:.96}
+  .svctl .svtip{bottom:22px}
+}
 </style>
 </head><body class="pg-analysis">
 
