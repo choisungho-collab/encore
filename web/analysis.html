@@ -88,6 +88,10 @@ svg{display:block}
 }
 .stage:fullscreen,.stage:-webkit-full-screen{width:100vw;height:100vh;max-height:none;aspect-ratio:auto!important;border-radius:0;background:#000}
 .stage:fullscreen video,.stage:-webkit-full-screen video{width:100%;height:100%;object-fit:contain}
+/* lock 미지원 브라우저(삼성 인터넷 등): 세로 전체화면을 90° 돌려 가로 체감 제공 */
+.stage.fs-rot{width:100vh!important;height:100vw!important;transform:rotate(90deg) translateY(-100vw);transform-origin:top left;position:fixed;top:0;left:0}
+.stage.fs-rot video{width:100%;height:100%;object-fit:contain}
+.mvwrap.fs-rot{width:100vh!important;height:100vw!important;transform:rotate(90deg) translateY(-100vw);transform-origin:top left;position:fixed;top:0;left:0}
 .vwrap{position:absolute;inset:0}
 #vid{transition:filter .55s ease,transform .55s ease,opacity .22s ease}
 #vid.vblur{filter:blur(22px) brightness(.85) saturate(.92);transform:scale(1.07)}
@@ -391,13 +395,27 @@ svg{display:block}
 .supsvg{width:100%;height:auto;display:block}
 .supsvg .sg{stroke:var(--line);stroke-width:1}
 .supsvg .sgx{stroke:var(--line);opacity:.45;stroke-dasharray:2 4}
-.supsvg .sl{font-family:var(--fm);font-size:10px;fill:var(--faint)}
+.supsvg .sl{font-family:var(--fm);font-size:13.5px;fill:var(--faint)}
 .supleg{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:11px}
 .spl{display:inline-flex;align-items:center;gap:7px;font-family:var(--fd);font-size:12.5px;font-weight:600;color:var(--ink2)}
 .spl i{width:12px;height:3px;border-radius:2px;flex:0 0 auto}
 .spl em{font-style:normal;font-family:var(--fm);font-size:11px;font-weight:600;color:var(--dim)}
 .spl .ihud{height:5px;box-shadow:0 0 0 1.5px rgba(255,255,255,.5)}
 .supcard .chsub{margin:14px 0 8px}
+/* 선수 상세: 핵심 4타일 + 상세 접기 */
+.kstats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:16px 0 6px}
+.kst{background:var(--surface2);border:1px solid var(--line);border-radius:var(--r1);padding:13px 12px 11px;min-width:0}
+.kst b{display:block;font-family:var(--fm);font-weight:700;font-size:24px;letter-spacing:-.01em;color:var(--ink);line-height:1.05;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kst i{display:block;font-style:normal;font-family:var(--fd);font-size:11px;font-weight:600;color:var(--dim);margin-top:5px;letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dstats{margin:4px 0 10px;border:1px solid var(--line);border-radius:var(--r1);background:transparent}
+.dstats summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:10px;padding:11px 14px;font-family:var(--fd);font-size:12.5px;font-weight:700;color:var(--ink2)}
+.dstats summary::-webkit-details-marker{display:none}
+.dstats summary::before{content:'';width:7px;height:7px;border-right:1.6px solid var(--dim);border-bottom:1.6px solid var(--dim);transform:rotate(-45deg);transition:.15s;flex:0 0 auto}
+.dstats[open] summary::before{transform:rotate(45deg)}
+.dstats .dsn{font-weight:600;color:var(--faint);font-size:11px;margin-left:auto}
+.dstats .statline{margin:2px 12px 10px}
+.dstats .snote{margin:0 14px 12px}
+@media(max-width:600px){.kstats{grid-template-columns:repeat(2,1fr);gap:8px}.kst b{font-size:21px}}
 .escard table{width:100%;border-collapse:collapse;font-family:var(--fm)}
 .escard th{font-size:10.5px;font-weight:700;letter-spacing:.08em;color:var(--faint);text-align:right;padding:4px 8px;border-bottom:1px solid var(--line)}
 .escard th:first-child{text-align:left}
@@ -407,6 +425,10 @@ svg{display:block}
 .escard td.pn2 i{width:9px;height:9px;border-radius:50%;flex:0 0 auto}
 .escard td.tt{font-weight:700;color:var(--ink)}
 .escard tr.top td.tt{color:var(--gold)}
+.escard .esw{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.escard .esw table{min-width:430px}
+.escard td.pn2{max-width:34vw}
+.escard td.pn2 span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media(max-width:600px){.escard td,.escard th{padding:6px 5px;font-size:12px}}
 @media(max-width:600px){.supcard{padding:13px 13px 11px}.supleg{gap:6px 12px}.spl{font-size:12px}.spl em{font-size:10.5px}}
 .ccols{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:4px}
@@ -567,6 +589,7 @@ svg{display:block}
 .povtabs .povlbl{font-family:var(--fd);font-size:12.5px;font-weight:700;letter-spacing:.01em;color:var(--ink2);margin-right:4px}
 .povtab{display:inline-flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--line);color:var(--ink2);font-family:var(--fd);font-weight:600;font-size:13.5px;padding:8px 13px 8px 11px;border-radius:9px;cursor:pointer;transition:.15s}.povtab .pvrc{font-family:var(--fm);font-size:10px;font-weight:700;color:var(--faint);background:var(--well);border-radius:4px;padding:1px 5px}.povtab.on .pvrc{color:var(--acc-ink)}
 .povtab:hover{border-color:var(--line2);color:var(--ink)}
+.povtab .pvnm{max-width:38vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .povtab.on{background:var(--acc-soft);border-color:var(--tc,var(--acc-line));color:var(--ink);box-shadow:0 0 0 1.5px var(--tc,transparent)}
 .povtab .pvdot{width:10px;height:10px;border-radius:50%;flex:0 0 auto;box-shadow:inset 0 0 0 1px rgba(255,255,255,.22),0 0 0 3px color-mix(in srgb,var(--tc) 22%,transparent)}.povmulti{margin-left:6px;display:inline-flex;align-items:center;gap:5px;background:var(--surface);border:1px solid var(--line);color:var(--ink2);font-family:var(--fd);font-weight:600;font-size:13px;padding:8px 13px;border-radius:9px;cursor:pointer;transition:.15s}
 .povmulti:hover{border-color:var(--line2);color:var(--ink)}
@@ -794,6 +817,16 @@ svg{display:block}
 #matchup:empty{min-height:150px}
 #moments:empty{min-height:64px}
 @keyframes encSk{to{background-position:-120% 0}}
+#vtoggle{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:6;width:62px;height:62px;border-radius:50%;
+  border:1.5px solid rgba(255,255,255,.34);background:rgba(12,16,26,.55);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
+  color:#fff;display:none;align-items:center;justify-content:center;cursor:pointer;padding:0;
+  opacity:0;pointer-events:none;transition:opacity .22s ease;box-shadow:0 10px 30px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.16)}
+#vtoggle svg{width:26px;height:26px}
+.stage.started #vtoggle{display:flex}
+.stage.started.ctlon #vtoggle,.stage.started.vpause #vtoggle{opacity:1;pointer-events:auto}
+.stage.fsidle #vtoggle{opacity:0!important;pointer-events:none!important}
+@media(pointer:coarse){.svctl .svpp{display:none}}
+@media(max-width:600px){#vtoggle{width:54px;height:54px}#vtoggle svg{width:22px;height:22px}}
 .svpp,.svbtn{position:relative;overflow:visible}
 .svpp::after,.svbtn::after{content:'';position:absolute;inset:-6px}
 /* ===== 멀티뷰 = 세로 풀폭 스택(2~4 공통) — 각 패널을 최대 크기로 = 최대 선명도 ===== */
@@ -1201,7 +1234,7 @@ function _unbindTU(el){if(el)_vidL.forEach(o=>{try{el.removeEventListener(o.ev,o
 function _regE(ev,fn){_vidL.push({ev:ev,fn:fn});if(vid){try{vid.addEventListener(ev,fn);}catch(e){}}}
 function _regTU(fn){_regE('timeupdate',fn);}
 let _svShow=null,_multiActive=false;
-function hideOverlay(){if(vid){vid.controls=false;vid.classList.remove('vblur');}if(vplay){vplay.style.opacity='0';vplay.style.pointerEvents='none';setTimeout(()=>{if(vplay)vplay.style.display='none';},420);}if(_svShow)_svShow();}
+function hideOverlay(){try{stage.classList.add('started');}catch(e){}if(window._tSync)try{window._tSync();}catch(e){}if(vid){vid.controls=false;vid.classList.remove('vblur');}if(vplay){vplay.style.opacity='0';vplay.style.pointerEvents='none';setTimeout(()=>{if(vplay)vplay.style.display='none';},420);}if(_svShow)_svShow();}
 /* ===== ENCORE 매치 인트로 (재생 전 5·4·3·2·1 + VS 카드) ===== */
 var _POV_PLAYERS=null;  // 실제 POV(시점) 올린 사람들 — 비동기 로드되면 채워짐
 var EINTRO_CSS=`
@@ -1471,10 +1504,29 @@ if(vid){(function(){
     if(isFinite(_dt)&&_dt>0){var _did=false;var _go2=function(){if(_did)return;_did=true;try{seek(_dt);}catch(_){}};if(vid&&vid.readyState>=1)setTimeout(_go2,90);else if(vid)vid.addEventListener('loadedmetadata',function(){setTimeout(_go2,90);},{once:true});}
   })();
   let _scrubbing=false;
-  const _show=()=>{bar.classList.add('show');if(_show._t)clearTimeout(_show._t);if(vid&&!vid.paused&&!_scrubbing)_show._t=setTimeout(()=>bar.classList.remove('show'),3600);};
+  const _hideBar=()=>{bar.classList.remove('show');stage.classList.remove('ctlon');};
+  const _show=()=>{bar.classList.add('show');stage.classList.add('ctlon');if(_show._t)clearTimeout(_show._t);if(vid&&!vid.paused&&!_scrubbing)_show._t=setTimeout(_hideBar,3600);};
   _svShow=_show;
-  stage.addEventListener('pointermove',()=>{if(!_multiActive)_show();});stage.addEventListener('click',()=>{if(_multiActive)return;_show();if(vid){if(vid.paused){hideOverlay();const pr=vid.play();if(pr&&pr.catch)pr.catch(()=>{});}else{vid.pause();}}});
-  stage.addEventListener('pointerleave',e=>{if(e.pointerType==='touch')return;if(vid&&!vid.paused&&!_scrubbing)bar.classList.remove('show');});  /* 터치는 손을 떼면 pointerleave가 발생 → 바가 숨어 탭의 click이 비디오로 새는 모바일 정지불가 버그 방지 */
+  stage.addEventListener('pointermove',()=>{if(!_multiActive)_show();});
+  const _COARSE=window.matchMedia&&window.matchMedia('(pointer:coarse)').matches;
+  const _togglePlay=()=>{if(!vid)return;if(vid.paused){hideOverlay();const pr=vid.play();if(pr&&pr.catch)pr.catch(()=>{});}else{vid.pause();}};
+  stage.addEventListener('click',(e)=>{if(_multiActive)return;
+    if(!_COARSE){_show();_togglePlay();return;}                       // 데스크톱: 기존 그대로
+    if(e.target&&e.target.closest&&e.target.closest('.svctl,#vtoggle,.povtabs,button,a'))return;
+    const now=Date.now();
+    if(now-(stage._lt||0)<300){                                        // 더블탭
+      clearTimeout(stage._tt);stage._lt=0;
+      const r=stage.getBoundingClientRect();let z;
+      if(stage.classList.contains('fs-rot')){z=(e.clientY-r.top)/Math.max(1,r.height);}   // 회전 폴백: 세로축이 곧 영상 가로축
+      else{z=(e.clientX-r.left)/Math.max(1,r.width);}
+      const d=z<0.35?-10:(z>0.65?10:0);
+      if(d&&vid){try{vid.currentTime=Math.max(0,Math.min(vid.duration||1e9,(vid.currentTime||0)+d));}catch(_e){}_flash(d>0?'10초 ▶▶':'◀◀ 10초');_show();}
+      else _togglePlay();
+      return;}
+    stage._lt=now;
+    stage._tt=setTimeout(()=>{stage._lt=0;if(stage.classList.contains('ctlon'))_hideBar();else _show();},300);  // 한번탭=컨트롤 토글
+  });
+  stage.addEventListener('pointerleave',e=>{if(e.pointerType==='touch')return;if(vid&&!vid.paused&&!_scrubbing)_hideBar();});  /* 터치는 손을 떼면 pointerleave가 발생 → 바가 숨어 탭의 click이 비디오로 새는 모바일 정지불가 버그 방지 */
   const _setIcon=()=>{const playing=vid&&!vid.paused;pp.innerHTML=playing?C_PAUSE:C_PLAY;if(playing)_show();else bar.classList.add('show');if(svmini)svmini.classList.toggle('on',!!playing);};
   const _paint=()=>{if(!vid||_scrubbing)return;const gt=Math.max(0,(vid.currentTime||0)-OFF);const p=totalSec>0?Math.max(0,Math.min(1,gt/totalSec)):0;range.value=String(p*1000);range.style.setProperty('--p',(p*100)+'%');if(svmini)svmini.style.setProperty('--mp',(p*100)+'%');tm.innerHTML='<b>'+cf(gt)+'</b> / '+cf(totalSec);};
   _regE('timeupdate',_paint);_regE('play',_setIcon);_regE('pause',_setIcon);_regE('loadedmetadata',_paint);
@@ -1492,11 +1544,53 @@ if(vid){(function(){
   const _setSpd=r=>{if(vid){try{vid.playbackRate=r;}catch(e){}}spd.textContent=(r===1?'1':String(r))+'×';};
   spd.addEventListener('click',e=>{e.stopPropagation();_si=(_si+1)%SPDS.length;_setSpd(SPDS[_si]);});
   mute.addEventListener('click',e=>{e.stopPropagation();if(!vid)return;vid.muted=!vid.muted;mute.innerHTML=vid.muted?C_SPOFF:C_SPON;});
-  if(document.fullscreenEnabled||document.webkitFullscreenEnabled){
-    fs.addEventListener('click',e=>{e.stopPropagation();try{if(document.fullscreenElement||document.webkitFullscreenElement){(document.exitFullscreen||document.webkitExitFullscreen||function(){}).call(document);}else{const rq=stage.requestFullscreen||stage.webkitRequestFullscreen;if(rq){const _p=rq.call(stage);if(_p&&_p.then){_p.then(_lockLS).catch(_lockLS);}else{setTimeout(_lockLS,140);}}}}catch(e2){}});
-    function _lockLS(){try{var o=screen.orientation;if(o&&o.lock)o.lock('landscape').catch(function(){});}catch(e){}}
+  // ── 전체화면 = 가로 (유튜브 파리티) ─────────────────────────────────
+  // 1) iPhone: fullscreen API 없음 → 네이티브 플레이어(자동 회전)
+  // 2) 표준: stage 전체화면 + screen.orientation.lock('landscape')
+  // 3) lock 거부(삼성 인터넷 등 API 차단 브라우저): CSS 90° 강제 회전 폴백,
+  //    기기 실제 회전과 동기화(실가로가 되면 회전 해제, 다시 세로면 재적용)
+  window._fsRotSync=function(){try{
+    var f=(document.fullscreenElement||document.webkitFullscreenElement);
+    document.querySelectorAll('.fs-rot').forEach(function(n){if(n!==f)n.classList.remove('fs-rot');});
+    if(!f){try{if(screen.orientation&&screen.orientation.unlock)screen.orientation.unlock();}catch(e2){}return;}
+    if(f!==stage&&!(f.classList&&f.classList.contains('mvwrap')))return;   // 우리 플레이어 요소만
+    if(f._lockOK){f.classList.remove('fs-rot');return;}
+    f.classList.toggle('fs-rot',window.innerHeight>window.innerWidth);
+  }catch(e){}};
+  function _lockLS(el){try{var o=screen.orientation;
+    if(o&&o.lock){o.lock('landscape').then(function(){el._lockOK=1;window._fsRotSync();},function(){el._lockOK=0;window._fsRotSync();});}
+    else{el._lockOK=0;window._fsRotSync();}
+  }catch(e){el._lockOK=0;window._fsRotSync();}}
+  window._enterFS=function(el){
+    if(vid&&vid.webkitEnterFullscreen&&!document.fullscreenEnabled&&!document.webkitFullscreenEnabled){
+      try{vid.webkitEnterFullscreen();}catch(e){}return;   // iOS
+    }
+    try{const rq=el.requestFullscreen||el.webkitRequestFullscreen;if(!rq)return;
+      const _p=rq.call(el);
+      if(_p&&_p.then){_p.then(function(){_lockLS(el);}).catch(function(){_lockLS(el);});}
+      else setTimeout(function(){_lockLS(el);},140);
+    }catch(e2){}
+  };
+  ['resize','orientationchange'].forEach(function(ev){window.addEventListener(ev,function(){window._fsRotSync();},{passive:true});});
+  if(document.fullscreenEnabled||document.webkitFullscreenEnabled||(vid&&vid.webkitEnterFullscreen)){
+    fs.addEventListener('click',e=>{e.stopPropagation();
+      if(document.fullscreenElement||document.webkitFullscreenElement){try{(document.exitFullscreen||document.webkitExitFullscreen||function(){}).call(document);}catch(e2){}}
+      else window._enterFS(stage);});
   }else fs.style.display='none';
   const _flash=t=>{kbd.textContent=t;kbd.classList.add('show');if(kbd._t)clearTimeout(kbd._t);kbd._t=setTimeout(()=>kbd.classList.remove('show'),650);};
+  // ── 중앙 재생/정지 토글: 시작 후의 '단일' 재생 컨트롤 (모바일은 바 버튼 숨김 → 진짜 하나만) ──
+  (function(){
+    const vw=stage.querySelector('.vwrap');if(!vw)return;
+    const tg=document.createElement('button');tg.id='vtoggle';tg.setAttribute('aria-label','재생/정지');tg.innerHTML=C_PLAY;
+    vw.appendChild(tg);
+    const sync=()=>{const playing=vid&&!vid.paused&&!vid.ended;
+      stage.classList.toggle('vpause',!playing&&stage.classList.contains('started'));
+      tg.innerHTML=playing?C_PAUSE:C_PLAY;tg.setAttribute('aria-label',playing?'일시정지':'재생');};
+    window._tSync=sync;
+    tg.addEventListener('click',e=>{e.stopPropagation();_togglePlay();_show();});
+    ['play','pause','ended'].forEach(ev=>stage.addEventListener(ev,e=>{if(e.target&&e.target.tagName==='VIDEO'){sync();if(ev!=='play')_show();}},true));
+    sync();
+  })();
   // ── 프레임 스텝(,/.) : 정지 후 1프레임씩 (단일 시점) ──
   document.addEventListener('keydown',function(e){
     var tg=e.target||{},tn=(tg.tagName||'').toLowerCase();
@@ -1509,7 +1603,7 @@ if(vid){(function(){
     var idleT=null;
     function inFs(){return (document.fullscreenElement||document.webkitFullscreenElement)===stage;}
     function wake(){if(!inFs())return;stage.classList.remove('fsidle');if(idleT)clearTimeout(idleT);idleT=setTimeout(function(){if(inFs())stage.classList.add('fsidle');},2600);}
-    function onFs(){var _f=inFs();stage.classList.toggle('fs-on',_f);if(_f)wake();else{stage.classList.remove('fsidle');if(idleT){clearTimeout(idleT);idleT=null;}try{if(screen.orientation&&screen.orientation.unlock)screen.orientation.unlock();}catch(e){}}}
+    function onFs(){var _f=inFs();stage.classList.toggle('fs-on',_f);if(_f)wake();else{stage.classList.remove('fsidle');if(idleT){clearTimeout(idleT);idleT=null;}try{if(screen.orientation&&screen.orientation.unlock)screen.orientation.unlock();}catch(e){}stage._lockOK=0;stage.classList.remove('fs-rot');}window._fsRotSync();}
     document.addEventListener('fullscreenchange',onFs);document.addEventListener('webkitfullscreenchange',onFs);
     ['mousemove','pointermove','keydown','touchstart'].forEach(function(ev){document.addEventListener(ev,wake,{passive:true});});
   })();
@@ -1790,6 +1884,7 @@ if(VIDEO){(async()=>{try{
         fsB.addEventListener('click',()=>{
           try{
             if(document.fullscreenElement||document.webkitFullscreenElement){(document.exitFullscreen||document.webkitExitFullscreen||function(){}).call(document);}
+            else if(window._enterFS){window._enterFS(_mvWrap);}
             else{const rq=_mvWrap.requestFullscreen||_mvWrap.webkitRequestFullscreen;if(rq)rq.call(_mvWrap);}
           }catch(e){}
         });
@@ -2068,8 +2163,8 @@ function renderEndScore(){
  const col=n=>((DATA.players||[]).find(p=>p.name===n)||{}).color||'#9fb2d9';
  const top=nm.reduce((m2,k)=>Math.max(m2,ES[k].t||0),0);
  const rows=nm.sort((a2,b2)=>(ES[b2].t||0)-(ES[a2].t||0)).map(n=>{const v=ES[n];
-  return `<tr class="${(v.t||0)===top?'top':''}"><td class="pn2"><i style="background:${col(n)}"></i>${esc(n)}</td><td>${v.u??'—'}</td><td>${v.s??'—'}</td><td>${v.r??'—'}</td><td class="tt">${v.t??'—'}</td></tr>`;}).join('');
- el.innerHTML=`<div class="ch">종료 점수판 <span class="cnote">실측 OCR · 유닛+건물+자원=총점 체크섬 검증</span></div><table><thead><tr><th>플레이어</th><th>유닛</th><th>건물</th><th>자원</th><th>총점</th></tr></thead><tbody>${rows}</tbody></table>`;
+  return `<tr class="${(v.t||0)===top?'top':''}"><td class="pn2"><i style="background:${col(n)}"></i><span>${esc(n)}</span></td><td>${v.u??'—'}</td><td>${v.s??'—'}</td><td>${v.r??'—'}</td><td class="tt">${v.t??'—'}</td></tr>`;}).join('');
+ el.innerHTML=`<div class="ch">종료 점수판 <span class="cnote">실측 OCR · 유닛+건물+자원=총점 체크섬 검증</span></div><div class="esw"><table><thead><tr><th>플레이어</th><th>유닛</th><th>건물</th><th>자원</th><th>총점</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 try{renderEndScore();}catch(_e){}
 if(HL.length){
@@ -2175,6 +2270,7 @@ function factsBlock(p){
  return `<div class="statline statsub">${h}</div>`;
 }
 function detail(p){const s=p.summary;
+ const _cr=(typeof COACH!=='undefined'?COACH:[]).find(c=>c.id===p.id);const _t=(_cr&&_cr.timings)||{};
  const stat=(v,k,acc)=>{const d=(typeof v==='number'&&isFinite(v))?String(Math.round(v)):(v??'—');return `<div class="stat"><div class="v ${acc?'acc':''}">${d}</div><div class="k">${k}</div></div>`;};
  const _brow=b=>{const g=boGroup(b);return `<div class="brow ${g.c}"><span class="bt">${b.t}</span><span class="bd"></span><span class="bn">${esc(b.name||'')}</span><span class="bc">${g.l}</span></div>`;};
  const _ball=(p.build||[]);const _bseen=new Set();
@@ -2193,7 +2289,15 @@ function detail(p){const s=p.summary;
  const lg=`<span class="lg"><i><span class="d" style="background:var(--gold)"></span>확장</i><i><span class="d" style="background:var(--acc)"></span>생산</i><i><span class="d" style="background:var(--violet)"></span>테크</i></span>`;
 
  return `<div class="phead"><span class="cc" style="background:${p.color}"></span><div><div class="nm">${esc(p.name||'—')}</div><div class="sub">${raceChip(p.race)}<span>${RACE[p.race]||''} · Team ${p.team}</span></div></div><a class="prof" href="player.html?name=${encodeURIComponent(p.name||'')}">프로필${I.arrowUR}</a></div>
-  <div class="statline">${stat(RACE[p.race]||'?','종족')}${stat(p.apm||0,'APM',1)}${stat(p.eapm||0,'EAPM')}${stat(s.buildings,'건물')}${stat(s.units,'유닛')}${stat(p.total_supply||'—','총 생산')}${stat(s.supply200||'—','200 도달')}</div>${factsBlock(p)}<div class="snote">${I.info}<span>총 생산은 누적 생산 보급, 200 도달은 추정 (둘 다 전사 미반영)</span></div>
+  <div class="kstats">
+   <div class="kst"><b>${p.apm||0}</b><i>APM · 유효 ${p.eapm||0}</i></div>
+   <div class="kst"><b>${_t.workers??'—'}</b><i>일꾼</i></div>
+   <div class="kst"><b>${s.supply200||'—'}</b><i>${s.supply200?'200 도달':('미도달 · 생산 '+(p.total_supply||0))}</i></div>
+   <div class="kst"><b>${(_t.atk_lv!=null||_t.arm_lv!=null)?('공'+(_t.atk_lv||0)+'·방'+(_t.arm_lv||0)):'—'}</b><i>업그레이드</i></div>
+  </div>
+  <details class="dstats"><summary>상세 수치<span class="dsn">건물 · 유닛 · 멀티 · 정찰 · 컨트롤 …</span></summary>
+   <div class="statline">${stat(RACE[p.race]||'?','종족')}${stat(s.buildings,'건물')}${stat(s.units,'유닛')}${stat(p.total_supply||'—','총 생산')}</div>${factsBlock(p)}<div class="snote">${I.info}<span>총 생산은 누적 생산 보급, 200 도달은 추정 (둘 다 전사 미반영)</span></div>
+  </details>
   ${coachBlock(p)}
   <div class="cols"><div class="col l"><div class="ch">빌드오더${lg}</div><div class="bo">${bo}</div></div>
    <div class="col"><div class="ch">유닛 구성</div><div class="units">${un}</div>
