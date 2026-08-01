@@ -1048,6 +1048,18 @@ body.pg-analysis .main,body.pg-analysis section.comm{display:none!important}
   .svctl .svbtn{opacity:.96}
   .svctl .svtip{bottom:22px}
 }
+
+/* ── 전체화면 스크럽바: 유튜브식 인셋(제스처 영역 회피) + 라운드 + 트랙 가시성 ── */
+.svrange{background:linear-gradient(90deg,#ff0033 0%,#ff0033 var(--p,0%),rgba(255,255,255,.38) var(--p,0%),rgba(255,255,255,.38) 100%)}
+@media(pointer:coarse){
+  .stage.fs-on .svsc{left:14px;right:14px;bottom:calc(env(safe-area-inset-bottom,0px) + 16px)}
+  .stage.fs-on .svrange{border-radius:99px;height:4px}
+  .stage.fs-on .svrange:active{height:6px}
+  .stage.fs-on .svtime{left:18px;bottom:calc(env(safe-area-inset-bottom,0px) + 36px)}
+  .stage.fs-on .svctl .svbtn[aria-label="전체화면"]{right:8px;bottom:calc(env(safe-area-inset-bottom,0px) + 26px)}
+  .stage.fs-on .svctl::after{height:138px}
+  .stage.fs-on .svctl .svtip{bottom:calc(env(safe-area-inset-bottom,0px) + 40px)}
+}
 </style>
 </head><body class="pg-analysis">
 
