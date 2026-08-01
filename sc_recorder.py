@@ -155,7 +155,7 @@ import queue as _queue
 from collections import deque as _deque
 GUI_Q = _queue.Queue(maxsize=4000)
 LOG_BUF = _deque(maxlen=400)   # 로그창이 닫혀 있어도 최근 로그를 항상 보관(열면 즉시 채움)
-APP_VERSION = "1.9.5"
+APP_VERSION = "1.9.6"
 REC_STATE = {"recording": False, "encoder": "", "ready": False}
 LAST_ERR = {"msg": "", "t": 0.0}
 UP_DONE = {"t": 0.0, "shown": 0.0}
@@ -1566,6 +1566,21 @@ def extract_end_score(analysis, video_path):
         return None
 
 
+
+def _slim_cloud_analysis(a):
+    """업로드 페이로드 다이어트: combat_fine(팀 좌표/강도 원시열)·players[].sup_anchor(OCR 앵커)는
+    웹이 안 쓰고 재분석으로 재생성 가능 → 클라우드 사본에서 제거. 로컬 원본은 그대로."""
+    try:
+        if not isinstance(a, dict): return a
+        import copy as _cp
+        b = _cp.deepcopy(a)
+        b.pop("combat_fine", None)
+        for _p in (b.get("players") or []):
+            if isinstance(_p, dict): _p.pop("sup_anchor", None)
+        return b
+    except Exception:
+        return a
+
 def enhance_highlights_with_audio(analysis, video_path):
     """녹화 오디오로 하이라이트 업그레이드. 어떤 실패에도 조용히 원본 유지."""
     try:
@@ -2502,7 +2517,7 @@ def sync_existing_to_cloud(log_fn=None, auto=False):
                 "length": d.get("length"), "length_sec": d.get("length_sec") or 0,
                 "type": d.get("type"), "winner": d.get("winner"), "saver": d.get("saver"),
                 "np": d.get("np") or len(d.get("players") or []), "players": d.get("players") or [],
-                "won": (bool(d["won"]) if d.get("won") is not None else None), "analysis": analysis})
+                "won": (bool(d["won"]) if d.get("won") is not None else None), "analysis": _slim_cloud_analysis(analysis)})
             done += 1; lg(f"    ✓ done: {d.get('map') or mid}")
             if str(mid) in fails: fails.pop(str(mid), None); _fdirty = True   # 성공 → 실패기록 삭제
         except Exception as e:
@@ -3472,7 +3487,7 @@ def ingest(video_path, rep_path, uploader=None, t0=None, rep_mtime=None):
                 "video_size": size or 0, "map": meta.get("map"), "matchup": meta.get("matchup"),
                 "length": meta.get("length"), "length_sec": _len_sec(meta.get("length") or ""),
                 "type": meta.get("type"), "winner": winner, "saver": saver,
-                "np": len(players), "players": players, "won": won, "analysis": analysis})
+                "np": len(players), "players": players, "won": won, "analysis": _slim_cloud_analysis(analysis)})
             for p in (video_path, tmp_thumb):
                 try: os.remove(p)
                 except OSError: pass
@@ -4374,7 +4389,7 @@ def _cloud_send(video, rep):
            "map": meta.get("map"), "matchup": meta.get("matchup"), "length": meta.get("length"),
            "length_sec": _len_sec(meta.get("length") or ""), "type": meta.get("type"),
            "winner": winner, "saver": saver, "np": len(players),
-           "players": players, "won": won, "analysis": analysis}
+           "players": players, "won": won, "analysis": _slim_cloud_analysis(analysis)}
     rr = requests.post(url, json={"key": key, "action": "register", "match": row}, timeout=60)
     if rr.status_code != 200: return False
     try: os.remove(video)

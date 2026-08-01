@@ -492,7 +492,7 @@ function archiveHead(){return '<div class="head"><div class="eb">Brood War Archi
   if(!hadCache&&grid)grid.innerHTML=skelCards(8);
   // 2) 네트워크로 최신본 가져와 갱신 (stale-while-revalidate)
   let rows;
-  try{rows=await sbGet("matches?select=*&order=uploaded.desc&limit=200");}
+  try{rows=await sbGet("matches?select=id,map,length,length_sec,players,winner,saver,uploader,thumb,uploaded,views,likes&order=uploaded.desc&limit=200");}
   catch(e){
     console.error("[ENCORE] matches 불러오기 실패:",e);
     if(!hadCache&&grid)grid.innerHTML='<div class="empty"><div class="ebox"><h2>불러오기 실패</h2><p>서버 응답 오류 (HTTP '+((e&&e.message)||'?')+'). 키 또는 권한(RLS) 문제일 수 있어요. 잠시 후 다시 시도해 주세요.</p></div></div>';

@@ -252,7 +252,9 @@ function hallOfFame(rows){
   var agg={};
   rows.forEach(function(r){
     var a;try{a=(typeof r.analysis==="string")?JSON.parse(r.analysis||"{}"):(r.analysis||{});}catch(e){a={};}
-    var ps=(a&&a.players)||[];var winner=(a&&a.meta&&a.meta.winner!=null)?a.meta.winner:r.winner;
+    var ps=r.players;if(typeof ps==="string"){try{ps=JSON.parse(ps);}catch(e2){ps=null;}}
+    if(!Array.isArray(ps))ps=(a&&a.players)||[];
+    var winner=(r.winner!=null)?r.winner:((a&&a.meta)?a.meta.winner:null);
     ps.forEach(function(p){if(!p.name)return;var k=p.name;
       if(!agg[k])agg[k]={games:0,wins:0,apmS:0,apmN:0,res:[],races:{}};
       agg[k].games++;var won=(winner!=null&&p.team===winner);if(won)agg[k].wins++;if(p.race){agg[k].races[p.race]=(agg[k].races[p.race]||0)+1;}
@@ -283,7 +285,7 @@ function hallOfFame(rows){
   const grid=document.getElementById("grid"),topslot=document.getElementById("topslot");
   {var _h0=document.getElementById("hall");if(_h0)_h0.innerHTML=skelHall();}
   let rows;
-  try{rows=await sbGet("matches?select=*&order=uploaded.desc&limit=500");}
+  try{rows=await sbGet("matches?select=id,map,length,length_sec,players,winner,saver,uploader,thumb,uploaded,views,likes&order=uploaded.desc&limit=500");}
   catch(e){if(grid)grid.innerHTML='<div class="empty"><div class="ebox"><h2>불러오기 실패</h2><p>잠시 후 다시 시도해 주세요.</p></div></div>';return;}
   const allGames=rows.map(gameView);
   const hallHtml=hallOfFame(rows);

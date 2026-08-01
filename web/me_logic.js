@@ -81,7 +81,7 @@
   // (로그인 고치기 전 올린 판은 owner_puuid 가 비어 있거나 달라서 안 뜨던 문제 보완)
   async function fetchMine(who) {
     var byId = {}, q = [];
-    q.push("matches?select=*&owner_puuid=eq." + encodeURIComponent(who.puuid) + "&order=uploaded.desc&limit=300");
+    q.push("matches?select=id,map,length,length_sec,players,winner,saver,uploader,thumb,uploaded,views,likes,owner_puuid&owner_puuid=eq." + encodeURIComponent(who.puuid) + "&order=uploaded.desc&limit=300");
     if (who.name) {
       q.push("matches?select=*&saver=eq." + encodeURIComponent(who.name) + "&order=uploaded.desc&limit=300");
       var ln = String(who.name).toLowerCase();
