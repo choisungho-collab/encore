@@ -1602,12 +1602,18 @@ if(vid){(function(){
   }catch(e){el._lockOK=0;window._fsRotSync();}}
   window._enterFS=function(el){
     if(vid&&vid.webkitEnterFullscreen&&!document.fullscreenEnabled&&!document.webkitFullscreenEnabled){
-      try{vid.webkitEnterFullscreen();}catch(e){}return;   // iOS
+      try{vid.webkitEnterFullscreen();}catch(e){}return;   // iOS / 일부 웹뷰: 네이티브 플레이어
     }
     try{const rq=el.requestFullscreen||el.webkitRequestFullscreen;if(!rq)return;
       const _p=rq.call(el);
       if(_p&&_p.then){_p.then(function(){_lockLS(el);}).catch(function(){_lockLS(el);});}
       else setTimeout(function(){_lockLS(el);},140);
+      // 벨트&서스펜더: 락 프라미스/이벤트 타이밍이 어긋나는 브라우저 대비 시차 재동기화 3연발
+      [150,450,900].forEach(function(ms){setTimeout(function(){window._fsRotSync();},ms);});
+      // 일부 크로미움: 전체화면 '안에서의 제스처'에서만 lock 허용 → 첫 터치에 1회 재시도
+      var _rt=function(){try{var f=document.fullscreenElement||document.webkitFullscreenElement;
+        if(f===el&&!el._lockOK)_lockLS(el);}catch(e3){}document.removeEventListener('touchend',_rt,true);};
+      document.addEventListener('touchend',_rt,true);
     }catch(e2){}
   };
   ['resize','orientationchange'].forEach(function(ev){window.addEventListener(ev,function(){window._fsRotSync();},{passive:true});});
