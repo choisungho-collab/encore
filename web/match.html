@@ -2,7 +2,7 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ENCORE · ENCORE</title><meta property="og:type" content="website"><meta property="og:site_name" content="ENCORE"><meta property="og:title" content="ENCORE · ENCORE"><meta property="og:description" content="경기 다시보기 — 멀티 시점, 타임라인, 자원·생산 분석까지."><meta property="og:image" content="https://encorestar.netlify.app/og.png"><meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20d%3D%22M16.00%2016.40%20L16.00%203.80%20L19.12%2012.11%20Z%22%20fill%3D%22%23F2F6FB%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M16.00%2016.40%20L19.12%2012.11%20L27.98%2012.51%20Z%22%20fill%3D%22%239AA5B6%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M16.00%2016.40%20L27.98%2012.51%20L21.04%2018.04%20Z%22%20fill%3D%22%236E7889%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M16.00%2016.40%20L21.04%2018.04%20L23.41%2026.59%20Z%22%20fill%3D%22%234A5364%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M16.00%2016.40%20L23.41%2026.59%20L16.00%2021.70%20Z%22%20fill%3D%22%234A5364%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M16.00%2016.40%20L16.00%2021.70%20L8.59%2026.59%20Z%22%20fill%3D%22%236E7889%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M16.00%2016.40%20L8.59%2026.59%20L10.96%2018.04%20Z%22%20fill%3D%22%239AA5B6%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M16.00%2016.40%20L10.96%2018.04%20L4.02%2012.51%20Z%22%20fill%3D%22%23F2F6FB%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M16.00%2016.40%20L4.02%2012.51%20L12.88%2012.11%20Z%22%20fill%3D%22%23F2F6FB%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M16.00%2016.40%20L12.88%2012.11%20L16.00%203.80%20Z%22%20fill%3D%22%23F2F6FB%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M16.00%203.80%20L19.12%2012.11%20L27.98%2012.51%20L21.04%2018.04%20L23.41%2026.59%20L16.00%2021.70%20L8.59%2026.59%20L10.96%2018.04%20L4.02%2012.51%20L12.88%2012.11%20Z%22%20fill%3D%22none%22%20stroke%3D%22%233A4354%22%20stroke-width%3D%22.55%22%20stroke-linejoin%3D%22round%22%20opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E">
-<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.css">
+<link rel="preconnect" href="https://luljnalcnxfyxmlgoxbc.supabase.co" crossorigin><link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.css">
 
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -1060,6 +1060,24 @@ body.pg-analysis .main,body.pg-analysis section.comm{display:none!important}
   .stage.fs-on .svctl::after{height:138px}
   .stage.fs-on .svctl .svtip{bottom:calc(env(safe-area-inset-bottom,0px) + 40px)}
 }
+
+/* ── 스크럽바 v2: 보이는 선은 얇게, 잡는 영역은 두껍게 (유튜브식) ── */
+@media(pointer:coarse){
+  .svrange{height:22px;border-radius:0;background:linear-gradient(90deg,#ff0033 0%,#ff0033 var(--p,0%),rgba(255,255,255,.38) var(--p,0%),rgba(255,255,255,.38) 100%);background-size:100% 3px;background-position:center;background-repeat:no-repeat}
+  .svrange:active{background-size:100% 6px}
+  .stage.fs-on .svrange{height:24px;background-size:100% 4px;border-radius:0}
+  .stage.fs-on .svrange:active{background-size:100% 7px}
+  .svctl .svtip{bottom:26px}
+}
+/* ── 클립 공유: 상시 알약 → 컨트롤과 함께 뜨는 아이콘 (우상단 배속 옆) ── */
+.stage.started .clipshare{opacity:0;pointer-events:none}
+.stage.started.ctlon .clipshare,.stage.started.vpause .clipshare{opacity:1;pointer-events:auto}
+.stage.fsidle .clipshare{opacity:0!important;pointer-events:none!important}
+@media(pointer:coarse){
+  .clipshare{top:6px;right:104px;padding:0;width:42px;height:42px;justify-content:center;background:transparent;border:0;-webkit-backdrop-filter:none;backdrop-filter:none}
+  .clipshare span{display:none}
+  .clipshare svg{width:22px;height:22px}
+}
 </style>
 </head><body class="pg-watch">
 
@@ -1161,6 +1179,7 @@ async function __get(p,ms){
  {var _sk=document.getElementById("stage");if(_sk)_sk.innerHTML=String.raw`<div class="skel-thumb" style="border-radius:17px"></div>`;}
  let __m,__netErr=null;
  for(let __try=0;__try<2&&!__m;__try++){ // 인앱 웹뷰 첫 요청 실패가 잦아 1회 자동 재시도
+   const __cmtsP=__get("comments?match_id=eq."+encodeURIComponent(__id)+"&select=*&order=created.asc").catch(()=>[]);
    try{__m=(await __get("matches?id=eq."+encodeURIComponent(__id)+"&select=*&limit=1",12000))[0];__netErr=null;}
    catch(e){__netErr=e;if(__try===0)await new Promise(r=>setTimeout(r,700));}
  }
@@ -1171,7 +1190,7 @@ async function __get(p,ms){
  if(!__a.highlights)__a.highlights=[];
  window.__ENC_BOOTED=true; // 첫 페인트 성공 — 이후 오류는 부팅 배너 대상 아님
  {var _bf=document.getElementById('bootfail');if(_bf)_bf.remove();}
- let __cmts=[];try{__cmts=await __get("comments?match_id=eq."+encodeURIComponent(__id)+"&select=*&order=created.asc");}catch(e){}
+ let __cmts=[];try{__cmts=await __cmtsP;}catch(e){}
  const __pn=new Set((__a.players||[]).map(p=>p.name));__cmts.forEach(c=>c.participant=__pn.has(c.author));
  document.title=(mapName(__a.meta.map)||"Match")+" · ENCORE";
  const __coach=coach_report(__a);
@@ -1509,9 +1528,9 @@ if(vid){
  }catch(_){}}
  vid.addEventListener('loadedmetadata',()=>{_fitAR();if(vid.duration&&isFinite(vid.duration)){OFF=_povOff(__self,vid.duration);if(OFF>1){try{vid.currentTime=Math.max(0,OFF-10);}catch(e){}}}});
  if(vid&&vid.videoWidth>0)_fitAR();
- if(vplay)vplay.addEventListener('click',(e)=>{e.stopPropagation();if(vplay._done)return;vplay._done=true;const _tryPlay=()=>{hideOverlay();const pr=vid.play();if(pr&&pr.catch)pr.catch(()=>{try{vid.muted=true;vid.play().catch(()=>{});}catch(e2){}});};try{vid.load();}catch(e2){}encoreIntro(()=>{if(vid.readyState>=2){_tryPlay();}else{vid.addEventListener('canplay',_tryPlay,{once:true});}});});
+ if(vplay)vplay.addEventListener('click',(e)=>{e.stopPropagation();if(vplay._done)return;vplay._done=true;const _tryPlay=()=>{hideOverlay();const pr=vid.play();if(pr&&pr.catch)pr.catch(()=>{try{vid.muted=true;vid.play().catch(()=>{});}catch(e2){}});};try{vid.load();}catch(e2){}const _go=()=>{if(vid.readyState>=2){_tryPlay();}else{vid.addEventListener('canplay',_tryPlay,{once:true});}};if(vplay._skipIntro){_go();}else{encoreIntro(_go);}});
  vid.addEventListener('play',hideOverlay);
- if(vplay&&VIDEO){var _at0=Date.now();(function _autoPlay(){if(!vplay||vplay._done)return;if(_POV_PLAYERS||Date.now()-_at0>1200){try{vplay.click();}catch(e){}return;}setTimeout(_autoPlay,120);})();}
+ if(vplay&&VIDEO){var _at0=Date.now();(function _autoPlay(){if(!vplay||vplay._done)return;if(_POV_PLAYERS||Date.now()-_at0>1200){try{vplay._skipIntro=true;vplay.click();}catch(e){}return;}setTimeout(_autoPlay,120);})();}
 }
 const seek=s=>{if(!vid)return;const go=()=>{hideOverlay();try{vid.currentTime=Math.max(0,Math.min((vid.duration||1e9),s+OFF));}catch(e){}vid.play().catch(()=>{});vid.scrollIntoView({behavior:'smooth',block:'center'});};if(vid.readyState>=1){go();}else{vid.addEventListener('loadedmetadata',go,{once:true});}};
 document.addEventListener('click',function(e){var b=e.target&&e.target.closest?e.target.closest('.cseek,.statseek'):null;if(!b)return;e.preventDefault();e.stopPropagation();var s=parseFloat(b.getAttribute('data-s'));if(isFinite(s))seek(s);});
