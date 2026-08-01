@@ -155,7 +155,7 @@ import queue as _queue
 from collections import deque as _deque
 GUI_Q = _queue.Queue(maxsize=4000)
 LOG_BUF = _deque(maxlen=400)   # 로그창이 닫혀 있어도 최근 로그를 항상 보관(열면 즉시 채움)
-APP_VERSION = "1.9.6"
+APP_VERSION = "1.9.8"
 REC_STATE = {"recording": False, "encoder": "", "ready": False}
 LAST_ERR = {"msg": "", "t": 0.0}
 UP_DONE = {"t": 0.0, "shown": 0.0}
@@ -863,6 +863,7 @@ def extract_analysis(rep_path):
             "supply_series": _ss, "supply_step": SS_STEP, "worker_series": _ws, "worker50_sec": _w50,
             "sup_anchor": (_anch if len(_anch) >= 6 else None),
             "up_timed": _ut, "worker_ms": _wms, "worker_ko": WORKER_KO.get(rl, "일꾼"),
+            "tech1": {nm: mmss(min(fr)) for nm, fr in (pl.get("up_fr") or {}).items() if fr},   # 업글/테크 최초 시작 시각 — 코치 2.0 인과 체인용
             "atk_lv": atk_lv, "arm_lv": arm_lv, "supply_bld": sup_bld, "supply_cap": sup_cap, "supply_ko": sup_ko,
             "main_prod_n": mp_n, "main_prod_ko": mp_ko,
             "summary": {"buildings": sum(1 for b in pl["build"] if b["cat"] in ("building", "morph")),
@@ -3051,12 +3052,12 @@ def _hw_or_x264(q, x264_preset="veryfast"):
     except Exception: base = []
     qs = str(int(q))
     if "h264_nvenc" in base:
-        return ["-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", qs, "-b:v", "0"]
+        return ["-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", qs, "-b:v", "0","-force_key_frames", "expr:gte(t,n_forced*2)"]
     if "h264_amf" in base:
-        return ["-c:v", "h264_amf", "-quality", "quality", "-rc", "cqp", "-qp_i", qs, "-qp_p", qs]
+        return ["-c:v", "h264_amf", "-quality", "quality", "-rc", "cqp", "-qp_i", qs, "-qp_p", qs,"-force_key_frames", "expr:gte(t,n_forced*2)"]
     if "h264_qsv" in base:
-        return ["-c:v", "h264_qsv", "-preset", "faster", "-global_quality", qs]
-    return ["-c:v", "libx264", "-preset", x264_preset, "-crf", qs]
+        return ["-c:v", "h264_qsv", "-preset", "faster", "-global_quality", qs,"-force_key_frames", "expr:gte(t,n_forced*2)"]
+    return ["-c:v", "libx264", "-preset", x264_preset, "-crf", qs, "-sc_threshold", "0","-force_key_frames", "expr:gte(t,n_forced*2)"]
 
 CLIP_KINDS = {"battle", "gg", "drop"}
 def make_clips(video_path, highlights, game_len_sec, out_dir, lead=6.0, maxn=3, dur=30.0, pre=12.0):
@@ -3150,11 +3151,11 @@ def _compress_encoder():
     base = _encoder_args()
     if "h264_nvenc" in base:
         # NVENC 는 라이브 녹화와 동시 2세션 이상 가능(GTX 900대 이후). p5=빠름·고효율, cq=용량/화질 균형.
-        return (["-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "26", "-b:v", "0"], "NVENC (하드웨어)")
+        return (["-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", "26", "-b:v", "0","-force_key_frames", "expr:gte(t,n_forced*2)"], "NVENC (하드웨어)")
     if "h264_amf" in base:
-        return (["-c:v", "h264_amf", "-quality", "quality", "-rc", "cqp", "-qp_i", "26", "-qp_p", "26"], "AMF (하드웨어)")
+        return (["-c:v", "h264_amf", "-quality", "quality", "-rc", "cqp", "-qp_i", "26", "-qp_p", "26","-force_key_frames", "expr:gte(t,n_forced*2)"], "AMF (하드웨어)")
     if "h264_qsv" in base:
-        return (["-c:v", "h264_qsv", "-preset", "faster", "-global_quality", "26"], "QSV (하드웨어)")
+        return (["-c:v", "h264_qsv", "-preset", "faster", "-global_quality", "26","-force_key_frames", "expr:gte(t,n_forced*2)"], "QSV (하드웨어)")
     return (None, None)
 
 def _compress_for_upload(video_path):
