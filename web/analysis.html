@@ -830,8 +830,8 @@ svg{display:block}
 .stage.fsidle #vtoggle{opacity:0!important;pointer-events:none!important}
 #vtoggle{width:72px;height:72px;border:0;background:rgba(0,0,0,.5)}
 #vtoggle svg{width:32px;height:32px}
-.vskip{position:absolute;top:50%;transform:translateY(-50%);z-index:6;width:56px;height:56px;border-radius:50%;border:0;background:rgba(0,0,0,.42);color:#fff;display:none;flex-direction:column;align-items:center;justify-content:center;gap:1px;cursor:pointer;opacity:0;pointer-events:none;transition:opacity .22s;padding:0;font-family:var(--fm);font-size:10px;font-weight:700}
-.vskip svg{width:20px;height:20px}
+.vskip{position:absolute;top:50%;transform:translateY(-50%);z-index:6;width:50px;height:50px;border-radius:50%;border:0;background:rgba(0,0,0,.3);color:rgba(255,255,255,.92);display:none;flex-direction:column;align-items:center;justify-content:center;gap:1px;cursor:pointer;opacity:0;pointer-events:none;transition:opacity .22s;padding:0;font-family:var(--fm);font-size:9.5px;font-weight:700}
+.vskip svg{width:17px;height:17px}
 .vskip.l{left:16%}.vskip.r{right:16%}
 @media(pointer:coarse){
   .svctl .svpp{display:none}
@@ -1145,8 +1145,8 @@ body.pg-analysis .main,body.pg-analysis section.comm{display:none!important}
 .analysis .statline .stat .v{font-size:15px}
 .analysis .kst i{font-size:10.5px}
 .analysis .coach{border-top:0;margin-top:14px;padding-top:4px}
-.analysis .coachh{margin-bottom:10px}
-.analysis .coachh>*:first-child{font-family:var(--fm);font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--faint)}
+.analysis .coachh{margin-bottom:10px;font-family:var(--fm);font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--faint)}
+.analysis .coachh .cnote{font-family:var(--fd);font-size:10.5px;font-weight:500;letter-spacing:0}
 .analysis .ccard,.analysis .cverdict{border-radius:12px}
 .analysis .cols{gap:16px}
 .analysis .col.l{border-right:0}
@@ -1182,6 +1182,48 @@ body.pg-analysis .main,body.pg-analysis section.comm{display:none!important}
 .mvwrap:fullscreen .mvbar,.mvwrap:-webkit-full-screen .mvbar{position:absolute;left:0;right:0;bottom:0;transform:none;width:auto;border-radius:0;border:0;
   background:linear-gradient(0deg,rgba(0,0,0,.85) 0%,rgba(0,0,0,.4) 60%,rgba(0,0,0,0) 100%);
   -webkit-backdrop-filter:none;backdrop-filter:none;box-shadow:none;padding:20px 16px calc(env(safe-area-inset-bottom,0px) + 12px)}
+
+.analysis .cgrade,.cgrade{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 11px;border-radius:999px;
+  background:var(--surface);border:1px solid var(--line);box-shadow:none}
+.cgrade i{font-style:normal;font-family:var(--fd);font-size:11.5px;font-weight:600;color:var(--dim)}
+.cgrade b{font-family:var(--fm);font-size:12.5px;font-weight:800}
+.cgrade.gS b,.cgrade.gA b{color:var(--acc-ink)}
+.cgrade.gS{border-color:var(--acc-line)}
+.cgrade.gB b{color:var(--gold)}
+.cgrade.gC b{color:var(--loss)}
+.cgrade.gC{border-color:rgba(232,105,76,.35)}
+.analysis .cgrades{margin:10px 0 0;gap:7px}
+.analysis .dstats{margin-bottom:4px}
+
+/* 코치 2.0 — 이 판의 핵심 */
+.ckwrap{margin:4px 0 14px}
+.cklab{font-family:var(--fm);font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--loss);margin-bottom:8px}
+.ccard.ck{border-color:rgba(232,105,76,.4);border-left:3px solid var(--loss);background:rgba(232,105,76,.07);margin-bottom:8px}
+.ccard.ck .cct b{color:var(--ink)}
+.ckb{margin-left:auto;font-family:var(--fm);font-size:9px;font-weight:800;letter-spacing:.06em;color:var(--loss);background:rgba(232,105,76,.14);border:1px solid rgba(232,105,76,.4);border-radius:6px;padding:2px 6px}
+.ckev{display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 7px}
+.cke{display:inline-flex;align-items:center;gap:5px;font-family:var(--fm);font-size:11px;color:var(--ink2);background:var(--well);border:1px solid var(--line);border-radius:999px;padding:4px 9px;cursor:default}
+.cke.cseek{cursor:pointer}
+.cke b{color:var(--ink);font-weight:700}
+.cke i{font-style:normal;color:var(--faint);font-size:10px}
+
+/* 코치 3.0 — 전략 리포트 카드 */
+.stcard{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:12px 13px;margin:4px 0 12px}
+.sthead{display:flex;align-items:center;gap:9px;margin-bottom:9px}
+.stlab{font-family:var(--fm);font-size:10px;font-weight:800;letter-spacing:.1em;color:var(--faint);background:var(--well);border:1px solid var(--line);border-radius:6px;padding:2px 7px}
+.sthead b{font-size:14.5px;font-weight:800;color:var(--ink)}
+.strate{margin-left:auto;font-family:var(--fm);font-size:11px;font-weight:800;border-radius:999px;padding:3px 10px;border:1px solid var(--line)}
+.strate.g{color:var(--acc-ink);border-color:var(--acc-line);background:var(--acc-soft)}
+.strate.m{color:var(--gold);border-color:rgba(231,167,63,.4)}
+.strate.b{color:var(--loss);border-color:rgba(232,105,76,.4)}
+.stitems{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:9px}
+.sti{display:inline-flex;align-items:center;gap:4px;font-family:var(--fm);font-size:11px;border-radius:999px;padding:4px 10px;border:1px solid var(--line);background:var(--well);color:var(--ink2)}
+.sti.ok{color:var(--acc-ink);border-color:var(--acc-line)}
+.sti.late{color:var(--gold);border-color:rgba(231,167,63,.4)}
+.sti.miss{color:var(--loss);border-color:rgba(232,105,76,.35)}
+.sti.cseek{cursor:pointer}
+.stline{margin:0;font-size:12.5px;line-height:1.6;color:var(--ink2)}
+.stline.good{color:var(--acc-ink)}
 </style>
 </head><body class="pg-analysis">
 
@@ -1408,7 +1450,7 @@ function _unbindTU(el){if(el)_vidL.forEach(o=>{try{el.removeEventListener(o.ev,o
 function _regE(ev,fn){_vidL.push({ev:ev,fn:fn});if(vid){try{vid.addEventListener(ev,fn);}catch(e){}}}
 function _regTU(fn){_regE('timeupdate',fn);}
 let _svShow=null,_multiActive=false;
-function hideOverlay(){try{stage.classList.add('started');}catch(e){}try{if(vid&&vid.preload!=='auto')vid.preload='auto';}catch(e){}if(window._tSync)try{window._tSync();}catch(e){}if(vid){vid.controls=false;vid.classList.remove('vblur');}if(vplay){vplay.style.opacity='0';vplay.style.pointerEvents='none';setTimeout(()=>{if(vplay)vplay.style.display='none';},420);}if(_svShow)_svShow();}
+function hideOverlay(){try{stage.classList.add('started');}catch(e){}try{if(vid&&vid.preload!=='auto')vid.preload='auto';}catch(e){}if(window._tSync)try{window._tSync();}catch(e){}if(vid){vid.controls=false;vid.classList.remove('vblur');}if(vplay){vplay.style.opacity='0';vplay.style.pointerEvents='none';setTimeout(()=>{if(vplay)vplay.style.display='none';},420);}}
 /* ===== ENCORE 매치 인트로 (재생 전 5·4·3·2·1 + VS 카드) ===== */
 var _POV_PLAYERS=null;  // 실제 POV(시점) 올린 사람들 — 비동기 로드되면 채워짐
 var EINTRO_CSS=`
@@ -1701,7 +1743,7 @@ if(vid){(function(){
     stage._tt=setTimeout(()=>{stage._lt=0;if(stage.classList.contains('ctlon'))_hideBar();else _show();},300);  // 한번탭=컨트롤 토글
   });
   stage.addEventListener('pointerleave',e=>{if(e.pointerType==='touch')return;if(vid&&!vid.paused&&!_scrubbing)_hideBar();});  /* 터치는 손을 떼면 pointerleave가 발생 → 바가 숨어 탭의 click이 비디오로 새는 모바일 정지불가 버그 방지 */
-  const _setIcon=()=>{const playing=vid&&!vid.paused;pp.innerHTML=playing?C_PAUSE:C_PLAY;if(playing)_show();else bar.classList.add('show');if(svmini)svmini.classList.toggle('on',!!playing);};
+  const _setIcon=()=>{const playing=vid&&!vid.paused;pp.innerHTML=playing?C_PAUSE:C_PLAY;if(playing){if(!(window.matchMedia&&window.matchMedia('(pointer:coarse)').matches))_show();}else bar.classList.add('show');if(svmini)svmini.classList.toggle('on',!!playing);};
   const _paint=()=>{if(!vid||_scrubbing)return;const gt=Math.max(0,(vid.currentTime||0)-OFF);const p=totalSec>0?Math.max(0,Math.min(1,gt/totalSec)):0;range.value=String(p*1000);range.style.setProperty('--p',(p*100)+'%');if(svmini)svmini.style.setProperty('--mp',(p*100)+'%');tm.innerHTML='<b>'+cf(gt)+'</b> / '+cf(totalSec);};
   _regE('timeupdate',_paint);_regE('play',_setIcon);_regE('pause',_setIcon);_regE('loadedmetadata',_paint);
   const _spin=on=>{if(svspin)svspin.classList.toggle('on',!!on);};
@@ -2456,7 +2498,10 @@ function coachBlock(p){
  // 분석 페이지에선 최상단 성적표가 '나'의 총평·등급을 이미 보여줌 → 같은 선수 패널에선 중복 제거
  const _dupHero=document.body.classList.contains('pg-analysis');   // 성적표(상단)가 선택 선수를 항상 비춤 → 패널 쪽은 상시 생략
  const cnt=n=>n?`<span class="ccln">${n}</span>`:'';
- return `<div class="coach"><div class="ch coachh">코치 리포트 <span class="cnote">실제 리플레이 기반 · 스타크래프트 기준</span></div>${_dupHero?'':gr}${_dupHero?'':vd}<div class="ccols"><div class="ccol"><div class="cclh good">잘한 점${cnt(gp.length)}</div>${gp.length?_wrap(gp,3,false):'<div class="cnone">—</div>'}</div><div class="ccol"><div class="cclh bad">아쉬운 점${cnt(bp.length)}</div>${bp.length?_wrap(bp,4,true):'<div class="cnone">개선할 점이 없어요 — 깔끔한 한 판!</div>'}</div></div></div>`;
+ return `<div class="coach"><div class="ch coachh">코치 리포트 <span class="cnote">실제 리플레이 기반 · 스타크래프트 기준</span></div>${_dupHero?'':gr}${_dupHero?'':vd}${cr.strat?`<div class="stcard"><div class="sthead"><span class="stlab">전략</span><b>${cr.strat.label}</b><span class="strate ${cr.strat.rate>=0.75?'g':(cr.strat.rate>=0.4?'m':'b')}">실행 ${Math.round(cr.strat.rate*100)}%</span></div><div class="stitems">${cr.strat.items.map(i=>`<span class="sti ${i.ok?'ok':(i.act!=null?'late':'miss')}${(i.act!=null&&VIDEO)?' cseek':''}"${(i.act!=null&&VIDEO)?` data-s="${i.act}"`:''}>${i.ok?'✓':(i.act!=null?'△':'✕')} ${i.lb}${i.act!=null?' '+_fmt(i.act):''}</span>`).join('')}</div><p class="stline ${cr.strat.line.tone}">${cr.strat.line.txt}</p></div>`:''}${(cr.stories&&cr.stories.length)?`<div class="ckwrap"><div class="cklab">이 판의 핵심</div>${cr.stories.map(st=>
+  `<div class="ccard ck"><div class="cct"><b>${st.t}</b>${(st.ev&&st.ev[0]&&VIDEO)?`<button class="cseek" data-s="${st.ev[0][1]}">▶ ${_fmt(st.ev[0][1])}</button>`:''}<span class="ckb">핵심</span></div>
+   ${st.ev&&st.ev.length?`<div class="ckev">${st.ev.map(e=>`<span class="cke${VIDEO?' cseek':''}" ${VIDEO?`data-s="${e[1]}"`:''}>${e[0]} <b>${_fmt(e[1])}</b>${e[2]?` <i>${e[2]}</i>`:''}</span>`).join('')}</div>`:''}
+   <p>${st.rx}</p></div>`).join('')}</div>`:''}<div class="ccols"><div class="ccol"><div class="cclh good">잘한 점${cnt(gp.length)}</div>${gp.length?_wrap(gp,3,false):'<div class="cnone">—</div>'}</div><div class="ccol"><div class="cclh bad">아쉬운 점${cnt(bp.length)}</div>${bp.length?_wrap(bp,4,true):'<div class="cnone">개선할 점이 없어요 — 깔끔한 한 판!</div>'}</div></div></div>`;
 }
 const FASTMAP=/(빨무|빠무|무한|fastest)/i.test((meta&&meta.map)||'');
 function factsBlock(p){
@@ -2497,7 +2542,7 @@ function detail(p){const s=p.summary;
    <div class="kst"><b>${s.supply200||'—'}</b><i>${s.supply200?'200 도달':('미도달 · 생산 '+(p.total_supply||0))}</i></div>
    <div class="kst"><b>${(_t.atk_lv!=null||_t.arm_lv!=null)?('공'+(_t.atk_lv||0)+'·방'+(_t.arm_lv||0)):'—'}</b><i>업그레이드${_t.up1?` · ${_t.up1}~`:''}</i></div>
   </div>
-  <details class="dstats"><summary>상세 수치<span class="dsn">건물 · 유닛 · 멀티 · 정찰 · 컨트롤 …</span></summary>
+  <details class="dstats"><summary>상세 수치<span class="dsn">${FASTMAP?"생산기지 · 첫 진출 · 견제":"생산기지 · 진출 · 멀티 · 정찰 · 견제"}</span></summary>
    ${factsBlock(p)}<div class="snote">${I.info}<span>200 도달·생산 수치는 리플레이 생산 기준 추정 (전사 미반영)</span></div>
   </details>
   ${coachBlock(p)}

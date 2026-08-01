@@ -353,6 +353,155 @@ function coach_player(p,peers,mins,fast){
 
   return [timings,pts,verdict,grades];
 }
+
+/* ═══ 코치 2.0 — 인과 체인: '이 판의 핵심' 스토리 (빨무 벤치마크 기반) ═══ */
+var BM_FAST={lurker:504,lurker_late:564,vsacs_gap:120,drop_first:634,defiler:871,
+             siege:330,vessel:599,storm:515,obs_gap:60};   // 이 갤러리 승자 실측과 동기화
+function _uT(p,k){var u=(p.units||[]).find?((p.units||[]).find(function(x){return x&&x.name===k;})):null;
+  return (u&&u.first)?_s2(u.first):null;}
+function _tT(p,k){var m=p.tech1||{};return (k in m)?_s2(m[k]):null;}
+function chain_stories(a,p,peers,fast,won){
+  if(!p||(!p.tech1&&!(p.units&&p.units[0]&&('first' in p.units[0]))))return [];   // 구버전 데이터 가드
+  var S=[],mins=_s2((a.meta&&a.meta.length)||'0:0')/60;
+  var opp=(peers||[]).filter(function(q){return q.team!==p.team;});
+  var oppLurk=1e9;opp.forEach(function(q){var t=_uT(q,'Lurker');if(t!=null&&t<oppLurk)oppLurk=t;});
+  function story(id,sc,title,ev,rx){S.push({id:id,score:sc,t:title,ev:ev||[],rx:rx});}
+  var rl=p.rl||({zerg:'Z',ran:'T',toss:'P'})[p.race]||'';
+  if(rl==='Z'&&mins>=7){
+    var lk=_uT(p,'Lurker'),la=_tT(p,'Lurker Aspect'),
+        vs=_tT(p,'Ventral Sacs (Overlord Transport)'),dr=(p.drop_secs&&p.drop_secs[0])||null;
+    if(lk==null&&la==null)
+      story('no-lurker',won?55:82,'럴커 라인 부재',[],
+        '다음 판: 해처리 2개째 타이밍에 럴커덴 → 레어 직후 아스펙트. 빨무 저그의 허리는 럴커야.');
+    else if(lk!=null&&lk>BM_FAST.lurker_late)
+      story('late-lurker',(won?50:85)+Math.min(15,Math.round((lk-BM_FAST.lurker)/30)),
+        '럴커가 늦었다 — '+_mmss(lk),[['럴커 첫 등장',lk,'기준 ~'+_mmss(BM_FAST.lurker)]],
+        '스포닝 직후 가스 → 레어 → 아스펙트를 한 호흡으로. 목표 '+_mmss(BM_FAST.lurker)+' — 럴커가 늦으면 뒤 라인 전부가 밀린다.');
+    if((lk!=null||la!=null)&&(vs==null||(lk!=null&&vs>lk+BM_FAST.vsacs_gap))){
+      var ev=[];if(lk!=null)ev.push(['럴커',lk,null]);if(vs!=null)ev.push(['수송업 시작',vs,'럴커 +'+Math.round(vs-lk)+'초']);
+      story('late-vsacs',won?45:76,(vs==null?'오버 수송업 미확보 — 드랍 불가':'수송업이 늦어 드랍 지연'),ev,
+        '레어 완성 즉시 수송업. 럴커 드랍이 견제의 본체 — 수송업 없는 럴커는 반쪽이야.');}
+    if((vs!=null)&&(dr==null||dr>BM_FAST.drop_first+120))
+      story('late-drop',won?40:70,(dr==null?'수송업은 됐는데 드랍 0회':'첫 드랍 '+_mmss(dr)+' — 늦음'),
+        (dr!=null?[['첫 드랍',dr,'기준 ~'+_mmss(BM_FAST.drop_first)]]:[['수송업',vs,null]]),
+        '수송업 완성 30초 안에 첫 드랍. 럴커 2기+저글링이면 충분 — 타이밍이 화력보다 중요해.');
+    if(mins>=11.5&&_uT(p,'Defiler')==null)
+      story('no-defiler',won?28:55,'디파일러 부재(후반)',[],'11~12분엔 디파일러 — 다크스웜 없인 후반 한타를 못 이겨.');
+  }
+  if(rl==='T'){
+    var sg=_tT(p,'Tank Siege Mode');
+    if(mins>=6&&sg==null)story('no-siege',won?32:62,'시즈모드 미개발',[],'팩토리 애드온에서 시즈부터 — 탱크는 시즈가 본체.');
+    else if(sg!=null&&sg>BM_FAST.siege+90)story('late-siege',won?30:58,'시즈가 늦었다 — '+_mmss(sg),[['시즈모드',sg,'기준 ~'+_mmss(BM_FAST.siege)]],'첫 팩토리에 바로 애드온 — 시즈 타이밍이 수비선 타이밍이야.');
+    if(oppLurk<1e9&&mins>=9&&_uT(p,'Science Vessel')==null)
+      story('no-vessel',won?35:72,'상대 럴커('+_mmss(oppLurk)+')인데 베슬 부재',[['상대 럴커',oppLurk,null]],
+        '스타포트→사이언스 퍼실리티. 베슬 없인 럴커 라인을 못 넘는다.');
+  }
+  if(rl==='P'){
+    if(oppLurk<1e9){var ob=_uT(p,'Observer');
+      if(ob==null||ob>oppLurk+BM_FAST.obs_gap)
+        story('late-obs',won?40:78,(ob==null?'옵저버 부재 — 상대 럴커에 무방비':'옵저버('+_mmss(ob)+')가 럴커보다 늦음'),
+          [['상대 럴커',oppLurk,null]].concat(ob!=null?[['옵저버',ob,null]]:[]),
+          '상대 저그면 로보틱스는 보험이 아니라 필수 — 옵저버가 럴커보다 먼저여야 해.');}
+    var st=_tT(p,'Psionic Storm');
+    if(mins>=8&&st==null)story('no-storm',won?28:58,'스톰 부재',[],'템플러 아카이브 → 스톰. 빨무 물량전의 정답 카드.');
+  }
+  S.sort(function(x,y){return y.score-x.score;});
+  return S.slice(0,2);
+}
+
+/* ═══ 코치 3.0 — 전략 인식 → 실행 채점 → 칭찬/시각 처방 ═══
+   CAL = 이 갤러리 63판 '승자 중앙값' 실측(초). 재보정 SQL: journal 참조. */
+var META={corsair:80,arbiter:78,htemp:71,shuttle:71,obs:65,vessel:64,dark:62,reaver:58,vulture:21,lurker:42};  // 유닛 보유 시 승률% (이 방 실측)
+var CAL={w50:{t:360,s:45},s200:{t:564,s:60},corsair:{t:420,s:90},lurker:{t:504,s:60},defiler:{t:871,s:100},mutal:{t:751,s:120},
+ shuttle:{t:405,s:60},reaver:{t:469,s:75},htemp:{t:470,s:75},dark:{t:445,s:75},
+ obs:{t:619,s:90},vulture:{t:206,s:60},vessel:{t:599,s:90},dropship:{t:546,s:80},
+ siege:{t:330,s:90},stim:{t:260,s:90},vsacs_gap:60,drop_gap:130};
+function _uN(p,k){var u=(p.units||[]).find(function(x){return x&&x.name===k;});return u?(u.n||0):0;}
+function strategy_report(a,p,peers,fast,won){
+ try{
+  if(!p||!p.units||!p.units.length||!(p.units[0]&&('first' in p.units[0])))return null;
+  var mins=_s2((a.meta&&a.meta.length)||'0:0')/60, hasTech=!!p.tech1;
+  var rl=p.rl||({zerg:'Z',ran:'T',toss:'P'})[p.race]||'';
+  var opp=(peers||[]).filter(function(q){return q.team!==p.team;});
+  var oppCloak=opp.some(function(q){return _uN(q,'Lurker')>0||_uN(q,'Dark Templar')>0;});
+  // ── 1) 전략 인식 ──
+  var A=[];
+  function arch(id,label,score,cps){if(score>0)A.push({id:id,label:label,score:score,cps:cps});}
+  if(rl==='Z'){
+    arch('z-lurker','럴커 운영', (_uN(p,'Lurker')>=2?3:0)+(_tT(p,'Lurker Aspect')!=null?2:0),[
+      {lb:'럴커',u:'Lurker',cal:CAL.lurker,fix:'해처리 2개째에 럴커덴 → 레어 완성 즉시 아스펙트'},
+      {lb:'수송업',tech:'Ventral Sacs (Overlord Transport)',cal:{t:CAL.lurker.t+CAL.vsacs_gap,s:60},fix:'레어 뜨면 오버 수송업부터'},
+      {lb:'첫 드랍',drop:1,cal:{t:CAL.lurker.t+CAL.drop_gap,s:70},fix:'수송업 완성 30초 안에 럴커 2기 드랍'},
+      {lb:'디파일러',u:'Defiler',cal:CAL.defiler,min:13,fix:'13~14분 하이브 → 디파일러로 후반 전환'}]);
+    arch('z-muta','뮤탈 전환', _uN(p,'Mutalisk')>=6?3:0,[
+      {lb:'뮤탈',u:'Mutalisk',cal:CAL.mutal,fix:'스파이어 타이밍을 앞당겨 첫 뮤탈 웨이브를 세게'}]);
+  }
+  if(rl==='T'){
+    arch('t-mech','벌처·메카닉', (_uN(p,'Vulture')>=4?3:0)+(_tT(p,'Tank Siege Mode')!=null?1:0),[
+      {lb:'첫 벌처',u:'Vulture',cal:CAL.vulture,fix:'팩토리 완성 즉시 벌처 — 3:30 전 첫 견제'},
+      {lb:'시즈모드',tech:'Tank Siege Mode',cal:CAL.siege,fix:'첫 팩 애드온에서 시즈 연구'},
+      {lb:'베슬',u:'Science Vessel',cal:CAL.vessel,when:oppCloak,fix:'상대 은폐 유닛 — 스타포트→베슬 필수'}]);
+    arch('t-bio','바이오닉 드랍', (_uN(p,'Marine')>=12?2:0)+(_uN(p,'Dropship')>=1?2:0),[
+      {lb:'스팀팩',tech:'Stim Packs',cal:CAL.stim,fix:'아카데미 완성 즉시 스팀'},
+      {lb:'드랍십',u:'Dropship',cal:CAL.dropship,fix:'9분 전 첫 드랍십 — 마린메딕 8+2'}]);
+  }
+  if(rl==='P'){
+    arch('p-reaver','리버 드랍', (_uN(p,'Reaver')>=1?2:0)+(_uN(p,'Shuttle')>=1?2:0),[
+      {lb:'셔틀',u:'Shuttle',cal:CAL.shuttle,fix:'로보틱스 완성 즉시 셔틀'},
+      {lb:'리버',u:'Reaver',cal:CAL.reaver,fix:'서포트베이 선착공 — 이 방 승자들의 1등 카드야'}]);
+    arch('p-corsair','커세어 제공권', _uN(p,'Corsair')>=4?3:0,[
+      {lb:'커세어',u:'Corsair',cal:CAL.corsair,fix:'스타게이트 2개 — 커세어 6기+로 오버로드·셔틀부터 끊어'}]);
+    arch('p-storm','스톰 운영', (_uN(p,'High Templar')>=2?2:0)+(_tT(p,'Psionic Storm')!=null?2:0),[
+      {lb:'하이템플러',u:'High Templar',cal:CAL.htemp,fix:'시타델→아카이브를 끊지 말고'},
+      {lb:'스톰',tech:'Psionic Storm',cal:{t:CAL.htemp.t+45,s:70},fix:'아카이브 완성 즉시 스톰 연구'},
+      {lb:'옵저버',u:'Observer',cal:CAL.obs,when:oppCloak,fix:'상대 은폐 — 옵저버는 필수'}]);
+    arch('p-dark','다크 견제', _uN(p,'Dark Templar')>=2?2:0,[
+      {lb:'다크',u:'Dark Templar',cal:CAL.dark,fix:'질럿 페이크 후 다크 3기 타이밍'}]);
+  }
+  if(!A.length)return null;
+  A.sort(function(x,y){return y.score-x.score;});
+  var top=A[0]; if(top.score<2)return null;
+  // ── 2) 실행 채점 (기초체력 공통 + 아키타입 체크포인트) ──
+  var cps=[];
+  if(p.worker50_sec!=null)cps.push({lb:'일꾼 50',raw:p.worker50_sec,cal:CAL.w50,fix:'6:00 전 일꾼 50 — 물량의 연료'});
+  if(mins>=9.5)cps.push({lb:'첫 200',raw:(p.supply200!=null?_s2(p.supply200):null),cal:CAL.s200,fix:'9:24 전 200 — 이 방 최대 승리 변수(도달 시 승률 56%, 미도달 36%)'});
+  cps=cps.concat(top.cps);
+  var items=[],hit=0,tot=0;
+  cps.forEach(function(cp){
+    if(cp.when===false)return;
+    if(cp.min&&mins<cp.min)return;
+    var act=null;
+    if('raw' in cp)act=cp.raw;
+    else if(cp.u)act=_uT(p,cp.u);
+    else if(cp.tech){if(!hasTech)return;act=_tT(p,cp.tech);}   // 구데이터: 판정 제외
+    else if(cp.drop)act=(p.drop_secs&&p.drop_secs[0])||null;
+    tot++;
+    var tgt=cp.cal.t,ok=(act!=null&&act<=tgt+cp.cal.s);
+    if(ok)hit++;
+    items.push({lb:cp.lb,act:act,tgt:tgt,ok:ok,fix:cp.fix});
+  });
+  if(!tot)return null;
+  var rate=hit/tot;
+  // ── 3) 출력: 칭찬 or 시각 박힌 처방 ──
+  var line;
+  if(rate>=0.75){
+    var good=items.filter(function(i){return i.ok;}).map(function(i){return i.lb+' '+_mmss(i.act);}).join(' · ');
+    var why={'p-corsair':' (이 방 커세어 보유 승률 80%)','p-reaver':' (이 방 셔틀 보유 승률 71%)','p-storm':' (이 방 하템 보유 승률 71%)'}[top.id]||'';
+    line={tone:'good',txt:'전략 실행 우수 — '+good+'. 이 리듬 그대로, 다음 판은 같은 빌드에서 물량만 한 단계 위로.'+why};
+  }else{
+    var miss=items.filter(function(i){return !i.ok;});
+    var steps=miss.map(function(i,ix){
+      return (ix+1)+') '+_mmss(i.tgt)+' '+i.lb+(i.act!=null?' (오늘 '+_mmss(i.act)+')':' (오늘 없음)')+' — '+i.fix;
+    }).join('  ');
+    line={tone:'fix',txt:'다음 판 체크리스트: '+steps};
+  }
+  if(top.id==='t-mech'&&_uN(p,'Vulture')>=10)
+    line.txt+=' ⚠ 이 방 벌처 다량 승률 21% — 벌처는 초반 견제까지만, 중반엔 탱크·베슬 전환.';
+  if(top.id==='z-lurker')
+    line.txt+=' 참고: 이 방은 커세어·하템 강세 — 럴커 곁에 히드라·스컬지 커버를 붙여.';
+  return {label:top.label,rate:rate,items:items,line:line};
+ }catch(_e){return null;}
+}
 function coach_report(a){
   var mins=(function(){var L=(a.meta&&a.meta.length)||"0:0";var q=(""+L).split(":");return ((+q[0])*60+(+q[1]||0))/60;})();
   const base=[];
@@ -378,7 +527,9 @@ function coach_report(a){
     p._es=(a.endscore&&a.endscore[p.name])||null;
     p._esAll=a.endscore||null;
     const r=coach_player(p,peers,mins,fast);
-    out.push({id:p.id,name:p.name,race:p.race,timings:r[0],points:r[1],verdict:(fast?"[빠른무한 모드] ":"")+r[2],grades:r[3]||[]});
+    try{r.stories=chain_stories(a,p,(a.players||[]).filter((b,j)=>j!==i),fast,(a.meta&&a.meta.winner)===p.team);}catch(_e){r.stories=[];}
+    try{r.strat=strategy_report(a,p,(a.players||[]).filter((b,j)=>j!==i),fast,(a.meta&&a.meta.winner)===p.team);}catch(_e){r.strat=null;}
+    out.push({id:p.id,name:p.name,race:p.race,timings:r[0],points:r[1],verdict:(fast?"[빠른무한 모드] ":"")+r[2],grades:r[3]||[],stories:(r.stories||[]),strat:(r.strat||null)});
   });
   return out;
 }
