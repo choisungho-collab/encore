@@ -1235,6 +1235,22 @@ body.pg-analysis .main,body.pg-analysis section.comm{display:none!important}
 .stage.fsidle .wpb{opacity:0;transition:opacity .3s}
 .wpsvg{width:100%;height:auto;display:block}
 @media(max-width:600px){.wpb{width:112px;height:18px;top:6px}}
+
+/* 체크리스트 구조화 */
+.stfixes{margin-top:2px}
+.stfl{font-family:var(--fm);font-size:10px;font-weight:800;letter-spacing:.09em;color:var(--faint);margin-bottom:7px}
+.stfx{display:flex;gap:10px;padding:8px 0;border-top:1px solid var(--line)}
+.stfx:first-of-type{border-top:0;padding-top:2px}
+.stt{flex:0 0 auto;font-family:var(--fm);font-size:12px;font-weight:800;color:var(--gold);background:rgba(231,167,63,.1);border:1px solid rgba(231,167,63,.3);border-radius:7px;padding:3px 8px;height:fit-content;line-height:1.2}
+.stfb{min-width:0}
+.stfb b{font-size:13px;font-weight:700;color:var(--ink)}
+.stfb .sta{font-family:var(--fm);font-size:10.5px;color:var(--loss);margin-left:7px}
+.stfb p{margin:3px 0 0;font-size:12px;line-height:1.55;color:var(--ink2)}
+.stnote{margin:9px 0 0;padding-top:8px;border-top:1px solid var(--line);font-size:11.5px;line-height:1.5;color:var(--faint)}
+
+.cvmode{font-family:var(--fm);font-size:9.5px;font-weight:800;letter-spacing:.05em;color:var(--gold);background:rgba(231,167,63,.12);border:1px solid rgba(231,167,63,.32);border-radius:6px;padding:2px 7px;margin-right:8px;white-space:nowrap;align-self:flex-start}
+.analysis .stcard{margin-top:2px}
+.analysis .cgrades{margin-top:14px}
 </style>
 </head><body class="pg-analysis">
 
@@ -1755,22 +1771,41 @@ if(vid){(function(){
     else{stage._tt=setTimeout(()=>{stage._lt=0;_show();},300);}                     // 숨김 상태에선 더블탭 판정 후 표시
   });
   stage.addEventListener('pointerleave',e=>{if(e.pointerType==='touch')return;if(vid&&!vid.paused&&!_scrubbing)_hideBar();});  /* 터치는 손을 떼면 pointerleave가 발생 → 바가 숨어 탭의 click이 비디오로 새는 모바일 정지불가 버그 방지 */
-  const _setIcon=()=>{const playing=vid&&!vid.paused;pp.innerHTML=playing?C_PAUSE:C_PLAY;if(playing){if(!(window.matchMedia&&window.matchMedia('(pointer:coarse)').matches))_show();}else if(stage.classList.contains('started'))_show();if(svmini)svmini.classList.toggle('on',!!playing);};
+  const _setIcon=()=>{if(stage._scrubHold)return;const playing=vid&&!vid.paused;pp.innerHTML=playing?C_PAUSE:C_PLAY;if(playing){if(!(window.matchMedia&&window.matchMedia('(pointer:coarse)').matches))_show();}else if(stage.classList.contains('started'))_show();if(svmini)svmini.classList.toggle('on',!!playing);};
   const _paint=()=>{if(!vid||_scrubbing)return;const gt=Math.max(0,(vid.currentTime||0)-OFF);const p=totalSec>0?Math.max(0,Math.min(1,gt/totalSec)):0;range.value=String(p*1000);range.style.setProperty('--p',(p*100)+'%');if(svmini)svmini.style.setProperty('--mp',(p*100)+'%');tm.innerHTML='<b>'+cf(gt)+'</b> / '+cf(totalSec);};
   _regE('timeupdate',_paint);_regE('play',_setIcon);_regE('pause',_setIcon);_regE('loadedmetadata',_paint);
   const _spin=on=>{if(svspin)svspin.classList.toggle('on',!!on);};
   _regE('waiting',()=>_spin(1));_regE('stalled',()=>_spin(1));_regE('seeking',()=>_spin(1));
   _regE('playing',()=>_spin(0));_regE('canplay',()=>_spin(0));_regE('seeked',()=>_spin(0));_regE('pause',()=>_spin(0));_regE('error',()=>_spin(0));
   pp.addEventListener('click',e=>{e.stopPropagation();if(!vid)return;if(vid.paused){hideOverlay();vid.play().catch(()=>{});}else vid.pause();});
-  range.addEventListener('pointerdown',()=>{_scrubbing=true;});
-  const _end=()=>{_scrubbing=false;_show();};
-  range.addEventListener('pointerup',_end);range.addEventListener('change',_end);
-  let _skT=0,_skPend=null;
+  let _skT=0,_skPend=null,_wasPlay=false;
   const _applySeek=(gt,fast)=>{if(!vid)return;const t=Math.max(0,Math.min((vid.duration||1e9),gt+OFF));try{if(fast&&vid.fastSeek)vid.fastSeek(t);else vid.currentTime=t;}catch(e){}};
+  // 드래그 시작: 재생을 '홀드'한다. 재생 중 반복 시킹은 디코더를 끊어 멈춤↔재생이 반복되므로,
+  // 유튜브처럼 잠시 멈춘 채 프레임만 미리보기 → 손을 떼는 순간 정확히 이동하고 이어서 재생.
+  const _grab=()=>{
+    if(_scrubbing)return;
+    _scrubbing=true;stage._scrubHold=1;
+    _wasPlay=!!(vid&&!vid.paused&&!vid.ended);
+    if(_wasPlay){try{vid.pause();}catch(e){}}
+  };
+  const _end=()=>{
+    if(!_scrubbing)return;
+    _scrubbing=false;
+    if(_skPend!=null){_applySeek(_skPend,false);_skPend=null;}      // 확정은 정밀 좌표로
+    const _resume=()=>{stage._scrubHold=0;
+      if(_wasPlay&&vid){const pr=vid.play();if(pr&&pr.catch)pr.catch(()=>{});}
+      _wasPlay=false;if(window._tSync)try{window._tSync();}catch(e){}};
+    if(vid&&vid.seeking)vid.addEventListener('seeked',_resume,{once:true});else _resume();
+    _show();
+  };
+  range.addEventListener('pointerdown',_grab);
+  range.addEventListener('keydown',_grab);
+  range.addEventListener('pointerup',_end);range.addEventListener('change',_end);
+  window.addEventListener('pointerup',_end,{passive:true});          // 바 밖에서 놓아도 복귀
   range.addEventListener('input',()=>{const p=(+range.value)/1000;range.style.setProperty('--p',(p*100)+'%');const gt=p*totalSec;tm.innerHTML='<b>'+cf(gt)+'</b> / '+cf(totalSec);
+    _grab();                                                          // 키보드/터치 등 pointerdown 없이 들어와도 홀드
     const now=Date.now();_skPend=gt;
-    if(now-_skT>180){_skT=now;_applySeek(gt,true);_skPend=null;}});   // 드래그 중엔 키프레임 스냅 프리뷰만
-  range.addEventListener('change',()=>{if(_skPend!=null){_applySeek(_skPend,false);_skPend=null;}});  // 확정은 정밀
+    if(now-_skT>110){_skT=now;_applySeek(gt,true);}});                // 정지 상태 프리뷰라 끊김 없음
   range.addEventListener('pointermove',ev=>{const rc=range.getBoundingClientRect();if(rc.width<=0)return;let f=(ev.clientX-rc.left)/rc.width;f=Math.max(0,Math.min(1,f));tip.textContent=cf(f*totalSec);tip.style.left=(f*100)+'%';tip.classList.add('show');});
   range.addEventListener('pointerleave',()=>tip.classList.remove('show'));
   const SPDS=[1,1.25,1.5,2];let _si=0;
@@ -1822,7 +1857,7 @@ if(vid){(function(){
     const vw=stage.querySelector('.vwrap');if(!vw)return;
     const tg=document.createElement('button');tg.id='vtoggle';tg.setAttribute('aria-label','재생/정지');tg.innerHTML=C_PLAY;
     vw.appendChild(tg);
-    const sync=()=>{const playing=vid&&!vid.paused&&!vid.ended;
+    const sync=()=>{if(stage._scrubHold)return;const playing=vid&&!vid.paused&&!vid.ended;
       stage.classList.toggle('vpause',!playing&&stage.classList.contains('started'));
       tg.innerHTML=playing?C_PAUSE:C_PLAY;tg.setAttribute('aria-label',playing?'일시정지':'재생');};
     window._tSync=sync;
@@ -2102,12 +2137,20 @@ if(VIDEO){(async()=>{try{
           try{vd.currentTime=tgt;}catch(e){done();}
         });
       };
-      scrub.addEventListener('pointerdown',()=>{_scrubbing=true;});
-      scrub.addEventListener('pointerup',()=>{_scrubbing=false;});
+      let _mvWas=false;
+      const _mvGrab=()=>{if(_scrubbing)return;_scrubbing=true;
+        _mvWas=_mvVids.some(v=>v&&!v.paused&&!v.ended);
+        if(_mvWas)_mvVids.forEach(v=>{try{v.pause();}catch(e){}});};
+      const _mvEnd=()=>{if(!_scrubbing)return;_scrubbing=false;
+        if(_mvWas){_mvVids.forEach(v=>{const pr=v.play();if(pr&&pr.catch)pr.catch(()=>{});});_mvWas=false;}};
+      scrub.addEventListener('pointerdown',_mvGrab);
+      scrub.addEventListener('pointerup',_mvEnd);
+      scrub.addEventListener('change',_mvEnd);
+      window.addEventListener('pointerup',_mvEnd,{passive:true});
       scrub.addEventListener('input',()=>{
         const p=(+scrub.value)/1000;scrub.style.setProperty('--p',(p*100)+'%');
         const gt=p*totalSec;timeEl.innerHTML='<b>'+_fmt(gt)+'</b> / '+_fmt(totalSec);
-        if(_seekT)clearTimeout(_seekT);_seekT=setTimeout(()=>_seekAll(gt),80);
+        _mvGrab();if(_seekT)clearTimeout(_seekT);_seekT=setTimeout(()=>_seekAll(gt),80);
       });
       scrub.addEventListener('change',()=>{if(_seekT){clearTimeout(_seekT);_seekT=null;}_seekAll((+scrub.value)/1000*totalSec);});
       _setPP();_paint();
@@ -2561,6 +2604,7 @@ const BO_HALL=new Set(['Nexus','Command Center','Hatchery']);
 const BO_PROD=new Set(['Gateway','Barracks','Factory','Starport','Robotics Facility','Stargate']);
 const BO_TECHB=new Set(['Cybernetics Core','Citadel of Adun','Templar Archives','Forge','Observatory','Robotics Support Bay','Fleet Beacon','Arbiter Tribunal','Academy','Engineering Bay','Machine Shop','Control Tower','Science Facility','Armory','Covert Ops','Spawning Pool','Hydralisk Den','Spire','Evolution Chamber',"Queen's Nest",'Greater Spire','Ultralisk Cavern','Defiler Mound','Nydus Canal']);
 function boGroup(b){if(b.cat==='building'){if(BO_HALL.has(b.name))return{c:'bo-hall',l:'확장'};if(BO_PROD.has(b.name))return{c:'bo-prod',l:'생산'};if(BO_TECHB.has(b.name))return{c:'bo-tech',l:'테크'};return{c:'bo-mute',l:'건물'};}if(b.cat==='morph')return{c:'bo-tech',l:'변환'};if(b.cat==='upgrade')return{c:'bo-tech',l:'업글'};if(b.cat==='tech')return{c:'bo-tech',l:'연구'};return{c:'bo-mute',l:''};}
+function _fmtN(){try{const ps=((typeof DATA!=='undefined'&&DATA&&DATA.players)||(typeof players!=='undefined'?players:[])||[]);let a=0,b=0;ps.forEach(p=>{if(p.team===1)a++;else if(p.team===2)b++;});return Math.max(a,b)||0;}catch(e){return 0;}}
 function coachBlock(p){
  const cr=(typeof COACH!=='undefined'?COACH:[]).find(c=>c.id===p.id);if(!cr)return'';
  const _fmt=s=>{s=Math.max(0,Math.round(+s||0));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');};
@@ -2575,14 +2619,24 @@ function coachBlock(p){
  };
  const GC={S:'gS',A:'gA',B:'gB',C:'gC'};
  const gr=(cr.grades&&cr.grades.length)?`<div class="cgrades">${cr.grades.map(g=>`<span class="cgrade ${GC[g.g]||''}"><i>${g.k}</i><b>${g.g}</b></span>`).join('')}</div>`:'';
- const vd=cr.verdict?`<div class="cverdict"><span class="cvl">총평</span><span class="cvt">${cr.verdict}</span></div>`:'';
+ const _vmode=/^\[([^\]]+)\]\s*/.exec(cr.verdict||'');
+ const _vtxt=(cr.verdict||'').replace(/^\[[^\]]+\]\s*/,'');
+ const vd=cr.verdict?`<div class="cverdict"><span class="cvl">총평</span>${_vmode?`<span class="cvmode">${_vmode[1]}</span>`:''}<span class="cvt">${_vtxt}</span></div>`:'';
  // 분석 페이지에선 최상단 성적표가 '나'의 총평·등급을 이미 보여줌 → 같은 선수 패널에선 중복 제거
  const _dupHero=document.body.classList.contains('pg-analysis');   // 성적표(상단)가 선택 선수를 항상 비춤 → 패널 쪽은 상시 생략
  const cnt=n=>n?`<span class="ccln">${n}</span>`:'';
- return `<div class="coach"><div class="ch coachh">코치 리포트 <span class="cnote">실제 리플레이 기반 · 스타크래프트 기준</span></div>${_dupHero?'':gr}${_dupHero?'':vd}${cr.strat?`<div class="stcard"><div class="sthead"><span class="stlab">전략</span><b>${cr.strat.label}</b><span class="stfmt">${cr.strat.fmt}:${cr.strat.fmt}</span><span class="strate ${cr.strat.rate>=0.75?'g':(cr.strat.rate>=0.4?'m':'b')}">실행 ${Math.round(cr.strat.rate*100)}%</span></div><div class="stitems">${cr.strat.items.map(i=>`<span class="sti ${i.ok?'ok':(i.act!=null?'late':'miss')}${(i.act!=null&&VIDEO)?' cseek':''}"${(i.act!=null&&VIDEO)?` data-s="${i.act}"`:''}>${i.ok?'✓':(i.act!=null?'△':'✕')} ${i.lb}${i.act!=null?' '+_fmt(i.act):''}</span>`).join('')}</div><p class="stline ${cr.strat.line.tone}">${cr.strat.line.txt}</p></div>`:''}${(cr.stories&&cr.stories.length)?`<div class="ckwrap"><div class="cklab">이 판의 핵심</div>${cr.stories.map(st=>
+ return `<div class="coach"><div class="ch coachh">코치 리포트 <span class="cnote">실제 리플레이 기반 · 스타크래프트 기준</span></div>${cr.strat?(()=>{const S=cr.strat,F=_fmtN(),
+  miss=(S.items||[]).filter(i=>!i.ok),
+  note=((S.line&&S.line.txt)||'').split(/(?=⚠|참고:)/).slice(1).join(' ').trim();
+  return `<div class="stcard"><div class="sthead"><span class="stlab">전략</span><b>${S.label}</b>${F?`<span class="stfmt">${F}:${F}</span>`:''}<span class="strate ${S.rate>=0.75?'g':(S.rate>=0.4?'m':'b')}">실행 ${Math.round(S.rate*100)}%</span></div>
+  <div class="stitems">${(S.items||[]).map(i=>`<span class="sti ${i.ok?'ok':(i.act!=null?'late':'miss')}${(i.act!=null&&VIDEO)?' cseek':''}"${(i.act!=null&&VIDEO)?` data-s="${i.act}"`:''}>${i.ok?'✓':(i.act!=null?'△':'✕')} ${i.lb}${i.act!=null?' '+_fmt(i.act):''}</span>`).join('')}</div>
+  ${(S.line&&S.line.tone==='good')?`<p class="stline good">${S.line.txt}</p>`
+    :`<div class="stfixes"><div class="stfl">다음 판 체크리스트</div>${miss.map(i=>
+      `<div class="stfx"><span class="stt">${_fmt(i.tgt)}</span><div class="stfb"><b>${i.lb}</b><span class="sta">${i.act!=null?'오늘 '+_fmt(i.act):'오늘 없음'}</span><p>${i.fix||''}</p></div></div>`).join('')}</div>`}
+  ${note?`<p class="stnote">${note}</p>`:''}</div>`;})():''}${(()=>{const _mk=(cr.strat&&cr.strat.items||[]).filter(i=>!i.ok).map(i=>i.lb);const _st=(cr.stories||[]).filter(s=>!_mk.some(k=>k&&s.t.indexOf(k)>=0));return _st.length?`<div class="ckwrap"><div class="cklab">이 판의 핵심</div>${_st.map(st=>
   `<div class="ccard ck"><div class="cct"><b>${st.t}</b>${(st.ev&&st.ev[0]&&VIDEO)?`<button class="cseek" data-s="${st.ev[0][1]}">▶ ${_fmt(st.ev[0][1])}</button>`:''}<span class="ckb">핵심</span></div>
    ${st.ev&&st.ev.length?`<div class="ckev">${st.ev.map(e=>`<span class="cke${VIDEO?' cseek':''}" ${VIDEO?`data-s="${e[1]}"`:''}>${e[0]} <b>${_fmt(e[1])}</b>${e[2]?` <i>${e[2]}</i>`:''}</span>`).join('')}</div>`:''}
-   <p>${st.rx}</p></div>`).join('')}</div>`:''}<div class="ccols"><div class="ccol"><div class="cclh good">잘한 점${cnt(gp.length)}</div>${gp.length?_wrap(gp,3,false):'<div class="cnone">—</div>'}</div><div class="ccol"><div class="cclh bad">아쉬운 점${cnt(bp.length)}</div>${bp.length?_wrap(bp,4,true):'<div class="cnone">개선할 점이 없어요 — 깔끔한 한 판!</div>'}</div></div></div>`;
+   <p>${st.rx}</p></div>`).join('')}</div>`:'';})()}${_dupHero?'':gr}${_dupHero?'':vd}<div class="ccols"><div class="ccol"><div class="cclh good">잘한 점${cnt(gp.length)}</div>${gp.length?_wrap(gp,3,false):'<div class="cnone">—</div>'}</div><div class="ccol"><div class="cclh bad">아쉬운 점${cnt(bp.length)}</div>${bp.length?_wrap(bp,4,true):'<div class="cnone">개선할 점이 없어요 — 깔끔한 한 판!</div>'}</div></div></div>`;
 }
 const FASTMAP=/(빨무|빠무|무한|fastest)/i.test((meta&&meta.map)||'');
 function factsBlock(p){
@@ -2621,7 +2675,7 @@ function detail(p){const s=p.summary;
    <div class="kst"><b>${p.apm||0}</b><i>APM · 유효 ${p.eapm||0}</i></div>
    <div class="kst"><b>${_t.workers??'—'}</b><i>일꾼${p.worker50_sec!=null?` · 50도달 ${Math.floor(p.worker50_sec/60)}:${String(p.worker50_sec%60).padStart(2,'0')}`:''}</i></div>
    <div class="kst"><b>${s.supply200||'—'}</b><i>${s.supply200?'200 도달':('미도달 · 생산 '+(p.total_supply||0))}</i></div>
-   <div class="kst"><b>${(_t.atk_lv!=null||_t.arm_lv!=null)?('공'+(_t.atk_lv||0)+'·방'+(_t.arm_lv||0)):'—'}</b><i>업그레이드${_t.up1?` · ${_t.up1}~`:''}</i></div>
+   <div class="kst"><b>${(_t.atk_lv!=null||_t.arm_lv!=null)?('공'+(_t.atk_lv||0)+'·방'+(_t.arm_lv||0)):'—'}</b><i>${(_t.atk_lv||_t.arm_lv)?`업그레이드${_t.up1?` · ${_t.up1}~`:''}`:(_t.up1?`첫 업 ${_t.up1} · 미완성`:'업그레이드 없음')}</i></div>
   </div>
   <details class="dstats"><summary>상세 수치<span class="dsn">${FASTMAP?"생산기지 · 첫 진출 · 견제":"생산기지 · 진출 · 멀티 · 정찰 · 견제"}</span></summary>
    ${factsBlock(p)}<div class="snote">${I.info}<span>200 도달·생산 수치는 리플레이 생산 기준 추정 (전사 미반영)</span></div>

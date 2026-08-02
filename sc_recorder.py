@@ -40,8 +40,24 @@ for _nm in ("stdout", "stderr"):
 def _safe_input(prompt=""):
     try: return input(prompt)
     except Exception: return ""
+# ── 콘솔 창 억제: 게임 위로 ffmpeg 검은 창이 뜨지 않도록 모든 자식 프로세스에 적용 ──
+def _nowin_kw():
+    """Windows 자식 프로세스의 콘솔 창을 숨기는 kwargs (CREATE_NO_WINDOW + SW_HIDE 이중 차단)."""
+    if os.name != "nt":
+        return {}
+    kw = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)}
+    try:
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = 0          # SW_HIDE
+        kw["startupinfo"] = si
+    except Exception:
+        pass
+    return kw
+NOWIN = _nowin_kw()
+
 def _run(args, **kw):
-    kw.setdefault("creationflags", getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    for _k, _v in NOWIN.items(): kw.setdefault(_k, _v)
     return subprocess.run(args, **kw)
 
 FROZEN     = getattr(sys, "frozen", False)
@@ -155,7 +171,7 @@ import queue as _queue
 from collections import deque as _deque
 GUI_Q = _queue.Queue(maxsize=4000)
 LOG_BUF = _deque(maxlen=400)   # 로그창이 닫혀 있어도 최근 로그를 항상 보관(열면 즉시 채움)
-APP_VERSION = "1.9.8"
+APP_VERSION = "1.9.12"
 REC_STATE = {"recording": False, "encoder": "", "ready": False}
 LAST_ERR = {"msg": "", "t": 0.0}
 UP_DONE = {"t": 0.0, "shown": 0.0}
@@ -462,6 +478,7 @@ def parse_rep(path):
         players.append({"name": p.get("Name"), "race": (p.get("Race") or {}).get("ShortName"),
                         "rl": (chr(_lt) if isinstance(_lt, int) and 65 <= _lt <= 90 else "?"),
                         "team": p.get("Team"), "apm": pd.get("APM"),
+                        "last_cmd": round((pd.get("LastCmdFrame") or 0) / FPS_GAME, 1),
                         "color": "#%06x" % ((p.get("Color") or {}).get("RGB", 8421504))})
     frames = h.get("Frames", 0) or 0; secs = frames / FPS_GAME
     t1 = "".join(pl["rl"] for pl in players if pl["team"] == 1)
@@ -472,8 +489,15 @@ def parse_rep(path):
     _teams_present = {pl["team"] for pl in players if pl.get("team") in (1, 2)}
     _wt = comp.get("WinnerTeam")
     _winner = _wt if (_wt in _teams_present and len(_teams_present) >= 2) else None
+    _src = "screp" if _winner is not None else None
+    # 2차 방어선: 생존(마지막 명령) 판정이 확실하면 screp 의 '나간 순서' 추정을 덮어쓴다.
+    _wlc = _winner_from_lastcmd(players, secs)
+    if _wlc in _teams_present and len(_teams_present) >= 2:
+        if _winner is not None and _wlc != _winner:
+            log(f"  · 승패 교정: screp={_winner} → 생존판정={_wlc} (마지막 명령 기준)")
+        _winner, _src = _wlc, "lastcmd"
     meta.update({"map": clean(h.get("Map")), "length": "%d:%02d" % (secs // 60, secs % 60),
-                 "type": (h.get("Type") or {}).get("Name"), "winner": _winner,
+                 "type": (h.get("Type") or {}).get("Name"), "winner": _winner, "win_src": _src,
                  "saver": (_identity_saver_fallback([p.get("Name") for p in (h.get("Players") or [])])
                            # 1순위: 이 기기 주인 계정이 플레이어 명단에 있으면 그가 시점의 주인 —
                            # 친구가 공유해 준 rep(RepSaver=타인)이 폴더에 있어도 영상 POV 는 이 기기 플레이어다.
@@ -880,6 +904,13 @@ def extract_analysis(rep_path):
                       or next((p.get("Name") for p in (h.get("Players") or []) if p.get("ID") == comp.get("RepSaverPlayerID")), None))}
     leave_list = sorted([{"sec": int(max(0, fr)/FPS_GAME), "t": mmss(fr), "name": (players.get(pid) or {}).get("name")}
                          for fr, pid in leaves], key=lambda x: x["sec"])
+    # 승패 재판정: 퇴장 기록(전원 퇴장한 팀 = 패배)이 screp 추정보다 확실하다.
+    _wlv = _winner_from_leaves(res, leave_list)
+    if _wlv in (1, 2) and _wlv != meta.get("winner"):
+        log(f"  · 승패 교정: screp={meta.get('winner')} → 퇴장판정={_wlv}")
+        meta["winner"] = _wlv; meta["win_src"] = "leaves"
+    elif _wlv in (1, 2):
+        meta["win_src"] = meta.get("win_src") or "leaves"
     team_fine = {}; team_cx = {}; team_cy = {}; team_cp = {}
     for pid in order:
         _t = players[pid]["team"]; _cf = players[pid]["combat_fine"]
@@ -1125,7 +1156,7 @@ def _audio_rms_curve(video_path, sr=8000):
     try:
         p = subprocess.run([FFMPEG, "-v", "error", "-i", video_path, "-vn",
                             "-ac", "1", "-ar", str(sr), "-f", "s16le", "-"],
-                           capture_output=True, timeout=240)
+                           capture_output=True, timeout=240, **NOWIN)
         raw = p.stdout
         if not raw or len(raw) < sr * 2 * 5: return None      # 5초 미만이면 무의미
         np = _wl_np()
@@ -1200,7 +1231,7 @@ def _supply_change_curve(video_path, fps=2.0):
               "scale=%d:%d,format=gray") % (fps, W, H)
         p = subprocess.run([FFMPEG, "-v", "error", "-i", video_path, "-vf", vf,
                             "-f", "rawvideo", "-pix_fmt", "gray", "-"],
-                           capture_output=True, timeout=420)
+                           capture_output=True, timeout=420, **NOWIN)
         raw = p.stdout; fsz = W * H
         n = len(raw) // fsz
         if n < 10: return None
@@ -1270,7 +1301,7 @@ def _hud_band_frames(video_path, fps=1.0):
               % (fps, bw, bh, bx, by, _HUD_W, _HUD_H))
         p = subprocess.run([FFMPEG, "-v", "error", "-i", video_path, "-vf", vf,
                             "-f", "rawvideo", "-pix_fmt", "gray", "-"],
-                           capture_output=True, timeout=420)
+                           capture_output=True, timeout=420, **NOWIN)
         raw = p.stdout; fsz = _HUD_W * _HUD_H
         n = len(raw) // fsz
         if n < 20: return None
@@ -1472,7 +1503,7 @@ def _score_tail_frames(video_path, tail=8.0, fps=2.0):
         p = subprocess.run([FFMPEG, "-v", "error", "-sseof", "-%s" % tail, "-i", video_path,
                             "-vf", "fps=%s,scale=960:540" % fps,
                             "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
-                           capture_output=True, timeout=180)
+                           capture_output=True, timeout=180, **NOWIN)
         raw = p.stdout; fsz = 960 * 540 * 3
         n = len(raw) // fsz
         if n < 2: return None, None
@@ -1596,25 +1627,53 @@ def enhance_highlights_with_audio(analysis, video_path):
         try:
             for _x2 in str(meta.get("length") or "0:0").split(":"): gl = gl * 60 + int(_x2 or 0)
         except Exception: gl = 0
-        E = _audio_rms_curve(video_path)
-        if E is None: return
-        hl2, solo = _grade_battles(E, hl, lead, gl)
-        for s2 in solo[:1]:
-            if gl and not (2 <= s2 <= gl - 2): continue
-            hl2.append({"sec": s2, "t": "%d:%02d" % (s2 // 60, s2 % 60),
-                        "label": "교전", "who": None, "kind": "battle", "ai_only": 1})
+        # 단계별 진단: 어느 분석이 왜 건너뛰어졌는지 남긴다(DB 에서 원인 추적 가능)
+        _diag = {}
+        try:
+            import numpy as _np_chk; _diag["numpy"] = getattr(_np_chk, "__version__", "ok")
+        except Exception as _e_np:
+            _diag["numpy"] = "MISSING: %s" % _e_np
+        try:
+            analysis.setdefault("meta", {})["vdiag"] = _diag
+        except Exception:
+            pass
+        E = None
+        try:
+            E = _audio_rms_curve(video_path)
+        except Exception as _e_au:
+            _diag["audio"] = "ERR: %s" % _e_au
+        if E is None:
+            _diag.setdefault("audio", "none(무음·트랙없음·추출실패)")
+        else:
+            _diag["audio"] = "ok"
+        # 오디오가 없어도 HUD/점수판 분석은 계속한다 (기존에는 여기서 통째로 중단됐음)
+        if E is not None:
+            hl2, solo = _grade_battles(E, hl, lead, gl)
+            for s2 in solo[:1]:
+                if gl and not (2 <= s2 <= gl - 2): continue
+                hl2.append({"sec": s2, "t": "%d:%02d" % (s2 // 60, s2 % 60),
+                            "label": "교전", "who": None, "kind": "battle", "ai_only": 1})
+        else:
+            hl2 = list(hl)
         # ④ 인구 급감 = 병력 대량 손실 — 1순위: HUD 실측 OCR, 폴백: ROI 변화율(추정)
         try:
             _saver = (meta.get("saver") or None)
-            H = extract_hud_series(analysis, video_path)
-            try: extract_end_score(analysis, video_path)
-            except Exception: pass
+            try:
+                H = extract_hud_series(analysis, video_path)
+                _diag["hud"] = ("ok(%d wipes)" % len(H.get("wipes") or [])) if H else "none(HUD 미인식)"
+            except Exception as _e_hud:
+                H = None; _diag["hud"] = "ERR: %s" % _e_hud
+            try:
+                extract_end_score(analysis, video_path)
+                _diag["endscore"] = "ok" if analysis.get("endscore") else "none(점수판 미인식)"
+            except Exception as _e_es:
+                _diag["endscore"] = "ERR: %s" % _e_es
             if H and isinstance(H.get("wipes"), list):
                 for s3 in H["wipes"]:
                     if any(abs(h.get("sec", -999) - s3) < 30 and h.get("kind") == "wipe" for h in hl2): continue
                     hl2.append({"sec": s3, "t": "%d:%02d" % (s3 // 60, s3 % 60),
                                 "label": "병력 대량 손실", "who": _saver, "kind": "wipe", "hud": 1})
-            else:
+            elif E is not None:
                 C = _supply_change_curve(video_path)
                 if C is not None:
                     for s3 in _detect_wipes(C, E, lead, gl):
@@ -1625,7 +1684,10 @@ def enhance_highlights_with_audio(analysis, video_path):
             pass
         hl2.sort(key=lambda h: h.get("sec", 0))
         analysis["highlights"] = hl2
-        try: log("  오디오 교전 분석 반영 — battle 등급/지속시간 업데이트")
+        try:
+            analysis.setdefault("meta", {})["vdiag"] = _diag
+            log("  영상 분석 — 오디오:%s · HUD:%s · 점수판:%s" %
+                (_diag.get("audio"), _diag.get("hud"), _diag.get("endscore")))
         except Exception: pass
     except Exception:
         pass
@@ -1928,8 +1990,7 @@ def make_preview(src, out, start_sec=12, dur=5):
         cmd = [f, "-y", "-ss", str(max(0, int(start_sec or 0))), "-i", src, "-t", str(dur), "-an",
                "-vf", "scale=-2:360", *_hw_or_x264(30),
                "-movflags", "+faststart", out]
-        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=240,
-                       creationflags=(0x08000000 if os.name == "nt" else 0))
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=240, **NOWIN)
         return os.path.isfile(out) and os.path.getsize(out) > 10000
     except Exception:
         return False
@@ -2868,6 +2929,7 @@ def rebuild_db_from_recordings(log_fn=None):
                 _sw = detect_screen_result(video)
                 if _sw is not None:
                     meta["winner"] = _winner_from_screen(meta.get("players") or [], meta.get("saver"), _sw, meta.get("winner"))
+                    meta["win_src"] = "screen"
             except Exception: pass
             players = meta.get("players") or []; saver = meta.get("saver"); winner = meta.get("winner")
             won = _compute_won(players, saver, winner)
@@ -3094,7 +3156,8 @@ def _ffmpeg_progress_run(cmd, total_dur, cb, creationflags=0, timeout=4*3600):
     total_dur(초)를 알면 %를 계산. 반환: ffmpeg 종료코드(성공 0)."""
     try:
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                             text=True, bufsize=1, creationflags=creationflags)
+                             text=True, bufsize=1, creationflags=creationflags,
+                             **({k: v for k, v in NOWIN.items() if k == "startupinfo"}))
     except Exception:
         return 1
     t0 = time.time()
@@ -3343,6 +3406,59 @@ def detect_screen_result(video_path, tail=6.0, want=9):
     if wins >= need and wins > losses: return True
     if losses >= need and losses > wins: return False
     return None
+
+def _winner_from_leaves(players, leaves):
+    """퇴장 기록으로 승자 판정 — '한 팀이 전원 나갔으면 남은 팀이 승리'.
+    screp 의 WinnerTeam 은 '마지막에 나간 사람의 팀'을 승자로 보는 경향이 있어
+    팀 전원이 전멸·퇴장한 쪽을 거꾸로 승자로 찍는 사고가 난다(2026-08-02 실측:
+    상대팀 2명이 8:39/10:42 에 모두 나갔는데도 그 팀을 승자로 판정).
+    여기서는 '누가 마지막이냐'가 아니라 '어느 팀이 통째로 사라졌느냐'를 본다."""
+    try:
+        left = {str(x.get("name") or "").strip().lower() for x in (leaves or []) if x.get("name")}
+        if not left:
+            return None
+        teams = {}
+        for p in (players or []):
+            t = p.get("team")
+            if t not in (1, 2):
+                continue
+            nm = str(p.get("name") or "").strip().lower()
+            teams.setdefault(t, []).append(nm in left)
+        if len(teams) < 2:
+            return None
+        gone = [t for t, flags in teams.items() if flags and all(flags)]
+        alive = [t for t, flags in teams.items() if flags and not all(flags)]
+        if len(gone) == 1 and len(alive) == 1:
+            return alive[0]
+        return None
+    except Exception:
+        return None
+
+def _winner_from_lastcmd(players, total_secs, gap=25.0):
+    """마지막 명령 시각으로 승자 추정.
+    패배한 플레이어는 '죽는 순간' 조작이 끊기고, 승자는 경기 종료까지 계속 명령한다.
+    → 팀별 '가장 늦은 마지막 명령'을 비교해 확실한 차이(gap초 이상)가 나면 그 팀이 생존팀 = 승리.
+    차이가 작으면(동시 종료·GG 직후 종료 등) 판단 보류 → None 으로 상위 폴백에 맡긴다.
+    screp 의 WinnerTeam 은 '나간 순서' 추정이라 팀전에서 승자가 먼저 나가면 뒤집히는데,
+    이 신호는 나간 순서와 무관해 그 오판을 잡아낸다."""
+    try:
+        best = {}
+        for p in (players or []):
+            t = p.get("team")
+            if t not in (1, 2):
+                continue
+            lc = p.get("last_cmd")
+            if lc is None:
+                continue
+            best[t] = max(best.get(t, -1.0), float(lc))
+        if len(best) < 2:
+            return None
+        (ta, va), (tb, vb) = sorted(best.items(), key=lambda kv: -kv[1])
+        if (va - vb) >= gap:
+            return ta
+        return None
+    except Exception:
+        return None
 
 def _winner_from_screen(players, saver, screen_won, screp_winner):
     """화면 판정(True/False)을 저장자 기준 winner 팀번호로 변환. meta/analysis 의 winner 를
@@ -3859,7 +3975,7 @@ class Recorder:
         self.proc = subprocess.Popen(self._cmd(self.path, mode, output_idx),
                       stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
                       stderr=(self._errf or subprocess.DEVNULL),
-                      creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                      **NOWIN)
         self._vt0 = time.time()
     def _alive(self):
         return self.proc is not None and self.proc.poll() is None
@@ -4050,7 +4166,7 @@ class Recorder:
             except Exception: _ef = subprocess.DEVNULL
             try:
                 p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
-                                     stderr=_ef, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                                     stderr=_ef, **NOWIN)
             except Exception:
                 return
             proc_box["p"] = p; self._vt0 = time.time()
@@ -4376,6 +4492,7 @@ def _cloud_send(video, rep):
         _sw = detect_screen_result(video)
         if _sw is not None:
             meta["winner"] = _winner_from_screen(meta.get("players") or [], meta.get("saver"), _sw, meta.get("winner"))
+            meta["win_src"] = "screen"
             if analysis is not None: analysis.setdefault("meta", {})["winner"] = meta.get("winner")
     except Exception: pass
     try:
