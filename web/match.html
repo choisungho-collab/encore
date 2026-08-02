@@ -89,9 +89,16 @@ svg{display:block}
 .stage:fullscreen,.stage:-webkit-full-screen{width:100vw;height:100vh;max-height:none;aspect-ratio:auto!important;border-radius:0;background:#000}
 .stage:fullscreen video,.stage:-webkit-full-screen video{width:100%;height:100%;object-fit:contain}
 /* lock 미지원 브라우저(삼성 인터넷 등): 세로 전체화면을 90° 돌려 가로 체감 제공 */
-.stage.fs-rot{width:100vh!important;height:100vw!important;transform:rotate(90deg) translateY(-100vw);transform-origin:top left;position:fixed;top:0;left:0}
-.stage.fs-rot video{width:100%;height:100%;object-fit:contain}
-.mvwrap.fs-rot{width:100vh!important;height:100vw!important;transform:rotate(90deg) translateY(-100vw);transform-origin:top left;position:fixed;top:0;left:0}
+/* 전체화면 가로 폴백(lock 미지원 브라우저): 전체화면 요소는 UA 스타일이 transform 을 무효화하므로
+   반드시 '자식'을 회전시킨다. stage 는 상태 플래그만 갖고, 실제 회전은 .vwrap / .mvgrid 가 받는다. */
+.stage.fs-rot .vwrap{position:absolute;left:50%;top:50%;width:100vh;height:100vw;
+  transform:translate(-50%,-50%) rotate(90deg);transform-origin:center center}
+.stage.fs-rot .vwrap>video{width:100%;height:100%;object-fit:contain}
+.stage.fs-rot>.clipshare{display:none}
+.mvwrap.fs-rot .mvgrid{position:absolute;left:50%;top:50%;width:100vh;height:100vw;
+  transform:translate(-50%,-50%) rotate(90deg);transform-origin:center center;aspect-ratio:auto}
+.mvwrap.fs-rot .mvbar{position:absolute;left:50%;top:50%;width:100vh;
+  transform:translate(-50%,calc(50vw - 100%)) rotate(90deg);transform-origin:center center}
 .vwrap{position:absolute;inset:0}
 #vid{transition:filter .55s ease,transform .55s ease,opacity .22s ease}
 #vid.vblur{filter:blur(22px) brightness(.85) saturate(.92);transform:scale(1.07)}
@@ -1817,13 +1824,14 @@ if(vid){(function(){
   // 2) 표준: stage 전체화면 + screen.orientation.lock('landscape')
   // 3) lock 거부(삼성 인터넷 등 API 차단 브라우저): CSS 90° 강제 회전 폴백,
   //    기기 실제 회전과 동기화(실가로가 되면 회전 해제, 다시 세로면 재적용)
+  // 회전 동기화: lock 성공 여부를 '믿지 않고' 실제 화면 비율만 본다.
+  // 전체화면인데 화면이 세로면 → 무조건 회전(자식 컨테이너 회전), 가로면 → 해제. 브라우저 불문 자기교정.
   window._fsRotSync=function(){try{
     var f=(document.fullscreenElement||document.webkitFullscreenElement);
     document.querySelectorAll('.fs-rot').forEach(function(n){if(n!==f)n.classList.remove('fs-rot');});
     if(!f){try{if(screen.orientation&&screen.orientation.unlock)screen.orientation.unlock();}catch(e2){}return;}
     if(f!==stage&&!(f.classList&&f.classList.contains('mvwrap')))return;   // 우리 플레이어 요소만
-    if(f._lockOK){f.classList.remove('fs-rot');return;}
-    f.classList.toggle('fs-rot',window.innerHeight>window.innerWidth);
+    f.classList.toggle('fs-rot',(window.innerHeight>window.innerWidth));
   }catch(e){}};
   function _lockLS(el){try{var o=screen.orientation;
     if(o&&o.lock){o.lock('landscape').then(function(){el._lockOK=1;window._fsRotSync();},function(){el._lockOK=0;window._fsRotSync();});}
@@ -1846,6 +1854,10 @@ if(vid){(function(){
     }catch(e2){}
   };
   ['resize','orientationchange'].forEach(function(ev){window.addEventListener(ev,function(){window._fsRotSync();},{passive:true});});
+  // 전체화면 진입/이탈 이벤트에서도 여러 시점에 재동기화 (레이아웃 확정 시점이 브라우저마다 다름)
+  ['fullscreenchange','webkitfullscreenchange'].forEach(function(ev){
+    document.addEventListener(ev,function(){[0,60,200,500,900].forEach(function(ms){
+      setTimeout(function(){try{window._fsRotSync();}catch(e){}},ms);});},false);});
   if(document.fullscreenEnabled||document.webkitFullscreenEnabled||(vid&&vid.webkitEnterFullscreen)){
     fs.addEventListener('click',e=>{e.stopPropagation();
       if(document.fullscreenElement||document.webkitFullscreenElement){try{(document.exitFullscreen||document.webkitExitFullscreen||function(){}).call(document);}catch(e2){}}
@@ -2426,9 +2438,9 @@ document.getElementById('hlnote').innerHTML=I.info+'교전은 다수 선수 동�
 // timeline + moments
 const HL=augmentHL(DATA.highlights||[]);
 // ── 인구 곡선 (생산 누적) — 첫 200 도달·생산 공백이 그래프로, 교전/몰살은 세로 마커로
-/* ═ 실시간 승률(베타): 이 갤러리 245샘플 로지스틱 학습 — 정확도 79% (초반 71%→후반 88%)
+/* ═ 실시간 승률(베타): 이 갤러리 245샘플 로지스틱 학습(대칭 증강·무편향) — 정확도 82%
    특징: 팀 인구차 · 일꾼 보정 · 60초 모멘텀 · 시간가중. 재보정: 세션에서 "승률 모델 보정" ═ */
-const WPC={ds:0.196,dw:-0.404,mom:1.575,dsf:0.069,b0:0.114};
+const WPC={ds:0.236,dw:-0.453,mom:1.599,dsf:0.073,b0:0};   // 무편향(절편 0)+대칭 학습: 동일 상황이면 팀 번호와 무관하게 50%. 정확도 82%
 function wpSeries(){
   try{
     const ps=(DATA.players||[]).filter(p=>Array.isArray(p.supply_series)&&p.supply_series.length>3);
@@ -2448,6 +2460,7 @@ function wpSeries(){
       const ds=(s1-s2)/200,dw=(w1-w2)/50,f=Math.min(1,(i*st)/Math.max(60,dur));
       const z=WPC.b0+WPC.ds*ds+WPC.dw*dw+WPC.mom*m+WPC.dsf*ds*f;
       let p=1/(1+Math.exp(-Math.max(-30,Math.min(30,z))));
+      const warm=Math.min(1,(i*st)/120);p=0.5+(p-0.5)*warm;   // 초반 2분: 근거 부족 → 50% 쪽으로
       ema=(ema==null)?p:(ema*0.5+p*0.5);   // 표시 스무딩(가볍게) — 교전 스윙 즉각 반영
       out.push({t:i*st,p:ema});
     }
@@ -2469,7 +2482,7 @@ function renderWinProb(){
   const Y=p=>PAD+(1-p)*(H-PAD*2);
   const line=pts.map((o,i)=>(i?'L':'M')+X(o.t).toFixed(1)+' '+Y(o.p).toFixed(1)).join(' ');
   const area=line+' L '+X(pts[pts.length-1].t).toFixed(1)+' '+Y(0.5)+' L '+X(0)+' '+Y(0.5)+' Z';
-  host.innerHTML=`<div class="ch">승률 추이 <span class="cnote">베타 · 인구·모멘텀 학습(정확도 79%) · TEAM 1 기준</span></div>
+  host.innerHTML=`<div class="ch">승률 추이 <span class="cnote">베타 · 인구·모멘텀 학습(정확도 82%) · TEAM 1 기준</span></div>
    <svg class="wpsvg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
     <line x1="${PAD}" y1="${Y(0.5)}" x2="${W-PAD}" y2="${Y(0.5)}" stroke="rgba(255,255,255,.18)" stroke-dasharray="4 4"/>
     <path d="${area}" fill="rgba(224,180,65,.10)"/>
