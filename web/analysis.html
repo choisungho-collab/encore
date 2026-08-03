@@ -1296,6 +1296,21 @@ body.pg-analysis .main,body.pg-analysis section.comm{display:none!important}
 .gdet>summary::after{content:'';width:6px;height:6px;border-right:1.6px solid var(--faint);border-bottom:1.6px solid var(--faint);transform:rotate(45deg);margin-left:2px;transition:.15s}
 .gdet[open]>summary::after{transform:rotate(-135deg)}
 .gdet>summary .cclh{margin:0}
+
+/* 차트 텍스트 HTML 레이어 — SVG 배율과 무관한 고정 px 타이포 */
+.chwrap{position:relative}
+.axl{position:absolute;font-family:var(--fm);font-size:11px;line-height:1;color:var(--faint);pointer-events:none;white-space:nowrap}
+.axl.y{transform:translate(-100%,-50%)}
+.axl.x{transform:translateX(-50%)}
+.axl.cap{transform:translateY(-115%);color:rgba(231,167,63,.75);font-size:10.5px}
+.axl.wp{font-family:var(--fd);font-weight:800;font-size:12px;letter-spacing:.01em}
+.wpres{position:absolute;right:6px;transform:translateY(-50%);display:flex;flex-direction:column;align-items:flex-end;gap:3px;pointer-events:none}
+.wpres b{font-family:var(--fm);font-size:17px;font-weight:800;line-height:1;text-shadow:0 1px 6px rgba(0,0,0,.6)}
+.wpres i{font-style:normal;font-family:var(--fd);font-size:10.5px;font-weight:800;padding:2px 7px;border-radius:6px;background:var(--well);border:1px solid var(--line)}
+.wpres i.w{color:#ffd76a;border-color:rgba(231,167,63,.5)}
+.wpres i.l{color:#ff9a8f;border-color:rgba(255,120,110,.45)}
+.supsvg .sl{display:none}
+@media(max-width:600px){.axl{font-size:10px}.axl.wp{font-size:11px}.wpres b{font-size:15px}}
 </style>
 </head><body class="pg-analysis">
 
@@ -2567,7 +2582,11 @@ function wpSeries(){
     const st=ps[0].supply_step||8;
     const L=Math.max.apply(null,ps.map(p=>p.supply_series.length));
     const dur=(__m&&+__m.length_sec)||((meta&&_s2(meta.length))||L*st);
-    const sum=(arr,i,key)=>arr.reduce((a,p)=>{const v=(p[key]||[]);return a+(+v[Math.min(i,v.length-1)]||0);},0);
+    const _lv={};(DATA.leaves||[]).forEach(l=>{const n=String(l.name||'').trim().toLowerCase();
+      if(n&&l.sec!=null&&(!(n in _lv)||+l.sec<_lv[n]))_lv[n]=+l.sec;});
+    const _fac=(p,i)=>{const lv=_lv[String(p.name||'').trim().toLowerCase()];
+      if(lv==null)return 1;const t=i*st;return Math.max(0,1-Math.max(0,t-lv)/30);};   // 퇴장 후 30초 페이드아웃
+    const sum=(arr,i,key)=>arr.reduce((a,p)=>{const v=(p[key]||[]);return a+_fac(p,i)*(+v[Math.min(i,v.length-1)]||0);},0);
     const out=[];let ema=null;
     for(let i=0;i<L;i++){
       const s1=sum(t1,i,'supply_series'),s2=sum(t2,i,'supply_series');
@@ -2575,7 +2594,10 @@ function wpSeries(){
       const j=Math.max(0,i-4);
       const m=((s1-sum(t1,j,'supply_series'))-(s2-sum(t2,j,'supply_series')))/50;
       const ds=(s1-s2)/200,dw=(w1-w2)/50,f=Math.min(1,(i*st)/Math.max(60,dur));
-      const z=WPC.b0+WPC.ds*ds+WPC.dw*dw+WPC.mom*m+WPC.dsf*ds*f;
+      // 퇴장 결손 패널티: 팀 인원 대비 이탈 비율(페이드 반영) — 전원 이탈 ≈ 패배 확정
+      const g1=t1.length?t1.reduce((a,p)=>a+(1-_fac(p,i)),0)/t1.length:0;
+      const g2=t2.length?t2.reduce((a,p)=>a+(1-_fac(p,i)),0)/t2.length:0;
+      const z=WPC.b0+WPC.ds*ds+WPC.dw*dw+WPC.mom*m+WPC.dsf*ds*f+2.4*(g2-g1);
       let p=1/(1+Math.exp(-Math.max(-30,Math.min(30,z))));
       const warm=Math.min(1,(i*st)/120);p=0.5+(p-0.5)*warm;   // 초반 2분: 근거 부족 → 50% 쪽으로
       ema=(ema==null)?p:(ema*0.5+p*0.5);   // 표시 스무딩(가볍게) — 교전 스윙 즉각 반영
@@ -2594,7 +2616,6 @@ function renderWinProb(){
   __wp=wpSeries();
   const host=document.getElementById('wpcard');if(!host)return;
   if(!__wp){host.style.display='none';return;}
-  // ── 내 관점 고정: 이 페이지의 주인(저장자)이 속한 팀이 '위쪽' ──
   const ps=(DATA.players||[]);
   const meName=(meta&&meta.saver)||'';
   const mep=ps.find(p=>p.name===meName);
@@ -2605,33 +2626,39 @@ function renderWinProb(){
   const myLab=mine.length===1?mine[0].name:'우리 팀';
   const opLab=opp.length===1?opp[0].name:'상대 팀';
   const pts=__wp.pts.map(o=>({t:o.t,p:(myTeam===1?o.p:1-o.p)}));
-  const W=680,H=140,PL=10,PR=46,PT=16,PB=14;
+  const W=680,H=140,PL=8,PR=8,PT=10,PB=10;
   const dur=Math.max(1,pts[pts.length-1].t);
   const X=t=>PL+(t/dur)*(W-PL-PR);
   const Y=p=>PT+(1-p)*(H-PT-PB);
   const line=pts.map((o,i)=>(i?'L':'M')+X(o.t).toFixed(1)+' '+Y(o.p).toFixed(1)).join(' ');
   const base=Y(0.5).toFixed(1);
   const area=line+' L '+X(dur).toFixed(1)+' '+base+' L '+X(0).toFixed(1)+' '+base+' Z';
-  // 교전/몰살 마커 — 승률 출렁임의 '이유'를 같은 x축에 연결
   const hls=(DATA.highlights||[]).filter(h=>(h.kind==='wipe'||h.kind==='battle')&&h.sec>2&&h.sec<dur-2);
   const mk=hls.map(h=>`<line x1="${X(h.sec).toFixed(1)}" y1="${PT}" x2="${X(h.sec).toFixed(1)}" y2="${H-PB}" stroke="${h.kind==='wipe'?'rgba(255,120,110,.55)':'rgba(240,170,140,.35)'}" stroke-dasharray="2 4"/>`).join('');
-  const pe=pts[pts.length-1].p, peY=Y(pe), up=pe>=0.5;
-  host.innerHTML=`<div class="ch">승률 추이 <span class="cnote">베타 · 정확도 82% · <b style="color:${myCol}">${esc(myLab)}</b> 관점</span></div>
-   <svg class="wpsvg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
-    <defs>
-     <clipPath id="wpUp"><rect x="0" y="0" width="${W}" height="${base}"/></clipPath>
-     <clipPath id="wpDn"><rect x="0" y="${base}" width="${W}" height="${H}"/></clipPath>
-    </defs>
-    ${mk}
-    <path d="${area}" fill="${myCol}" opacity=".16" clip-path="url(#wpUp)"/>
-    <path d="${area}" fill="${opCol}" opacity=".15" clip-path="url(#wpDn)"/>
-    <line x1="${PL}" y1="${base}" x2="${W-PR}" y2="${base}" stroke="rgba(255,255,255,.30)" stroke-dasharray="5 4"/>
-    <path d="${line}" fill="none" stroke="var(--gold)" stroke-width="2" stroke-linejoin="round"/>
-    <circle cx="${X(dur).toFixed(1)}" cy="${peY.toFixed(1)}" r="3.4" fill="var(--gold)"/>
-    <text x="${W-PR+6}" y="${(peY+4).toFixed(1)}" class="sl" style="font-weight:800;fill:${up?myCol:opCol}">${Math.round((up?pe:1-pe)*100)}%</text>
-    <text x="${PL+2}" y="${PT-4}" class="sl" style="fill:${myCol}">▲ ${esc(myLab)} 우세</text>
-    <text x="${PL+2}" y="${H-2}" class="sl" style="fill:${opCol}">▼ ${esc(opLab)} 우세</text>
-   </svg>`;
+  const pe=pts[pts.length-1].p, up=pe>=0.5;
+  const wKnown=(meta&&meta.winner!=null)?+meta.winner:null;
+  const iWon=(wKnown!=null)?(wKnown===myTeam):null;
+  host.innerHTML=`<div class="ch">승률 추이 <span class="cnote">베타 · 추정치(전사·항복 일부 미반영) · <b style="color:${myCol}">${esc(myLab)}</b> 관점</span></div>
+   <div class="chwrap wpwrap">
+    <svg class="wpsvg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+     <defs>
+      <clipPath id="wpUp"><rect x="0" y="0" width="${W}" height="${base}"/></clipPath>
+      <clipPath id="wpDn"><rect x="0" y="${base}" width="${W}" height="${H}"/></clipPath>
+     </defs>
+     ${mk}
+     <path d="${area}" fill="${myCol}" opacity=".16" clip-path="url(#wpUp)"/>
+     <path d="${area}" fill="${opCol}" opacity=".15" clip-path="url(#wpDn)"/>
+     <line x1="${PL}" y1="${base}" x2="${W-PL}" y2="${base}" stroke="rgba(255,255,255,.30)" stroke-dasharray="5 4" vector-effect="non-scaling-stroke"/>
+     <path d="${line}" fill="none" stroke="var(--gold)" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+     <circle cx="${X(dur).toFixed(1)}" cy="${Y(pe).toFixed(1)}" r="3.2" fill="var(--gold)"/>
+    </svg>
+    <span class="axl wp" style="left:8px;top:6px;color:${myCol}">▲ ${esc(myLab)} 우세</span>
+    <span class="axl wp" style="left:8px;bottom:6px;color:${opCol}">▼ ${esc(opLab)} 우세</span>
+    <div class="wpres" style="top:${(Y(pe)/H*100).toFixed(1)}%">
+      <b style="color:${up?myCol:opCol}">${Math.round((up?pe:1-pe)*100)}%</b>
+      ${iWon==null?'':`<i class="${iWon?'w':'l'}">실제 ${iWon?'승리':'패배'}</i>`}
+    </div>
+   </div>`;
   host.style.display='';
 }
 function renderSupplyChart(){
@@ -2650,10 +2677,14 @@ function renderSupplyChart(){
  const _gstep=YMAX<=300?100:(YMAX<=600?200:300);
  const _gvals=[];for(let v=0;v<=YMAX;v+=_gstep)_gvals.push(v);
  if(_gvals[_gvals.length-1]!==YMAX)_gvals.push(YMAX);
- _gvals.forEach(v=>{g+=`<line x1="${L}" y1="${Y(v)}" x2="${W-R}" y2="${Y(v)}" class="sg"/><text x="${L-6}" y="${Y(v)+3.5}" class="sl" text-anchor="end">${v}</text>`;});
- if(YMAX>200)g+=`<line x1="${L}" y1="${Y(200)}" x2="${W-R}" y2="${Y(200)}" class="sg200"/><text x="${W-R-2}" y="${Y(200)-4}" class="sl" text-anchor="end" opacity=".75">인구 상한 200</text>`;
+ let axh='';
+ _gvals.forEach(v=>{g+=`<line x1="${L}" y1="${Y(v)}" x2="${W-R}" y2="${Y(v)}" class="sg"/>`;
+   axh+=`<span class="axl y" style="top:${(Y(v)/H*100).toFixed(2)}%;left:${((L-6)/W*100).toFixed(2)}%">${v}</span>`;});
+ if(YMAX>200){g+=`<line x1="${L}" y1="${Y(200)}" x2="${W-R}" y2="${Y(200)}" class="sg200"/>`;
+   axh+=`<span class="axl cap" style="top:${(Y(200)/H*100).toFixed(2)}%;right:${(R/W*100+1).toFixed(2)}%">인구 상한 200</span>`;}
  const stp=gl>12*60?300:120;
- for(let t=stp;t<gl;t+=stp) g+=`<line x1="${X(t)}" y1="${T2}" x2="${X(t)}" y2="${H-B}" class="sgx"/><text x="${X(t)}" y="${H-9}" class="sl" text-anchor="middle">${Math.round(t/60)}분</text>`;
+ for(let t=stp;t<gl;t+=stp){g+=`<line x1="${X(t)}" y1="${T2}" x2="${X(t)}" y2="${H-B}" class="sgx"/>`;
+   axh+=`<span class="axl x" style="left:${(X(t)/W*100).toFixed(2)}%;bottom:2px">${Math.round(t/60)}분</span>`;}
  (HL||[]).forEach(h=>{if(h.kind!=='battle'&&h.kind!=='wipe')return;const wp=h.kind==='wipe';
    g+=`<line x1="${X(h.sec)}" y1="${T2}" x2="${X(h.sec)}" y2="${H-B}" stroke="${wp?'#ff8f8f':'#f0a98e'}" stroke-width="${wp?1.5:1}" ${wp?'':'stroke-dasharray="3 3"'} opacity=".6"/>`;});
  // 실측 병합: 내 hud + 멀티뷰 시점들의 hud — 녹화한 선수마다 '사망 반영' 곡선을 자기 색으로
@@ -2683,7 +2714,7 @@ function renderSupplyChart(){
    if(HD.gs){const gp=HD.gs.map((v,k)=>{const t=k*st5-ld;return t<0?null:(X(t).toFixed(1)+','+Y2(v).toFixed(1));}).filter(Boolean).join(' ');
      r2+=`<polyline points="${gp}" fill="none" stroke="#79c8b4" stroke-width="1.4" opacity=".85"/>`;}
    rsvg=`<div class="ch chsub">자원 잔량 <span class="cnote">실측(녹화자) · <span style="color:#d9c07a">미네랄</span>/<span style="color:#79c8b4">가스</span> — 쌓이면 생산 부족</span></div><svg viewBox="0 0 ${W} ${H2}" class="supsvg" preserveAspectRatio="xMidYMid meet">${r2}</svg>`;}
- el.innerHTML=`<div class="ch">인구 곡선 <span class="cnote">얇은 선=생산 누적 · 굵은 선=실측 · 세로선 <span style="color:#f0a98e">교전</span>/<span style="color:#ff8f8f">몰살</span></span></div><svg viewBox="0 0 ${W} ${H}" class="supsvg" preserveAspectRatio="xMidYMid meet">${g}</svg><div class="supleg">${leg}</div>${rsvg}`;
+ el.innerHTML=`<div class="ch">인구 곡선 <span class="cnote">얇은 선=생산 누적 · 굵은 선=실측 · 세로선 <span style="color:#f0a98e">교전</span>/<span style="color:#ff8f8f">몰살</span></span></div><div class="chwrap"><svg viewBox="0 0 ${W} ${H}" class="supsvg" preserveAspectRatio="xMidYMid meet">${g}</svg>${axh}</div><div class="supleg">${leg}</div>${rsvg}`;
 }
 try{renderSupplyChart();}catch(_e){}try{renderWinProb();}catch(_e){}
 function renderEndScore(){

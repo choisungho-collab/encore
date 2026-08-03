@@ -171,7 +171,7 @@ import queue as _queue
 from collections import deque as _deque
 GUI_Q = _queue.Queue(maxsize=4000)
 LOG_BUF = _deque(maxlen=400)   # 로그창이 닫혀 있어도 최근 로그를 항상 보관(열면 즉시 채움)
-APP_VERSION = "1.9.17"
+APP_VERSION = "1.9.18"
 REC_STATE = {"recording": False, "encoder": "", "ready": False}
 LAST_ERR = {"msg": "", "t": 0.0}
 UP_DONE = {"t": 0.0, "shown": 0.0}
@@ -2160,7 +2160,7 @@ def _ver_tuple(s):
     try: return tuple(int(x) for x in re.findall(r"\d+", s or "")[:3]) or (0,)
     except Exception: return (0,)
 
-def _self_update(log_fn=None):
+def _self_update(log_fn=None, timeout=30):
     """새 버전을 내려받아 3중 검증(버전·내용·컴파일) 후 자기 자신을 교체.
     성공 시 새 버전 문자열, 아니면 None. 실행 중 프로세스엔 영향 없음(다음 실행부터 적용).
     frozen(EXE)은 실행 파일이 잠겨 있어 배지 안내(수동)로 폴백한다."""
@@ -2169,7 +2169,7 @@ def _self_update(log_fn=None):
         if FROZEN:
             return None
         import requests
-        r = requests.get(RAW_RECORDER_URL, timeout=30)
+        r = requests.get(RAW_RECORDER_URL, timeout=timeout)
         if r.status_code != 200:
             return None
         src = r.text
@@ -6302,5 +6302,22 @@ def main():
         if not FFMPEG: FFMPEG = ensure_ffmpeg()
         print("-" * 56); recorder_loop(cfg)
 
+def _startup_self_update():
+    """실행 직후(UI·감시 시작 전) 최신 확인 → 새 버전이면 교체 후 '즉시 그 버전으로 재실행'.
+    이 시점엔 녹화가 있을 수 없어 재시작이 안전하다. 오프라인·지연은 조용히 통과
+    (백그라운드 체크가 2차 방어: 세션 중 받아두고 다음 실행에 적용)."""
+    try:
+        if FROZEN:
+            return
+        done = _self_update(timeout=6)
+        if done:
+            try: log(f"시작 시 자동 업데이트 v{done} — 새 버전으로 재실행")
+            except Exception: pass
+            me = os.path.abspath(__file__)
+            os.execv(sys.executable, [sys.executable, me])
+    except Exception:
+        pass
+
 if __name__ == "__main__":
+    _startup_self_update()
     main()
