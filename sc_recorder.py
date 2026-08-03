@@ -171,7 +171,7 @@ import queue as _queue
 from collections import deque as _deque
 GUI_Q = _queue.Queue(maxsize=4000)
 LOG_BUF = _deque(maxlen=400)   # 로그창이 닫혀 있어도 최근 로그를 항상 보관(열면 즉시 채움)
-APP_VERSION = "1.9.15"
+APP_VERSION = "1.9.17"
 REC_STATE = {"recording": False, "encoder": "", "ready": False}
 LAST_ERR = {"msg": "", "t": 0.0}
 UP_DONE = {"t": 0.0, "shown": 0.0}
@@ -743,7 +743,9 @@ def extract_analysis(rep_path):
         _rl = chr(_lt) if isinstance(_lt, int) and 65 <= _lt <= 90 else None
         players[pid] = {"id": pid, "name": p.get("Name"), "race": (p.get("Race") or {}).get("ShortName"), "rl": _rl,
             "team": p.get("Team"), "color": "#%06x" % ((p.get("Color") or {}).get("RGB", 8421504)),
-            "apm": pd.get("APM"), "eapm": pd.get("EAPM"), "build": [], "units": Counter(), "up_fr": defaultdict(list),
+            "apm": pd.get("APM"), "eapm": pd.get("EAPM"),
+            "last_cmd": round((pd.get("LastCmdFrame") or 0) / FPS_GAME, 1),
+            "build": [], "units": Counter(), "up_fr": defaultdict(list),
             "unit_first": {}, "townhalls": [], "apm_series": [0]*nbins, "supply_events": [], "cost_events": [],
             "cmd_mix": Counter(), "hotkey_n": 0, "groups": set(), "drops": 0, "pings": 0,
             "scout_bases": set(), "scout_first_fr": None, "atk_first_fr": None, "drop_first_fr": None,
@@ -888,6 +890,7 @@ def extract_analysis(rep_path):
             "sup_anchor": (_anch if len(_anch) >= 6 else None),
             "up_timed": _ut, "worker_ms": _wms, "worker_ko": WORKER_KO.get(rl, "일꾼"),
             "tech1": {nm: mmss(min(fr)) for nm, fr in (pl.get("up_fr") or {}).items() if fr},   # 업글/테크 최초 시작 시각 — 코치 2.0 인과 체인용
+            "last_cmd": pl.get("last_cmd"),   # 생존판정 근거(초) — DB 감사용
             "atk_lv": atk_lv, "arm_lv": arm_lv, "supply_bld": sup_bld, "supply_cap": sup_cap, "supply_ko": sup_ko,
             "main_prod_n": mp_n, "main_prod_ko": mp_ko,
             "summary": {"buildings": sum(1 for b in pl["build"] if b["cat"] in ("building", "morph")),
@@ -1309,20 +1312,46 @@ def _hud_band_frames(video_path, fps=1.0):
     except Exception:
         return None
 
-def _hud_glyph_groups(img):
-    """한 밴드 프레임 → [ [glyph(12x18 float), ...] , ...] 클러스터(좌→우). 밝은 글자 가정."""
+def _hud_glyph_groups(img, raw=False):
+    """한 밴드 프레임 → 클러스터(좌→우).
+    기본: [ [glyph(12x18), ...], ... ]  (엔드스코어 등 기존 호환)
+    raw=True: {"cl":[[(x0,x1),...],...], "y":(y0,y1), "g":gray}
+      → 학습/판독이 '등분할'로 글리프를 직접 자른다(HUD 는 고정폭 폰트라
+        블러 융합·안티앨리어스 조각에도 위치 기반 절단이 가장 견고)."""
     np = _wl_np()
     g = img.astype(np.float32)
-    thr = max(140.0, float(g.mean() + 2.0 * g.std()))
-    b = g > thr
+    # ── 적응 이진화(v1.9.17): 실전 글리프는 안티앨리어스로 peak 90~160 이라
+    #    고정 임계 140 이 '/'·가는 획을 학살했다(실측: '/' 최대 98, '9' 143).
+    #    배경(맵)은 저주파 → 가로 박스블러를 빼는 하이패스로 텍스트만 양각 → 밝기 변동 면역.
+    #    배경 추정 = 가로 '롤링 미니멈'(창 31) + 3px 스무딩: 텍스트는 밝은 돌기라 min 에 섞이지 않아
+    #    숫자 밀집 구간에서도 배경만 깎인다(박스블러는 숫자 자체를 배경으로 흡수해 앞자리를 지웠음).
+    K = 31
+    pad = np.pad(g, ((0, 0), (K // 2, K // 2)), mode="edge")
+    try:
+        from numpy.lib.stride_tricks import sliding_window_view as _swv
+        bg = _swv(pad, K, axis=1).min(axis=2)
+    except Exception:
+        bg = np.stack([np.min(pad[:, i:i + K], axis=1) for i in range(g.shape[1])], axis=1)
+    bg = bg[:, :g.shape[1]]
+    k3 = np.ones(3, dtype=np.float32) / 3.0
+    bg = np.apply_along_axis(lambda r: np.convolve(r, k3, mode="same"), 1, bg)
+    hp = g - bg
+    thr = max(12.0, 1.3 * float(hp.std()))
+    b = hp > thr
     col = b.sum(axis=0)
     segs = []; x0 = None
     for x in range(len(col) + 1):
         on = x < len(col) and col[x] > 0
         if on and x0 is None: x0 = x
         elif not on and x0 is not None:
-            if x - x0 >= 2: segs.append((x0, x))
-            x0 = None
+            segs.append((x0, x)); x0 = None
+    # 안티앨리어스로 조각난 획 봉합: 1px 갭 병합
+    if segs:
+        merged = [list(segs[0])]
+        for a, c in segs[1:]:
+            if a - merged[-1][1] <= 1: merged[-1][1] = c
+            else: merged.append([a, c])
+        segs = [(a, c) for a, c in merged if c - a >= 2]
     if len(segs) < 3: return []
     rows = b.any(axis=1).nonzero()[0]
     if not len(rows): return []
@@ -1350,51 +1379,119 @@ def _hud_glyph_groups(img):
         drop = 0
         if len(ws) >= 3:
             ref = sorted(ws[1:])[len(ws[1:]) // 2]          # 선두 제외 중앙값(디지트 폭 대표)
-            while drop < 2 and len(ws) - drop > 1 and ws[drop] > 1.5 * ref:
+            while drop < 2 and len(ws) - drop > 1 and ws[drop] > 1.35 * ref:
                 drop += 1
-        elif len(ws) == 2 and ws[0] > 1.35 * ws[1]:
+        elif len(ws) == 2 and ws[0] > 1.25 * ws[1]:
             drop = 1
-        groups.append([_norm(x0, x1) for (x0, x1) in cl[drop:]])
+        kept = cl[drop:]
+        mass = sum(int(b[:, x0:x1].sum()) for (x0, x1) in kept)
+        if mass < 14:                      # 배경 돌기·압축 잡음 클러스터 제거
+            continue
+        groups.append(kept if raw else [_norm(x0, x1) for (x0, x1) in kept])
+    if raw:
+        return {"cl": groups, "y": (y0, y1), "g": g}
     return groups
 
+def _hud_norm_span(np, g, y0, y1, a, c):
+    """픽셀 구간 → 12x18 정규화 글리프 (학습·판독 등분할 공용)."""
+    a = int(max(0, a)); c = int(min(g.shape[1], max(a + 1, c)))
+    cimg = g[y0:y1, a:c]
+    yi = (np.arange(_GH) * (cimg.shape[0] - 1) / max(1, _GH - 1)).astype(int)
+    xi = (np.arange(_GW) * (cimg.shape[1] - 1) / max(1, _GW - 1)).astype(int)
+    cimg = cimg[yi][:, xi]
+    cimg = cimg - cimg.mean()
+    nr = float(np.sqrt((cimg * cimg).sum())) or 1.0
+    return cimg / nr
+
+def _hud_cut(np, g, y0, y1, a, c):
+    """(y0:y1, a:c) 크롭 → 12x18 zero-mean/unit-norm 글리프."""
+    a = int(max(0, a)); c = int(min(g.shape[1], max(a + 1, c)))
+    cimg = g[y0:y1, a:c]
+    yi = (np.arange(_GH) * (cimg.shape[0] - 1) / max(1, _GH - 1)).astype(int)
+    xi = (np.arange(_GW) * (cimg.shape[1] - 1) / max(1, _GW - 1)).astype(int)
+    cimg = cimg[yi][:, xi].astype(np.float32)
+    cimg = cimg - cimg.mean()
+    nr = float(np.sqrt((cimg * cimg).sum())) or 1.0
+    return cimg / nr
+
+def _hud_trim_span(cl):
+    """클러스터 세그목록 → 아이콘(선두 과폭) 제거 후 (s0,e) 픽셀범위. 등분할용."""
+    ws = [x1 - x0 for (x0, x1) in cl]
+    drop = 0
+    if len(ws) >= 3:
+        ref = sorted(ws[1:])[len(ws[1:]) // 2]
+        while drop < 2 and len(ws) - drop > 1 and ws[drop] > 1.35 * ref:
+            drop += 1
+    elif len(ws) == 2 and ws[0] > 1.25 * ws[1]:
+        drop = 1
+    kept = cl[drop:]
+    return (kept[0][0], kept[-1][1]) if kept else None
+
 def _hud_learn_templates(frames, anchors, lead):
-    """anchors=[(게임초,사용,최대)] → 문자('0'-'9','/') 템플릿 dict. 최소 조건 미달 시 None."""
+    """anchors=[(게임초,사용,최대)] → 문자 템플릿 dict + "_w"(평균 글자폭).
+    v1.9.17: 세그먼트 경계를 믿지 않는다 — HUD 는 고정폭 폰트이므로 인구 클러스터
+    범위를 want 글자수로 '등분'해 글리프를 뜬다(블러 융합·안티앨리어스 조각 면역)."""
     np = _wl_np()
-    bank = {}
+    bank = {}; widths = []
     for sec, u, m in anchors:
         fi = int(round(sec + lead))
         if fi < 0 or fi >= len(frames): continue
         want = "%d/%d" % (u, m)
-        groups = _hud_glyph_groups(frames[fi])
-        if not groups: continue
-        gl = groups[-1]                       # 인구 = 최우측 클러스터
-        if len(gl) > len(want) and len(gl) - len(want) <= 2:
-            gl = gl[-len(want):]              # 선두 잔여 잡음은 접미 정렬로 흡수
-        if len(gl) != len(want): continue
-        for ch, gy in zip(want, gl):
-            bank.setdefault(ch, []).append(gy)
+        info = _hud_glyph_groups(frames[fi], raw=True)
+        if not info or not info.get("cl"): continue
+        y0, y1 = info["y"]; g = info["g"]
+        span = _hud_trim_span(info["cl"][-1])
+        if not span: continue
+        s0, e = span
+        if e - s0 < 3 * len(want) or e - s0 > 16 * len(want): continue   # 폭 개연성
+        cl = info["cl"][-1]
+        kept = [seg for seg in cl if seg[0] >= s0]           # 트림 반영 세그
+        if len(kept) == len(want):                           # ① 세그 정합 → 정밀 크롭
+            cuts = kept
+        else:                                                # ② 융합/조각 → 등분 폴백
+            step = (e - s0) / float(len(want))
+            cuts = [(s0 + k * step, s0 + (k + 1) * step) for k in range(len(want))]
+        for ch, (a2, c2) in zip(want, cuts):
+            bank.setdefault(ch, []).append(_hud_cut(np, g, y0, y1, a2, c2))
+        widths.append((e - s0) / float(len(want)))
     if "/" not in bank or sum(len(v) for k, v in bank.items() if k.isdigit()) < 8: return None
     tpl = {}
     for ch, arr in bank.items():
-        if len(arr) < 2 and ch.isdigit() and len(bank) > 4: 
-            pass                              # 표본 1개도 허용(희귀 숫자) — 평균이 곧 자신
         m = np.mean(np.stack(arr), axis=0)
         m = m - m.mean(); nr = float(np.sqrt((m * m).sum())) or 1.0
         tpl[ch] = m / nr
-    return tpl if len([k for k in tpl if k.isdigit()]) >= 5 else None
-
+    if len([k for k in tpl if k.isdigit()]) < 5: return None
+    tpl["_w"] = float(sorted(widths)[len(widths) // 2]) if widths else 9.0
+    return tpl
 def _hud_read_all(frames, tpl):
-    """전 프레임 판독 → (sup_used, sup_max, minerals, gas) 초당 리스트 (None=결측)."""
+    """전 프레임 판독 → (sup_used, sup_max, minerals, gas) 초당 리스트 (None=결측).
+    v1.9.17: 클러스터 범위를 학습된 평균 글자폭(_w)으로 등분해 절단 — 세그 융합 면역."""
     np = _wl_np()
-    keys = list(tpl.keys()); T = np.stack([tpl[k] for k in keys])
+    keys = [k for k in tpl.keys() if k != "_w"]; T = np.stack([tpl[k] for k in keys])
+    W0 = float(tpl.get("_w") or 9.0)
     def _cls(gy):
         sc = (T * gy).sum(axis=(1, 2))
         i = int(np.argmax(sc))
-        return keys[i] if sc[i] >= 0.55 else None
-    def _num(gl, maxd):
-        chs = [_cls(g2) for g2 in gl]
+        if sc[i] < 0.55: return None
+        if len(sc) > 1:
+            j2 = int(np.argsort(sc)[-2])
+            if sc[i] - sc[j2] < 0.08: return None
+        return keys[i]
+    def _cluster_chars(g, y0, y1, cl):
+        span = _hud_trim_span(cl)
+        if not span: return []
+        s0, e = span
+        kept = [seg for seg in cl if seg[0] >= s0]
+        out1 = [_cls(_hud_cut(np, g, y0, y1, a2, c2)) for (a2, c2) in kept]   # ① 세그 정밀
+        if out1 and all(c is not None for c in out1): return out1
+        n = int(round((e - s0) / W0))                                          # ② 등분 폴백
+        if n < 1 or n > 7: return out1
+        step = (e - s0) / float(n)
+        out2 = [_cls(_hud_cut(np, g, y0, y1, s0 + k * step, s0 + (k + 1) * step)) for k in range(n)]
+        return out2 if sum(c is not None for c in out2) > sum(c is not None for c in out1) else out1
+    def _num(chs, maxd):
         run = []
-        for c in reversed(chs):               # 말미에서부터 연속 디지트만 수집(선두 잡음 무시)
+        for c in reversed(chs):               # 말미에서부터 연속 디지트만(선두 잡음 무시)
             if c is not None and c.isdigit(): run.append(c)
             else: break
         if not run: return None
@@ -1402,10 +1499,12 @@ def _hud_read_all(frames, tpl):
         return int(t) if 1 <= len(t) <= maxd else None
     su = []; sm = []; mn = []; gs = []
     for f in frames:
-        groups = _hud_glyph_groups(f)
+        info = _hud_glyph_groups(f, raw=True)
+        groups = (info or {}).get("cl") or []
         u = m = a = b2 = None
         if groups:
-            chs = [_cls(g2) for g2 in groups[-1]]
+            y0, y1 = info["y"]; gimg = info["g"]
+            chs = _cluster_chars(gimg, y0, y1, groups[-1])
             for k in range(min(len(chs), 7), 2, -1):   # 접미 k글자에서 u/m 패턴 탐색
                 tail = chs[-k:]
                 if any(c is None for c in tail): continue
@@ -1415,12 +1514,12 @@ def _hud_read_all(frames, tpl):
                 if L.isdigit() and R.isdigit() and 1 <= len(L) <= 3 and 1 <= len(R) <= 3:
                     u, m = int(L), int(R); break
             if len(groups) >= 3:
-                a = _num(groups[-3], 5); b2 = _num(groups[-2], 5)
+                a = _num(_cluster_chars(gimg, y0, y1, groups[-3]), 5)
+                b2 = _num(_cluster_chars(gimg, y0, y1, groups[-2]), 5)
             elif len(groups) == 2:
-                a = _num(groups[-2], 5)
+                a = _num(_cluster_chars(gimg, y0, y1, groups[-2]), 5)
         su.append(u); sm.append(m); mn.append(a); gs.append(b2)
     return su, sm, mn, gs
-
 def _hud_clean(seq, lo, hi, max_jump=None):
     """범위 필터 + 결측 전방채움 + (선택) 비정상 점프 제거. 반환은 int 리스트(초기 결측은 첫 유효값)."""
     out = []; last = None
@@ -2043,13 +2142,15 @@ def _preview_start_sec(analysis, length_sec):
     except Exception: pass
     return 12
 
+RAW_RECORDER_URL = "https://raw.githubusercontent.com/choisungho-collab/encore/main/sc_recorder.py"
+
 def check_latest_version(timeout=10):
     """GitHub main 브랜치의 APP_VERSION → 최신 버전 문자열(실패 시 None)."""
     try:
         import requests
-        r = requests.get("https://raw.githubusercontent.com/choisungho-collab/encore/main/sc_recorder.py",
-                         headers={"Range": "bytes=0-8000"}, timeout=timeout)
-        if r.status_code not in (200, 206): return None
+        # 헤더에 임베드 자산이 커서 버전 줄이 파일 중반(~460KB)에 있음 → 전체를 받아 전역 검색
+        r = requests.get(RAW_RECORDER_URL, timeout=timeout)
+        if r.status_code != 200: return None
         m = re.search(r'APP_VERSION\s*=\s*"(\d+(?:\.\d+)*)"', r.text)
         return m.group(1) if m else None
     except Exception:
@@ -2058,6 +2159,44 @@ def check_latest_version(timeout=10):
 def _ver_tuple(s):
     try: return tuple(int(x) for x in re.findall(r"\d+", s or "")[:3]) or (0,)
     except Exception: return (0,)
+
+def _self_update(log_fn=None):
+    """새 버전을 내려받아 3중 검증(버전·내용·컴파일) 후 자기 자신을 교체.
+    성공 시 새 버전 문자열, 아니면 None. 실행 중 프로세스엔 영향 없음(다음 실행부터 적용).
+    frozen(EXE)은 실행 파일이 잠겨 있어 배지 안내(수동)로 폴백한다."""
+    lg = log_fn or log
+    try:
+        if FROZEN:
+            return None
+        import requests
+        r = requests.get(RAW_RECORDER_URL, timeout=30)
+        if r.status_code != 200:
+            return None
+        src = r.text
+        m = re.search(r'APP_VERSION\s*=\s*"(\d+(?:\.\d+)*)"', src)
+        if not m or _ver_tuple(m.group(1)) <= _ver_tuple(APP_VERSION):
+            return None
+        new_ver = m.group(1)
+        if len(src) < 400_000 or "스타크래프트 자동 녹화" not in src[:2000]:
+            lg("자동 업데이트 중단: 원격 파일 내용 검증 실패"); return None
+        compile(src, "sc_recorder.py", "exec")                     # 문법 무결성 1차
+        me = os.path.abspath(__file__)
+        tmp, bak = me + ".new", me + ".bak"
+        with open(tmp, "w", encoding="utf-8", newline="") as f:
+            f.write(src)
+        compile(open(tmp, encoding="utf-8").read(), "sc_recorder.py", "exec")   # 디스크본 2차
+        try:
+            if os.path.exists(bak): os.remove(bak)
+            os.replace(me, bak)                                     # 현재본 백업(.bak)
+        except Exception:
+            pass
+        os.replace(tmp, me)
+        lg(f"자동 업데이트 완료 → v{new_ver}  (다음 실행부터 적용 · 이전본은 .bak)")
+        return new_ver
+    except Exception as e:
+        try: lg("자동 업데이트 실패: %s" % e)
+        except Exception: pass
+        return None
 
 def cleanup_storage_orphans(log_fn=None):
     """웹 삭제는 DB 행만 지움 → storage 고아 파일 정리(service_key 보유 레코더만).
@@ -5533,19 +5672,26 @@ def run_gui(cfg, url):
         try:
             latest=check_latest_version()
             if latest and _ver_tuple(latest) > _ver_tuple(APP_VERSION):
-                _upd_state["latest"]=latest      # 생성은 메인스레드 poll에서 (after는 스레드-불안전)
+                done=_self_update()               # ① 자동 교체 시도 (성공: 다음 실행부터 새 버전)
+                if done: _upd_state["done"]=done
+                else:    _upd_state["latest"]=latest   # ② 실패/EXE → 수동 다운로드 배지
         except Exception: pass
     threading.Thread(target=_upd_check, daemon=True).start()
     def _upd_badge():
-        if _upd_state["shown"] or not _upd_state["latest"]: return
-        _upd_state["shown"]=True; latest=_upd_state["latest"]
+        if _upd_state["shown"] or not (_upd_state.get("latest") or _upd_state.get("done")): return
+        _upd_state["shown"]=True
+        done=_upd_state.get("done"); latest=done or _upd_state["latest"]
         try:
-            cv.create_text(W-84, 20, anchor="e", text=f"새 버전 v{latest} \u2197",
+            txt = (f"v{done} 준비됨 · 재시작 시 적용" if done else f"새 버전 v{latest} \u2197")
+            cv.create_text(W-84, 20, anchor="e", text=txt,
                            fill=AZ2, font=(MON,9,"bold"), tags="upd")
-            cv.tag_bind("upd","<Button-1>",lambda e: open_app(url.rstrip("/")+"/download.html"))
+            if done:
+                cv.tag_bind("upd","<Button-1>",lambda e: toast("앱을 껐다 켜면 v%s 적용" % done))
+            else:
+                cv.tag_bind("upd","<Button-1>",lambda e: open_app(url.rstrip("/")+"/download.html"))
             cv.tag_bind("upd","<Enter>",lambda e: cv.config(cursor="hand2"))
             cv.tag_bind("upd","<Leave>",lambda e: cv.config(cursor=""))
-            log(f"새 버전 v{latest} — 상단 배지를 눌러 다운로드")
+            log((f"자동 업데이트 완료 — 재시작하면 v{done}" if done else f"새 버전 v{latest} — 상단 배지를 눌러 다운로드"))
         except Exception: pass
 
     # toast

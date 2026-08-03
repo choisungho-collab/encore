@@ -1744,7 +1744,8 @@ if(vid){
    if(r>=1.15&&r<=2.7)stage.style.aspectRatio=vid.videoWidth+' / '+vid.videoHeight; // 정상 가로 녹화만 적용
    else stage.style.removeProperty('aspect-ratio'); // 세로/이상값(일부 안드로이드 디코더의 W/H 스왑 등) → 기본 16:9 유지
  }catch(_){}}
- vid.addEventListener('loadedmetadata',()=>{_fitAR();if(vid.duration&&isFinite(vid.duration)){OFF=_povOff(__self,vid.duration);if(OFF>1){try{vid.currentTime=Math.max(0,OFF-10);}catch(e){}}}});
+ vid.addEventListener('loadedmetadata',()=>{_fitAR();if(stage.classList.contains('started'))return;   // 시점 전환 재발화 가드
+ if(vid.duration&&isFinite(vid.duration)){OFF=_povOff(__self,vid.duration);if(OFF>1){try{vid.currentTime=Math.max(0,OFF-10);}catch(e){}}}});
  if(vid&&vid.videoWidth>0)_fitAR();
  if(vplay)vplay.addEventListener('click',(e)=>{e.stopPropagation();if(vplay._done)return;vplay._done=true;const _tryPlay=()=>{hideOverlay();const pr=vid.play();if(pr&&pr.catch)pr.catch(()=>{try{vid.muted=true;vid.play().catch(()=>{});}catch(e2){}});};try{vid.load();}catch(e2){}const _go=()=>{if(vid.readyState>=2){_tryPlay();}else{vid.addEventListener('canplay',_tryPlay,{once:true});}};if(vplay._skipIntro){_go();}else{encoreIntro(_go);}});
  vid.addEventListener('play',hideOverlay);
@@ -2070,8 +2071,19 @@ function switchPov(v){
     const target=(wasPlaying||gt>1)?Math.max(0,Math.min((vid.duration||1e9),gt+OFF)):0;  // 같은 순간으로 맞춤
     const go=()=>{vid.muted=_prevMuted;if(wasPlaying){hideOverlay();if(vid.paused)vid.play().catch(()=>{});}else{try{vid.pause();}catch(e){}}};
     if(target>0.1){
-      vid.addEventListener('seeked',function _sk(){_reveal();go();},{once:true});
-      try{vid.currentTime=target;}catch(e){_reveal();go();}
+      // 원격 mp4 는 metadata 직후 seekable 범위가 아직 없어 currentTime 대입이 '조용히 무시'될 수 있다.
+      // → 도달 확인·재시도 루프: seeked 또는 0.35s 폴링으로 |현재−목표|≤1.5s 될 때까지 (최대 ~5s).
+      let _fin=false,_tries=0;
+      const _ok=()=>Math.abs((vid.currentTime||0)-target)<=1.5;
+      const _sk=()=>{if(_ok())_done();};
+      const _done=()=>{if(_fin)return;_fin=true;try{vid.removeEventListener('seeked',_sk);}catch(e){}_reveal();go();};
+      vid.addEventListener('seeked',_sk);
+      const _try=()=>{if(_fin||_mySeq!==_switchSeq)return;
+        if(_ok())return _done();
+        try{vid.currentTime=target;}catch(e){}
+        if(++_tries<14)setTimeout(_try,350);else _done();};
+      _try();
+      setTimeout(_done,6000);                                   // 최종 안전망
     }else{_reveal();go();}
   },{once:true});
   setTimeout(()=>{_reveal();if(vid){vid.style.visibility='';vid.muted=_prevMuted;if(wasPlaying&&vid.paused)vid.play().catch(()=>{});}},1500);  // 안전장치: 표시+이어재생 보장
@@ -2582,18 +2594,43 @@ function renderWinProb(){
   __wp=wpSeries();
   const host=document.getElementById('wpcard');if(!host)return;
   if(!__wp){host.style.display='none';return;}
-  const pts=__wp.pts,W=680,H=150,PAD=8;
-  const X=t=>PAD+(t/Math.max(1,pts[pts.length-1].t))*(W-PAD*2);
-  const Y=p=>PAD+(1-p)*(H-PAD*2);
+  // ── 내 관점 고정: 이 페이지의 주인(저장자)이 속한 팀이 '위쪽' ──
+  const ps=(DATA.players||[]);
+  const meName=(meta&&meta.saver)||'';
+  const mep=ps.find(p=>p.name===meName);
+  const myTeam=(mep&&(+mep.team===1||+mep.team===2))?+mep.team:1;
+  const t1p=ps.filter(p=>+p.team===1),t2p=ps.filter(p=>+p.team===2);
+  const mine=(myTeam===1?t1p:t2p),opp=(myTeam===1?t2p:t1p);
+  const myCol=(mine[0]&&mine[0].color)||'#7fb4ff', opCol=(opp[0]&&opp[0].color)||'#ff9a8f';
+  const myLab=mine.length===1?mine[0].name:'우리 팀';
+  const opLab=opp.length===1?opp[0].name:'상대 팀';
+  const pts=__wp.pts.map(o=>({t:o.t,p:(myTeam===1?o.p:1-o.p)}));
+  const W=680,H=140,PL=10,PR=46,PT=16,PB=14;
+  const dur=Math.max(1,pts[pts.length-1].t);
+  const X=t=>PL+(t/dur)*(W-PL-PR);
+  const Y=p=>PT+(1-p)*(H-PT-PB);
   const line=pts.map((o,i)=>(i?'L':'M')+X(o.t).toFixed(1)+' '+Y(o.p).toFixed(1)).join(' ');
-  const area=line+' L '+X(pts[pts.length-1].t).toFixed(1)+' '+Y(0.5)+' L '+X(0)+' '+Y(0.5)+' Z';
-  host.innerHTML=`<div class="ch">승률 추이 <span class="cnote">베타 · 인구·모멘텀 학습(정확도 82%) · TEAM 1 기준</span></div>
+  const base=Y(0.5).toFixed(1);
+  const area=line+' L '+X(dur).toFixed(1)+' '+base+' L '+X(0).toFixed(1)+' '+base+' Z';
+  // 교전/몰살 마커 — 승률 출렁임의 '이유'를 같은 x축에 연결
+  const hls=(DATA.highlights||[]).filter(h=>(h.kind==='wipe'||h.kind==='battle')&&h.sec>2&&h.sec<dur-2);
+  const mk=hls.map(h=>`<line x1="${X(h.sec).toFixed(1)}" y1="${PT}" x2="${X(h.sec).toFixed(1)}" y2="${H-PB}" stroke="${h.kind==='wipe'?'rgba(255,120,110,.55)':'rgba(240,170,140,.35)'}" stroke-dasharray="2 4"/>`).join('');
+  const pe=pts[pts.length-1].p, peY=Y(pe), up=pe>=0.5;
+  host.innerHTML=`<div class="ch">승률 추이 <span class="cnote">베타 · 정확도 82% · <b style="color:${myCol}">${esc(myLab)}</b> 관점</span></div>
    <svg class="wpsvg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
-    <line x1="${PAD}" y1="${Y(0.5)}" x2="${W-PAD}" y2="${Y(0.5)}" stroke="rgba(255,255,255,.18)" stroke-dasharray="4 4"/>
-    <path d="${area}" fill="rgba(224,180,65,.10)"/>
-    <path d="${line}" fill="none" stroke="var(--gold)" stroke-width="2"/>
-    <text x="${PAD+2}" y="${Y(1)+11}" class="sl">T1 100%</text>
-    <text x="${PAD+2}" y="${Y(0)-3}" class="sl">T2 100%</text>
+    <defs>
+     <clipPath id="wpUp"><rect x="0" y="0" width="${W}" height="${base}"/></clipPath>
+     <clipPath id="wpDn"><rect x="0" y="${base}" width="${W}" height="${H}"/></clipPath>
+    </defs>
+    ${mk}
+    <path d="${area}" fill="${myCol}" opacity=".16" clip-path="url(#wpUp)"/>
+    <path d="${area}" fill="${opCol}" opacity=".15" clip-path="url(#wpDn)"/>
+    <line x1="${PL}" y1="${base}" x2="${W-PR}" y2="${base}" stroke="rgba(255,255,255,.30)" stroke-dasharray="5 4"/>
+    <path d="${line}" fill="none" stroke="var(--gold)" stroke-width="2" stroke-linejoin="round"/>
+    <circle cx="${X(dur).toFixed(1)}" cy="${peY.toFixed(1)}" r="3.4" fill="var(--gold)"/>
+    <text x="${W-PR+6}" y="${(peY+4).toFixed(1)}" class="sl" style="font-weight:800;fill:${up?myCol:opCol}">${Math.round((up?pe:1-pe)*100)}%</text>
+    <text x="${PL+2}" y="${PT-4}" class="sl" style="fill:${myCol}">▲ ${esc(myLab)} 우세</text>
+    <text x="${PL+2}" y="${H-2}" class="sl" style="fill:${opCol}">▼ ${esc(opLab)} 우세</text>
    </svg>`;
   host.style.display='';
 }
@@ -2604,10 +2641,10 @@ function renderSupplyChart(){
  el.hidden=false;
  const ST=PS[0].supply_step||15;
  const gl=Math.max(...PS.map(p=>(p.supply_series.length-1)*ST));
- const W=680,H=192,L=34,R=10,T2=12,B=26,pw=W-L-R,ph2=H-T2-B;
  // y축 자동 스케일 — '생산 누적'은 200 을 넘는 게 정상이므로 최댓값에 맞춰 늘린다.
  const _peak=Math.max(200,...PS.map(p=>Math.max(...(p.supply_series||[0]))));
  const YMAX=Math.ceil(_peak/100)*100;
+ const W=680,H=192,L=16+String(YMAX).length*9,R=10,T2=12,B=26,pw=W-L-R,ph2=H-T2-B;   // 좌여백=자릿수 비례(1100 잘림 방지)
  const X=t=>L+pw*Math.min(1,t/gl), Y=v=>T2+ph2*(1-Math.min(YMAX,v)/YMAX);
  let g='';
  const _gstep=YMAX<=300?100:(YMAX<=600?200:300);
@@ -2720,7 +2757,7 @@ function pchip(p){const me=p.name===meta.saver;
   <span class="ap">${p.apm||0}</span></div>`;}
 const rail=document.getElementById('rail');
 {const seg=[];[1,2].forEach(t=>{const tp=players.filter(p=>p.team===t);if(!tp.length)return;const win=meta.winner===t;
-  seg.push(`<span class="tlab ${win?'win':''}">${win?I.trophy:''}T${t}</span>`+tp.map(pchip).join(''));});
+  seg.push(`<span class="tlab ${win?'win':''}">${win?I.trophy:''}${tp.length===1?'':('T'+t)}</span>`+tp.map(pchip).join(''));});
  rail.innerHTML=`<div class="pbar">${seg.join('<span class="tvs">vs</span>')}</div>`;}
 
 // detail

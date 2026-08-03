@@ -48,6 +48,9 @@ function sameGame(a, b){
   // (같은 saver 라도 시작이 붙어 있으면 한 판: 이중 인제스트/식별 꼬임까지 한 카드로 흡수)
   const ta = _idTs(a), tb = _idTs(b);
   const la = _len(a), lb = _len(b);
+  // 재업로드 내성: 같은 멤버(baseKey 동일)에 길이까지 초 단위로 일치하면 시각 무관 같은 판.
+  // (리매치가 ±2초 동률일 확률은 사실상 0 — 재분석 재업로드 사고를 옛 카드에 흡수한다)
+  if (la && lb && Math.abs(la - lb) <= 2) return true;
   if (ta != null && tb != null){
     if (Math.abs(ta - tb) > 180) return false;          // 시작 3분 이상 차이 = 다른 판(리매치)
     return (!la || !lb) ? true : Math.abs(la - lb) <= 20;  // POV 별 트리밍 오차 흡수
