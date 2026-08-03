@@ -171,7 +171,7 @@ import queue as _queue
 from collections import deque as _deque
 GUI_Q = _queue.Queue(maxsize=4000)
 LOG_BUF = _deque(maxlen=400)   # 로그창이 닫혀 있어도 최근 로그를 항상 보관(열면 즉시 채움)
-APP_VERSION = "1.9.12"
+APP_VERSION = "1.9.15"
 REC_STATE = {"recording": False, "encoder": "", "ready": False}
 LAST_ERR = {"msg": "", "t": 0.0}
 UP_DONE = {"t": 0.0, "shown": 0.0}
@@ -1337,12 +1337,24 @@ def _hud_glyph_groups(img):
         return c / nr
     gaps = [segs[i + 1][0] - segs[i][1] for i in range(len(segs) - 1)]
     med = sorted(gaps)[len(gaps) // 2] if gaps else 2
-    groups = [[]]; pos = [[segs[0]]]
-    groups[0].append(_norm(*segs[0]))
+    raw = [[segs[0]]]
     for i in range(1, len(segs)):
         if segs[i][0] - segs[i - 1][1] > max(6, med * 2.6):
-            groups.append([]); pos.append([])
-        groups[-1].append(_norm(*segs[i])); pos[-1].append(segs[i])
+            raw.append([])
+        raw[-1].append(segs[i])
+    # SC:R HUD 는 [아이콘][숫자] 구조 — 아이콘·숫자 간격이 좁아 한 클러스터로 붙는다.
+    # 아이콘은 숫자('1'·'/' 포함)보다 확연히 넓으므로, 클러스터 '선두'의 과폭 글리프를 잘라낸다.
+    groups = []
+    for cl in raw:
+        ws = [x1 - x0 for (x0, x1) in cl]
+        drop = 0
+        if len(ws) >= 3:
+            ref = sorted(ws[1:])[len(ws[1:]) // 2]          # 선두 제외 중앙값(디지트 폭 대표)
+            while drop < 2 and len(ws) - drop > 1 and ws[drop] > 1.5 * ref:
+                drop += 1
+        elif len(ws) == 2 and ws[0] > 1.35 * ws[1]:
+            drop = 1
+        groups.append([_norm(x0, x1) for (x0, x1) in cl[drop:]])
     return groups
 
 def _hud_learn_templates(frames, anchors, lead):
@@ -1356,6 +1368,8 @@ def _hud_learn_templates(frames, anchors, lead):
         groups = _hud_glyph_groups(frames[fi])
         if not groups: continue
         gl = groups[-1]                       # 인구 = 최우측 클러스터
+        if len(gl) > len(want) and len(gl) - len(want) <= 2:
+            gl = gl[-len(want):]              # 선두 잔여 잡음은 접미 정렬로 흡수
         if len(gl) != len(want): continue
         for ch, gy in zip(want, gl):
             bank.setdefault(ch, []).append(gy)
@@ -1379,21 +1393,27 @@ def _hud_read_all(frames, tpl):
         return keys[i] if sc[i] >= 0.55 else None
     def _num(gl, maxd):
         chs = [_cls(g2) for g2 in gl]
-        if any(c is None for c in chs): return None
-        t = "".join(chs)
-        return int(t) if t.isdigit() and 1 <= len(t) <= maxd else None
+        run = []
+        for c in reversed(chs):               # 말미에서부터 연속 디지트만 수집(선두 잡음 무시)
+            if c is not None and c.isdigit(): run.append(c)
+            else: break
+        if not run: return None
+        t = "".join(reversed(run[:maxd] if len(run) > maxd else run))
+        return int(t) if 1 <= len(t) <= maxd else None
     su = []; sm = []; mn = []; gs = []
     for f in frames:
         groups = _hud_glyph_groups(f)
         u = m = a = b2 = None
         if groups:
             chs = [_cls(g2) for g2 in groups[-1]]
-            if all(c is not None for c in chs):
-                t = "".join(chs)
-                if "/" in t:
-                    L, _, R = t.partition("/")
-                    if L.isdigit() and R.isdigit() and len(L) <= 3 and len(R) <= 3:
-                        u, m = int(L), int(R)
+            for k in range(min(len(chs), 7), 2, -1):   # 접미 k글자에서 u/m 패턴 탐색
+                tail = chs[-k:]
+                if any(c is None for c in tail): continue
+                t = "".join(tail)
+                if t.count("/") != 1: continue
+                L, _, R = t.partition("/")
+                if L.isdigit() and R.isdigit() and 1 <= len(L) <= 3 and 1 <= len(R) <= 3:
+                    u, m = int(L), int(R); break
             if len(groups) >= 3:
                 a = _num(groups[-3], 5); b2 = _num(groups[-2], 5)
             elif len(groups) == 2:
@@ -1415,25 +1435,38 @@ def _hud_clean(seq, lo, hi, max_jump=None):
     fv = next((x for x in out if x is not None), 0)
     return [fv if x is None else x for x in out]
 
+_HUD_WHY = None
+
 def extract_hud_series(analysis, video_path):
-    """녹화자 실측 HUD 시계열 → analysis['hud'] 저장 + 실측 몰살/재-200 도출. 실패 시 None."""
+    """녹화자 실측 HUD 시계열 → analysis['hud'] 저장 + 실측 몰살/재-200 도출. 실패 시 None.
+    실패 사유는 _HUD_WHY 에 남겨 상위(vdiag)에서 원인을 특정할 수 있게 한다."""
+    global _HUD_WHY
+    _HUD_WHY = None
     try:
         meta = analysis.get("meta") or {}
         saver = meta.get("saver")
         sp = next((p for p in (analysis.get("players") or []) if p.get("name") == saver), None)
         anchors = (sp or {}).get("sup_anchor")
-        if not saver or not anchors: return None
+        if not saver:
+            _HUD_WHY = "saver 미확인"; return None
+        if not sp:
+            _HUD_WHY = "saver(%s)가 플레이어 목록에 없음" % saver; return None
+        if not anchors:
+            _HUD_WHY = "sup_anchor 없음(리플레이 앵커 6개 미만 또는 슬림 사본 사용)"; return None
         lead = 0.0
         try: lead = float(meta.get("lead_sec") or 0.0)
         except Exception: pass
         frames = _hud_band_frames(video_path)
-        if frames is None: return None
+        if frames is None:
+            _HUD_WHY = "HUD 밴드 프레임 추출 실패(ffmpeg/해상도)"; return None
         tpl = _hud_learn_templates(frames, anchors, lead)
-        if tpl is None: return None
+        if tpl is None:
+            _HUD_WHY = "숫자 글리프 학습 실패(HUD 위치·스케일 불일치)"; return None
         global _HUD_TPL_CACHE; _HUD_TPL_CACHE = tpl   # 같은 게임 파이프라인 내 재사용(점수판 OCR)
         su, sm, mn, gs = _hud_read_all(frames, tpl)
         conf = sum(1 for v in su if v is not None) / max(1, len(su))
-        if conf < 0.55: return None
+        if conf < 0.55:
+            _HUD_WHY = "판독 신뢰도 낮음(%.2f < 0.55)" % conf; return None
         su = _hud_clean(su, 0, 200, max_jump=40)
         sm = _hud_clean(sm, 1, 200, max_jump=40)
         mn = _hud_clean(mn, 0, 99999); gs = _hud_clean(gs, 0, 99999)
@@ -1462,9 +1495,12 @@ def extract_hud_series(analysis, video_path):
             for t2 in range(lo + 1, n):
                 if su[t2] >= 196 and sm[t2] >= 199:
                     re200.append({"w": w2, "t": int(round(t2 - lead))}); break
-        stp = 5
+        # 원본이 1fps 로 읽히므로 그대로 1초 간격 저장 (기존 5초 간격은 데이터 80% 폐기였음).
+        # 정수 반올림으로 페이로드를 억제 — 15분 경기 기준 약 20KB.
+        stp = 1
+        _i = lambda arr: [int(round(v)) if v is not None else None for v in arr[::stp]]
         hud = {"who": saver, "step": stp, "conf": round(conf, 2),
-               "sup": su[::stp], "smax": sm[::stp], "mn": mn[::stp], "gs": gs[::stp],
+               "sup": _i(su), "smax": _i(sm), "mn": _i(mn), "gs": _i(gs),
                "wipes": wipes, "re200": re200, "lead": lead}
         analysis["hud"] = hud
         try: log("  HUD 실측 OCR 성공 (신뢰도 %d%%, 몰살 %d)" % (int(conf * 100), len(wipes)))
@@ -1660,7 +1696,7 @@ def enhance_highlights_with_audio(analysis, video_path):
             _saver = (meta.get("saver") or None)
             try:
                 H = extract_hud_series(analysis, video_path)
-                _diag["hud"] = ("ok(%d wipes)" % len(H.get("wipes") or [])) if H else "none(HUD 미인식)"
+                _diag["hud"] = ("ok(%d wipes)" % len(H.get("wipes") or [])) if H else ("none: %s" % (_HUD_WHY or "원인미상"))
             except Exception as _e_hud:
                 H = None; _diag["hud"] = "ERR: %s" % _e_hud
             try:

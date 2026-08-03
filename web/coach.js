@@ -412,7 +412,13 @@ function chain_stories(a,p,peers,fast,won){
 /* ═══ 코치 3.0 — 전략 인식 → 실행 채점 → 칭찬/시각 처방 ═══
    CAL = 이 갤러리 63판 '승자 중앙값' 실측(초). 재보정 SQL: journal 참조. */
 var META={corsair:80,arbiter:78,htemp:71,shuttle:71,obs:65,vessel:64,dark:62,reaver:58,vulture:21,lurker:42};  // 유닛 보유 시 승률% (이 방 실측)
-var CAL={w50:{t:360,s:45},s200:{t:564,s:60},corsair:{t:420,s:90},lurker:{t:504,s:60},defiler:{t:871,s:100},mutal:{t:751,s:120},
+var CAL_FMT={
+ 2:{w50:{t:375,s:45},dark:{t:402,s:75},htemp:{t:420,s:75},shuttle:{t:408,s:60},obs:{t:644,s:90},corsair:{t:638,s:90}},
+ 3:{w50:{t:360,s:45},s200:{t:564,s:60},dark:{t:445,s:75},htemp:{t:470,s:75},shuttle:{t:402,s:60},obs:{t:590,s:90},
+    lurker:{t:518,s:60},reaver:{t:469,s:75},corsair:{t:606,s:90}}};
+function _teamFmt(a){var c1=0,c2=0;(a.players||[]).forEach(function(q){if(q.team===1)c1++;else if(q.team===2)c2++;});return Math.max(c1,c2)||1;}
+function calF(fmt,k){var f=CAL_FMT[fmt];return (f&&f[k])||CAL[k];}
+var CAL={w50:{t:360,s:45},s200:{t:564,s:60},corsair:{t:606,s:90},lurker:{t:504,s:60},defiler:{t:871,s:100},mutal:{t:751,s:120},
  shuttle:{t:405,s:60},reaver:{t:469,s:75},htemp:{t:470,s:75},dark:{t:445,s:75},
  obs:{t:619,s:90},vulture:{t:206,s:60},vessel:{t:599,s:90},dropship:{t:546,s:80},
  siege:{t:330,s:90},stim:{t:260,s:90},vsacs_gap:60,drop_gap:130};
@@ -420,7 +426,7 @@ function _uN(p,k){var u=(p.units||[]).find(function(x){return x&&x.name===k;});r
 function strategy_report(a,p,peers,fast,won){
  try{
   if(!p||!p.units||!p.units.length||!(p.units[0]&&('first' in p.units[0])))return null;
-  var mins=_s2((a.meta&&a.meta.length)||'0:0')/60, hasTech=!!p.tech1;
+  var mins=_s2((a.meta&&a.meta.length)||'0:0')/60, hasTech=!!p.tech1, fmt=_teamFmt(a);
   var rl=p.rl||({zerg:'Z',ran:'T',toss:'P'})[p.race]||'';
   var opp=(peers||[]).filter(function(q){return q.team!==p.team;});
   var oppCloak=opp.some(function(q){return _uN(q,'Lurker')>0||_uN(q,'Dark Templar')>0;});
@@ -429,9 +435,9 @@ function strategy_report(a,p,peers,fast,won){
   function arch(id,label,score,cps){if(score>0)A.push({id:id,label:label,score:score,cps:cps});}
   if(rl==='Z'){
     arch('z-lurker','럴커 운영', (_uN(p,'Lurker')>=2?3:0)+(_tT(p,'Lurker Aspect')!=null?2:0),[
-      {lb:'럴커',u:'Lurker',cal:CAL.lurker,fix:'해처리 2개째에 럴커덴 → 레어 완성 즉시 아스펙트'},
-      {lb:'수송업',tech:'Ventral Sacs (Overlord Transport)',cal:{t:CAL.lurker.t+CAL.vsacs_gap,s:60},fix:'레어 뜨면 오버 수송업부터'},
-      {lb:'첫 드랍',drop:1,cal:{t:CAL.lurker.t+CAL.drop_gap,s:70},fix:'수송업 완성 30초 안에 럴커 2기 드랍'},
+      {lb:'럴커',u:'Lurker',cal:calF(fmt,'lurker'),fix:'해처리 2개째에 럴커덴 → 레어 완성 즉시 아스펙트'},
+      {lb:'수송업',tech:'Ventral Sacs (Overlord Transport)',cal:{t:calF(fmt,'lurker').t+CAL.vsacs_gap,s:60},fix:'레어 뜨면 오버 수송업부터'},
+      {lb:'첫 드랍',drop:1,cal:{t:calF(fmt,'lurker').t+CAL.drop_gap,s:70},fix:'수송업 완성 30초 안에 럴커 2기 드랍'},
       {lb:'디파일러',u:'Defiler',cal:CAL.defiler,min:13,fix:'13~14분 하이브 → 디파일러로 후반 전환'}]);
     arch('z-muta','뮤탈 전환', _uN(p,'Mutalisk')>=6?3:0,[
       {lb:'뮤탈',u:'Mutalisk',cal:CAL.mutal,fix:'스파이어 타이밍을 앞당겨 첫 뮤탈 웨이브를 세게'}]);
@@ -447,24 +453,24 @@ function strategy_report(a,p,peers,fast,won){
   }
   if(rl==='P'){
     arch('p-reaver','리버 드랍', (_uN(p,'Reaver')>=1?2:0)+(_uN(p,'Shuttle')>=1?2:0),[
-      {lb:'셔틀',u:'Shuttle',cal:CAL.shuttle,fix:'로보틱스 완성 즉시 셔틀'},
-      {lb:'리버',u:'Reaver',cal:CAL.reaver,fix:'서포트베이 선착공 — 이 방 승자들의 1등 카드야'}]);
+      {lb:'셔틀',u:'Shuttle',cal:calF(fmt,'shuttle'),fix:'로보틱스 완성 즉시 셔틀'},
+      {lb:'리버',u:'Reaver',cal:calF(fmt,'reaver'),fix:'서포트베이 선착공 — 이 방 승자들의 1등 카드야'}]);
     arch('p-corsair','커세어 제공권', _uN(p,'Corsair')>=4?3:0,[
-      {lb:'커세어',u:'Corsair',cal:CAL.corsair,fix:'스타게이트 2개 — 커세어 6기+로 오버로드·셔틀부터 끊어'}]);
+      {lb:'커세어',u:'Corsair',cal:calF(fmt,'corsair'),fix:'스타게이트 2개 — 커세어 6기+로 오버로드·셔틀부터 끊어'}]);
     arch('p-storm','스톰 운영', (_uN(p,'High Templar')>=2?2:0)+(_tT(p,'Psionic Storm')!=null?2:0),[
-      {lb:'하이템플러',u:'High Templar',cal:CAL.htemp,fix:'시타델→아카이브를 끊지 말고'},
-      {lb:'스톰',tech:'Psionic Storm',cal:{t:CAL.htemp.t+45,s:70},fix:'아카이브 완성 즉시 스톰 연구'},
-      {lb:'옵저버',u:'Observer',cal:CAL.obs,when:oppCloak,fix:'상대 은폐 — 옵저버는 필수'}]);
+      {lb:'하이템플러',u:'High Templar',cal:calF(fmt,'htemp'),fix:'시타델→아카이브를 끊지 말고'},
+      {lb:'스톰',tech:'Psionic Storm',cal:{t:calF(fmt,'htemp').t+45,s:70},fix:'아카이브 완성 즉시 스톰 연구'},
+      {lb:'옵저버',u:'Observer',cal:calF(fmt,'obs'),when:oppCloak,fix:'상대 은폐 — 옵저버는 필수'}]);
     arch('p-dark','다크 견제', _uN(p,'Dark Templar')>=2?2:0,[
-      {lb:'다크',u:'Dark Templar',cal:CAL.dark,fix:'질럿 페이크 후 다크 3기 타이밍'}]);
+      {lb:'다크',u:'Dark Templar',cal:calF(fmt,'dark'),fix:'질럿 페이크 후 다크 3기 타이밍'}]);
   }
   if(!A.length)return null;
   A.sort(function(x,y){return y.score-x.score;});
   var top=A[0]; if(top.score<2)return null;
   // ── 2) 실행 채점 (기초체력 공통 + 아키타입 체크포인트) ──
   var cps=[];
-  if(p.worker50_sec!=null)cps.push({lb:'일꾼 50',raw:p.worker50_sec,cal:CAL.w50,fix:'6:00 전 일꾼 50 — 물량의 연료'});
-  if(mins>=9.5)cps.push({lb:'첫 200',raw:(p.supply200!=null?_s2(p.supply200):null),cal:CAL.s200,fix:'9:24 전 200 — 이 방 최대 승리 변수(도달 시 승률 56%, 미도달 36%)'});
+  if(p.worker50_sec!=null)cps.push({lb:'일꾼 50',raw:p.worker50_sec,cal:calF(fmt,'w50'),fix:'일꾼 50 먼저 — 물량의 연료'});
+  if(fmt>=3&&mins>=9.5)cps.push({lb:'첫 200',raw:(p.supply200!=null?_s2(p.supply200):null),cal:calF(fmt,'s200'),fix:'9:24 전 200 — 이 방 최대 승리 변수(도달 시 승률 56%, 미도달 36%)'});
   cps=cps.concat(top.cps);
   var items=[],hit=0,tot=0;
   cps.forEach(function(cp){
@@ -485,9 +491,9 @@ function strategy_report(a,p,peers,fast,won){
   // ── 3) 출력: 칭찬 or 시각 박힌 처방 ──
   var line;
   if(rate>=0.75){
-    var good=items.filter(function(i){return i.ok;}).map(function(i){return i.lb+' '+_mmss(i.act);}).join(' · ');
+    var good=items.filter(function(i){return i.ok;}).map(function(i){return i.lb;}).join('·');
     var why={'p-corsair':' (이 방 커세어 보유 승률 80%)','p-reaver':' (이 방 셔틀 보유 승률 71%)','p-storm':' (이 방 하템 보유 승률 71%)'}[top.id]||'';
-    line={tone:'good',txt:'전략 실행 우수 — '+good+'. 이 리듬 그대로, 다음 판은 같은 빌드에서 물량만 한 단계 위로.'+why};
+    line={tone:'good',txt:good+' 타이밍 다 맞췄어. 이 리듬 그대로 — 다음 판은 물량만 한 단계 위로.'+why};
   }else{
     var miss=items.filter(function(i){return !i.ok;});
     var steps=miss.map(function(i,ix){
@@ -499,7 +505,7 @@ function strategy_report(a,p,peers,fast,won){
     line.txt+=' ⚠ 이 방 벌처 다량 승률 21% — 벌처는 초반 견제까지만, 중반엔 탱크·베슬 전환.';
   if(top.id==='z-lurker')
     line.txt+=' 참고: 이 방은 커세어·하템 강세 — 럴커 곁에 히드라·스컬지 커버를 붙여.';
-  return {label:top.label,rate:rate,items:items,line:line};
+  return {label:top.label,rate:rate,items:items,line:line,fmt:fmt};
  }catch(_e){return null;}
 }
 function coach_report(a){

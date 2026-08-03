@@ -1258,6 +1258,44 @@ body.pg-analysis .main,body.pg-analysis section.comm{display:none!important}
 .cvmode{font-family:var(--fm);font-size:9.5px;font-weight:800;letter-spacing:.05em;color:var(--gold);background:rgba(231,167,63,.12);border:1px solid rgba(231,167,63,.32);border-radius:6px;padding:2px 7px;margin-right:8px;white-space:nowrap;align-self:flex-start}
 .analysis .stcard{margin-top:2px}
 .analysis .cgrades{margin-top:14px}
+
+/* 팀 현황판 (게임 HUD 아래) */
+.pstat{position:absolute;right:1.5%;top:7.5%;z-index:6;display:none;flex-direction:column;gap:1px;
+  background:rgba(8,11,17,.62);-webkit-backdrop-filter:blur(7px);backdrop-filter:blur(7px);
+  border:1px solid rgba(255,255,255,.13);border-radius:9px;padding:6px 8px;pointer-events:none;
+  font-family:var(--fm);font-size:11px;line-height:1.35;color:#e8edf5;box-shadow:0 6px 18px rgba(0,0,0,.4)}
+.stage.pst-on .pstat{display:flex}
+.pst-h,.pst-r{display:grid;grid-template-columns:9px minmax(58px,1fr) 34px 46px 40px;gap:6px;align-items:center}
+.pst-h{font-size:9px;letter-spacing:.04em;color:rgba(255,255,255,.5);padding-bottom:3px;margin-bottom:2px;border-bottom:1px solid rgba(255,255,255,.12)}
+.pst-h b{font-weight:700;text-align:right}
+.pst-r i{width:7px;height:7px;border-radius:2px;display:block}
+.pst-r em{font-style:normal;font-family:var(--fd);font-size:11px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pst-r .v{text-align:right;font-variant-numeric:tabular-nums}
+.pst-r .s{color:#fff;font-weight:700}
+.pst-r .m{color:#8fd0ff}
+.pst-r .g{color:#9ee6a8}
+.svbtn.psb.on{opacity:1;color:var(--gold)}
+.stage.fsidle .pstat{opacity:.45;transition:opacity .3s}
+@media(max-width:600px){
+  .pstat{font-size:10px;padding:5px 6px;right:1%;top:6.5%;border-radius:7px}
+  .pst-h,.pst-r{grid-template-columns:7px minmax(44px,1fr) 28px 38px 32px;gap:4px}
+  .pst-r em{font-size:10px}
+}
+
+.supsvg .sg200{stroke:rgba(231,167,63,.45);stroke-width:1;stroke-dasharray:5 4}
+
+/* 현황판 실측 표시 */
+.pstat.has-real::before{content:'실측';position:absolute;top:-7px;right:8px;font-size:8.5px;font-weight:800;letter-spacing:.06em;color:#0b0e14;background:var(--gold);border-radius:4px;padding:1px 5px}
+.pstat{position:absolute}
+.pst-r.real .s{color:#ffe9a8}
+.pst-r:not(.real) .v{opacity:.82}
+
+.gdet{margin:0}
+.gdet>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:7px}
+.gdet>summary::-webkit-details-marker{display:none}
+.gdet>summary::after{content:'';width:6px;height:6px;border-right:1.6px solid var(--faint);border-bottom:1.6px solid var(--faint);transform:rotate(45deg);margin-left:2px;transition:.15s}
+.gdet[open]>summary::after{transform:rotate(-135deg)}
+.gdet>summary .cclh{margin:0}
 </style>
 </head><body class="pg-watch">
 
@@ -1734,7 +1772,9 @@ if(vid){(function(){
   const spd=document.createElement('button');spd.className='svbtn';spd.setAttribute('aria-label','재생 속도');spd.textContent='1×';
   const mute=document.createElement('button');mute.className='svbtn';mute.setAttribute('aria-label','음소거');mute.innerHTML=C_SPON;
   const fs=document.createElement('button');fs.className='svbtn';fs.setAttribute('aria-label','전체화면');fs.innerHTML=C_FS;
-  bar.appendChild(pp);bar.appendChild(scw);bar.appendChild(tm);bar.appendChild(spd);bar.appendChild(mute);bar.appendChild(fs);
+  const psb=document.createElement('button');psb.className='svbtn psb';psb.setAttribute('aria-label','팀 현황판');
+  psb.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 19V10M9.5 19V5M15 19v-6M20.5 19v-9"/></svg>';
+  bar.appendChild(pp);bar.appendChild(scw);bar.appendChild(tm);bar.appendChild(psb);bar.appendChild(spd);bar.appendChild(mute);bar.appendChild(fs);
   const kbd=document.createElement('div');kbd.className='svkbd';
   const svmini=document.createElement('div');svmini.className='svmini';svmini.innerHTML='<i></i>';
   const svspin=document.createElement('div');svspin.className='svspin';
@@ -1755,8 +1795,14 @@ if(vid){(function(){
   })();
   let _scrubbing=false;
   const _hideBar=()=>{bar.classList.remove('show');stage.classList.remove('ctlon');};
-  const _show=()=>{bar.classList.add('show');stage.classList.add('ctlon');if(_show._t)clearTimeout(_show._t);if(vid&&!vid.paused&&!_scrubbing)_show._t=setTimeout(_hideBar,3600);};
+  // 자동 숨김 타이머 재무장: 정지→재생으로 돌아왔을 때도 반드시 다시 걸리게 한다.
+  // (기존에는 _show() 호출 시점에만 걸려서, 일시정지 중 표시된 컨트롤이 재생 후 영원히 남았다)
+  const _armHide=()=>{if(_show._t)clearTimeout(_show._t);
+    if(vid&&!vid.paused&&!vid.ended&&!_scrubbing&&bar.classList.contains('show'))_show._t=setTimeout(_hideBar,3600);};
+  const _show=()=>{bar.classList.add('show');stage.classList.add('ctlon');_armHide();};
   _svShow=_show;
+  stage.addEventListener('play',e=>{if(e.target&&e.target.tagName==='VIDEO')_armHide();},true);
+  stage.addEventListener('seeked',e=>{if(e.target&&e.target.tagName==='VIDEO')_armHide();},true);
   stage.addEventListener('pointermove',(e)=>{if(!_multiActive&&e.pointerType!=='touch')_show();});
   const _COARSE=window.matchMedia&&window.matchMedia('(pointer:coarse)').matches;
   const _togglePlay=()=>{if(!vid)return;if(vid.paused){hideOverlay();const pr=vid.play();if(pr&&pr.catch)pr.catch(()=>{});}else{vid.pause();}};
@@ -1778,7 +1824,7 @@ if(vid){(function(){
     else{stage._tt=setTimeout(()=>{stage._lt=0;_show();},300);}                     // 숨김 상태에선 더블탭 판정 후 표시
   });
   stage.addEventListener('pointerleave',e=>{if(e.pointerType==='touch')return;if(vid&&!vid.paused&&!_scrubbing)_hideBar();});  /* 터치는 손을 떼면 pointerleave가 발생 → 바가 숨어 탭의 click이 비디오로 새는 모바일 정지불가 버그 방지 */
-  const _setIcon=()=>{if(stage._scrubHold)return;const playing=vid&&!vid.paused;pp.innerHTML=playing?C_PAUSE:C_PLAY;if(playing){if(!(window.matchMedia&&window.matchMedia('(pointer:coarse)').matches))_show();}else if(stage.classList.contains('started'))_show();if(svmini)svmini.classList.toggle('on',!!playing);};
+  const _setIcon=()=>{if(stage._scrubHold)return;const playing=vid&&!vid.paused;pp.innerHTML=playing?C_PAUSE:C_PLAY;if(playing){if(!(window.matchMedia&&window.matchMedia('(pointer:coarse)').matches))_show();else _armHide();}else if(stage.classList.contains('started'))_show();if(svmini)svmini.classList.toggle('on',!!playing);};
   const _paint=()=>{if(!vid||_scrubbing)return;const gt=Math.max(0,(vid.currentTime||0)-OFF);const p=totalSec>0?Math.max(0,Math.min(1,gt/totalSec)):0;range.value=String(p*1000);range.style.setProperty('--p',(p*100)+'%');if(svmini)svmini.style.setProperty('--mp',(p*100)+'%');tm.innerHTML='<b>'+cf(gt)+'</b> / '+cf(totalSec);};
   _regE('timeupdate',_paint);_regE('play',_setIcon);_regE('pause',_setIcon);_regE('loadedmetadata',_paint);
   const _spin=on=>{if(svspin)svspin.classList.toggle('on',!!on);};
@@ -1891,6 +1937,65 @@ if(vid){(function(){
     // 실시간 승률 배지 (재생 중 상시 · 베타)
     const wpb=document.createElement('div');wpb.className='wpb';wpb.innerHTML='<i></i><span></span>';
     vw.appendChild(wpb);
+    // ── 팀 현황판: 게임 HUD 아래에 전 선수 인구·자원 투자 실시간 표시 ──
+    const pst=document.createElement('div');pst.className='pstat';pst.id='pstat';vw.appendChild(pst);
+    // HUD 실측 수집: 내 녹화 + 멀티뷰 시점들 (선수별 '실제 보유 자원/현재 인구')
+    const _HUDM={};
+    (function(){const add=h=>{if(typeof h==='string'){try{h=JSON.parse(h);}catch(_e){return;}}
+      if(h&&h.who&&Array.isArray(h.sup)&&h.sup.length>3&&!_HUDM[h.who])_HUDM[h.who]=h;};
+      add(DATA.hud);(window.__povViews||[]).forEach(v=>add(v&&v.hud));})();
+    const _PS=(function(){
+      try{
+        const ps=(DATA.players||[]).filter(p=>Array.isArray(p.supply_series)&&p.supply_series.length);
+        if(!ps.length)return null;
+        return ps.map(p=>({name:p.name,color:p.color||'#8aa',team:p.team,
+          step:+p.supply_step||15,sup:p.supply_series||[],wk:p.worker_series||[],
+          res:Array.isArray(p.resource_series)?p.resource_series:[],hud:_HUDM[p.name]||null}));
+      }catch(e){return null;}
+    })();
+    // HUD 배열은 '영상 시간' 기준(step 간격, lead 만큼 앞당김) → 게임 시각으로 색인
+    const _atHud=(h,sec)=>{if(!h)return null;const st=h.step||5,ld=h.lead||0;
+      const A=h.sup||[];if(!A.length)return null;
+      const x=(sec+ld)/st;if(x<-0.5)return null;
+      const i=Math.max(0,Math.min(A.length-1,Math.floor(x))),j=Math.min(A.length-1,i+1),f=Math.max(0,Math.min(1,x-i));
+      const L=(arr)=>{if(!arr||arr[i]==null)return null;const a=+arr[i],b=(arr[j]==null?a:+arr[j]);return a+(b-a)*f;};
+      return {sup:L(A),smax:L(h.smax),mn:L(h.mn),gs:L(h.gs)};};
+    const _kfmt=v=>v>=10000?(v/1000).toFixed(v>=100000?0:1)+'k':String(Math.round(v));
+    const _atArr=(arr,step,sec)=>{if(!arr.length)return null;const i=Math.max(0,Math.min(arr.length-1,Math.round(sec/step)));return +arr[i]||0;};
+    const _atRes=(rs,sec)=>{if(!rs.length)return null;let lo=0;
+      for(let k=0;k<rs.length;k++){if((+rs[k].t||0)<=sec)lo=k;else break;}
+      return rs[lo];};
+    if(_PS){
+      pst.innerHTML='<div class="pst-h"><span></span><b>인구</b><b>미네랄</b><b>가스</b></div>'+
+        _PS.map((p,i)=>`<div class="pst-r" data-i="${i}"><i style="background:${p.color}"></i><em>${esc(p.name)}</em><span class="v s">–</span><span class="v m">–</span><span class="v g">–</span></div>`).join('');
+      const rows=[...pst.querySelectorAll('.pst-r')];
+      window._pstUpdate=function(sec){
+        _PS.forEach((p,i)=>{const r=rows[i];if(!r)return;
+          const hv=_atHud(p.hud,sec);
+          if(hv&&hv.sup!=null){                       // ── 실측: 게임 화면에서 읽은 실제 값 ──
+            r.classList.add('real');
+            r.querySelector('.s').textContent=Math.round(hv.sup)+(hv.smax!=null?('/'+Math.round(hv.smax)):'');
+            r.querySelector('.m').textContent=hv.mn!=null?_kfmt(hv.mn):'–';
+            r.querySelector('.g').textContent=hv.gs!=null?_kfmt(hv.gs):'–';
+          }else{                                       // ── 추정: 생산·투자 누적 ──
+            r.classList.remove('real');
+            const sv=_atArr(p.sup,p.step,sec), rv=_atRes(p.res,sec);
+            r.querySelector('.s').textContent=sv==null?'–':Math.round(sv);
+            r.querySelector('.m').textContent=rv?_kfmt(rv.min||0):'–';
+            r.querySelector('.g').textContent=rv?_kfmt(rv.gas||0):'–';}});
+        const anyReal=_PS.some(p=>p.hud);
+        pst.classList.toggle('has-real',anyReal);
+      };
+      psb.addEventListener('click',e=>{e.stopPropagation();
+        const on=stage.classList.toggle('pst-on');psb.classList.toggle('on',on);
+        if(on&&vid)window._pstUpdate(Math.max(0,(vid.currentTime||0)-OFF));_show();});
+      let _pt=0;
+      stage.addEventListener('timeupdate',e=>{
+        if(!e.target||e.target.tagName!=='VIDEO')return;
+        if(!stage.classList.contains('pst-on'))return;
+        const now=Date.now();if(now-_pt<250)return;_pt=now;
+        window._pstUpdate(Math.max(0,(vid.currentTime||0)-OFF));},true);
+    }else{psb.style.display='none';}
     let _wpT=0;
     stage.addEventListener('timeupdate',e=>{
       if(!e.target||e.target.tagName!=='VIDEO')return;
@@ -2500,9 +2605,16 @@ function renderSupplyChart(){
  const ST=PS[0].supply_step||15;
  const gl=Math.max(...PS.map(p=>(p.supply_series.length-1)*ST));
  const W=680,H=192,L=34,R=10,T2=12,B=26,pw=W-L-R,ph2=H-T2-B;
- const X=t=>L+pw*Math.min(1,t/gl), Y=v=>T2+ph2*(1-Math.min(200,v)/200);
+ // y축 자동 스케일 — '생산 누적'은 200 을 넘는 게 정상이므로 최댓값에 맞춰 늘린다.
+ const _peak=Math.max(200,...PS.map(p=>Math.max(...(p.supply_series||[0]))));
+ const YMAX=Math.ceil(_peak/100)*100;
+ const X=t=>L+pw*Math.min(1,t/gl), Y=v=>T2+ph2*(1-Math.min(YMAX,v)/YMAX);
  let g='';
- [0,100,200].forEach(v=>{g+=`<line x1="${L}" y1="${Y(v)}" x2="${W-R}" y2="${Y(v)}" class="sg"/><text x="${L-6}" y="${Y(v)+3.5}" class="sl" text-anchor="end">${v}</text>`;});
+ const _gstep=YMAX<=300?100:(YMAX<=600?200:300);
+ const _gvals=[];for(let v=0;v<=YMAX;v+=_gstep)_gvals.push(v);
+ if(_gvals[_gvals.length-1]!==YMAX)_gvals.push(YMAX);
+ _gvals.forEach(v=>{g+=`<line x1="${L}" y1="${Y(v)}" x2="${W-R}" y2="${Y(v)}" class="sg"/><text x="${L-6}" y="${Y(v)+3.5}" class="sl" text-anchor="end">${v}</text>`;});
+ if(YMAX>200)g+=`<line x1="${L}" y1="${Y(200)}" x2="${W-R}" y2="${Y(200)}" class="sg200"/><text x="${W-R-2}" y="${Y(200)-4}" class="sl" text-anchor="end" opacity=".75">인구 상한 200</text>`;
  const stp=gl>12*60?300:120;
  for(let t=stp;t<gl;t+=stp) g+=`<line x1="${X(t)}" y1="${T2}" x2="${X(t)}" y2="${H-B}" class="sgx"/><text x="${X(t)}" y="${H-9}" class="sl" text-anchor="middle">${Math.round(t/60)}분</text>`;
  (HL||[]).forEach(h=>{if(h.kind!=='battle'&&h.kind!=='wipe')return;const wp=h.kind==='wipe';
@@ -2516,7 +2628,8 @@ function renderSupplyChart(){
    g+=`<polyline points="${pts}" fill="none" stroke="${p.color||'#9fb2d9'}" stroke-width="2" stroke-linejoin="round" opacity=".9"/>`;});
  const _pcol=n=>((DATA.players||[]).find(p=>p.name===n)||{}).color||'#e8eefc';
  Object.keys(HUDS).forEach(nm=>{const h=HUDS[nm],st5=h.step||5,ld=h.lead||0,c=_pcol(nm);
-   const pts=h.sup.map((v,k)=>{const t=k*st5-ld;return t<0?null:(X(t).toFixed(1)+','+Y(v).toFixed(1));}).filter(Boolean).join(' ');
+   const _stride=Math.max(1,Math.ceil(h.sup.length/220));   // 1초 데이터 대응: 점 개수 제한
+   const pts=h.sup.map((v,k)=>{if(k%_stride&&k!==h.sup.length-1)return null;const t=k*st5-ld;return t<0?null:(X(t).toFixed(1)+','+Y(v).toFixed(1));}).filter(Boolean).join(' ');
    g+=`<polyline points="${pts}" fill="none" stroke="rgba(255,255,255,.5)" stroke-width="4" stroke-linejoin="round"/>`;
    g+=`<polyline points="${pts}" fill="none" stroke="${c}" stroke-width="2.4" stroke-linejoin="round"/>`;});
  const HD=DATA.hud&&DATA.hud.sup&&DATA.hud.sup.length>3?DATA.hud:null;   // 자원 스파크라인은 내 시점 전용
@@ -2641,15 +2754,16 @@ function coachBlock(p){
  return `<div class="coach"><div class="ch coachh">코치 리포트 <span class="cnote">실제 리플레이 기반 · 스타크래프트 기준</span></div>${cr.strat?(()=>{const S=cr.strat,F=_fmtN(),
   miss=(S.items||[]).filter(i=>!i.ok),
   note=((S.line&&S.line.txt)||'').split(/(?=⚠|참고:)/).slice(1).join(' ').trim();
+  const _main=((S.line&&S.line.txt)||'').split(/(?=⚠|참고:)/)[0].trim();
   return `<div class="stcard"><div class="sthead"><span class="stlab">전략</span><b>${S.label}</b>${F?`<span class="stfmt">${F}:${F}</span>`:''}<span class="strate ${S.rate>=0.75?'g':(S.rate>=0.4?'m':'b')}">실행 ${Math.round(S.rate*100)}%</span></div>
   <div class="stitems">${(S.items||[]).map(i=>`<span class="sti ${i.ok?'ok':(i.act!=null?'late':'miss')}${(i.act!=null&&VIDEO)?' cseek':''}"${(i.act!=null&&VIDEO)?` data-s="${i.act}"`:''}>${i.ok?'✓':(i.act!=null?'△':'✕')} ${i.lb}${i.act!=null?' '+_fmt(i.act):''}</span>`).join('')}</div>
-  ${(S.line&&S.line.tone==='good')?`<p class="stline good">${S.line.txt}</p>`
+  ${(S.line&&S.line.tone==='good')?`<p class="stline good">${_main}</p>`
     :`<div class="stfixes"><div class="stfl">다음 판 체크리스트</div>${miss.map(i=>
       `<div class="stfx"><span class="stt">${_fmt(i.tgt)}</span><div class="stfb"><b>${i.lb}</b><span class="sta">${i.act!=null?'오늘 '+_fmt(i.act):'오늘 없음'}</span><p>${i.fix||''}</p></div></div>`).join('')}</div>`}
   ${note?`<p class="stnote">${note}</p>`:''}</div>`;})():''}${(()=>{const _mk=(cr.strat&&cr.strat.items||[]).filter(i=>!i.ok).map(i=>i.lb);const _st=(cr.stories||[]).filter(s=>!_mk.some(k=>k&&s.t.indexOf(k)>=0));return _st.length?`<div class="ckwrap"><div class="cklab">이 판의 핵심</div>${_st.map(st=>
   `<div class="ccard ck"><div class="cct"><b>${st.t}</b>${(st.ev&&st.ev[0]&&VIDEO)?`<button class="cseek" data-s="${st.ev[0][1]}">▶ ${_fmt(st.ev[0][1])}</button>`:''}<span class="ckb">핵심</span></div>
    ${st.ev&&st.ev.length?`<div class="ckev">${st.ev.map(e=>`<span class="cke${VIDEO?' cseek':''}" ${VIDEO?`data-s="${e[1]}"`:''}>${e[0]} <b>${_fmt(e[1])}</b>${e[2]?` <i>${e[2]}</i>`:''}</span>`).join('')}</div>`:''}
-   <p>${st.rx}</p></div>`).join('')}</div>`:'';})()}${_dupHero?'':gr}${_dupHero?'':vd}<div class="ccols"><div class="ccol"><div class="cclh good">잘한 점${cnt(gp.length)}</div>${gp.length?_wrap(gp,3,false):'<div class="cnone">—</div>'}</div><div class="ccol"><div class="cclh bad">아쉬운 점${cnt(bp.length)}</div>${bp.length?_wrap(bp,4,true):'<div class="cnone">개선할 점이 없어요 — 깔끔한 한 판!</div>'}</div></div></div>`;
+   <p>${st.rx}</p></div>`).join('')}</div>`:'';})()}${_dupHero?'':gr}${_dupHero?'':vd}<div class="ccols"><div class="ccol">${gp.length?`<details class="gdet"><summary><span class="cclh good">잘한 점${cnt(gp.length)}</span></summary>${_wrap(gp,3,false)}</details>`:''}</div><div class="ccol"><div class="cclh bad">아쉬운 점${cnt(bp.length)}</div>${bp.length?_wrap(bp,4,true):'<div class="cnone">개선할 점이 없어요 — 깔끔한 한 판!</div>'}</div></div></div>`;
 }
 const FASTMAP=/(빨무|빠무|무한|fastest)/i.test((meta&&meta.map)||'');
 function factsBlock(p){
