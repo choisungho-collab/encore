@@ -4,7 +4,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Cpath%20d%3D%22M16.00%2016.40%20L16.00%203.80%20L19.12%2012.11%20Z%22%20fill%3D%22%23F2F6FB%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M16.00%2016.40%20L19.12%2012.11%20L27.98%2012.51%20Z%22%20fill%3D%22%239AA5B6%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M16.00%2016.40%20L27.98%2012.51%20L21.04%2018.04%20Z%22%20fill%3D%22%236E7889%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M16.00%2016.40%20L21.04%2018.04%20L23.41%2026.59%20Z%22%20fill%3D%22%234A5364%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M16.00%2016.40%20L23.41%2026.59%20L16.00%2021.70%20Z%22%20fill%3D%22%234A5364%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M16.00%2016.40%20L16.00%2021.70%20L8.59%2026.59%20Z%22%20fill%3D%22%236E7889%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M16.00%2016.40%20L8.59%2026.59%20L10.96%2018.04%20Z%22%20fill%3D%22%239AA5B6%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M16.00%2016.40%20L10.96%2018.04%20L4.02%2012.51%20Z%22%20fill%3D%22%23F2F6FB%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M16.00%2016.40%20L4.02%2012.51%20L12.88%2012.11%20Z%22%20fill%3D%22%23F2F6FB%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M16.00%2016.40%20L12.88%2012.11%20L16.00%203.80%20Z%22%20fill%3D%22%23F2F6FB%22%2F%3E%0A%20%20%3Cpath%20d%3D%22M16.00%203.80%20L19.12%2012.11%20L27.98%2012.51%20L21.04%2018.04%20L23.41%2026.59%20L16.00%2021.70%20L8.59%2026.59%20L10.96%2018.04%20L4.02%2012.51%20L12.88%2012.11%20Z%22%20fill%3D%22none%22%20stroke%3D%22%233A4354%22%20stroke-width%3D%22.55%22%20stroke-linejoin%3D%22round%22%20opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E">
 <link rel="preconnect" href="https://luljnalcnxfyxmlgoxbc.supabase.co" crossorigin><link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.css">
 
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
 :root{
  --bg:#0C0D10;--surface:#131519;--surface2:#181B21;--hover:#1D2128;--well:#0E0F13;
@@ -17,6 +17,7 @@
  --fd:'Pretendard Variable','Pretendard','Apple SD Gothic Neo',system-ui,sans-serif;
  --fh:'Pretendard Variable','Pretendard',system-ui,sans-serif;
  --fm:'IBM Plex Mono',ui-monospace,monospace;
+ --fn:'Rajdhani','IBM Plex Mono',ui-monospace,sans-serif;   /* 숫자 전용 — 각지고 판독성 높은 스탯 폰트 */
  --r1:9px;--r2:13px;--r3:17px;
  --sh:0 12px 32px -18px rgba(0,0,0,.7);
 }
@@ -1311,6 +1312,19 @@ body.pg-analysis .main,body.pg-analysis section.comm{display:none!important}
 .wpres i.l{color:#ff9a8f;border-color:rgba(255,120,110,.45)}
 .supsvg .sl{display:none}
 @media(max-width:600px){.axl{font-size:10px}.axl.wp{font-size:11px}.wpres b{font-size:15px}}
+
+/* ── 숫자 타이포 통일: 차트·범례·현황판·스탯 전부 Rajdhani ── */
+.axl{font-family:var(--fn);font-weight:600;font-size:12.5px}
+.axl.wp{font-family:var(--fd)}
+.wpres b{font-family:var(--fn);font-size:19px;letter-spacing:.01em}
+.supleg .spl,.supleg .spl em{font-family:var(--fn);font-weight:600}
+.supleg .spl{font-size:13px}
+.pstat,.pst-r .v,.pst-h b{font-family:var(--fn)}
+.pst-r .v{font-size:12.5px;font-weight:600}
+.svtime{font-family:var(--fn)!important;font-weight:600;letter-spacing:.02em}
+.stnum,.stcell b,.stcell .v{font-family:var(--fn)}
+.strate,.stchip,.stchip b{font-family:var(--fn);font-weight:600}
+.fchip b,.fchip .v{font-family:var(--fn)}
 </style>
 </head><body class="pg-analysis">
 
@@ -2831,7 +2845,7 @@ function coachBlock(p){
   ${note?`<p class="stnote">${note}</p>`:''}</div>`;})():''}${(()=>{const _mk=(cr.strat&&cr.strat.items||[]).filter(i=>!i.ok).map(i=>i.lb);const _st=(cr.stories||[]).filter(s=>!_mk.some(k=>k&&s.t.indexOf(k)>=0));return _st.length?`<div class="ckwrap"><div class="cklab">이 판의 핵심</div>${_st.map(st=>
   `<div class="ccard ck"><div class="cct"><b>${st.t}</b>${(st.ev&&st.ev[0]&&VIDEO)?`<button class="cseek" data-s="${st.ev[0][1]}">▶ ${_fmt(st.ev[0][1])}</button>`:''}<span class="ckb">핵심</span></div>
    ${st.ev&&st.ev.length?`<div class="ckev">${st.ev.map(e=>`<span class="cke${VIDEO?' cseek':''}" ${VIDEO?`data-s="${e[1]}"`:''}>${e[0]} <b>${_fmt(e[1])}</b>${e[2]?` <i>${e[2]}</i>`:''}</span>`).join('')}</div>`:''}
-   <p>${st.rx}</p></div>`).join('')}</div>`:'';})()}${_dupHero?'':gr}${_dupHero?'':vd}<div class="ccols"><div class="ccol">${gp.length?`<details class="gdet"><summary><span class="cclh good">잘한 점${cnt(gp.length)}</span></summary>${_wrap(gp,3,false)}</details>`:''}</div><div class="ccol"><div class="cclh bad">아쉬운 점${cnt(bp.length)}</div>${bp.length?_wrap(bp,4,true):'<div class="cnone">개선할 점이 없어요 — 깔끔한 한 판!</div>'}</div></div></div>`;
+   <p>${st.rx}</p></div>`).join('')}</div>`:'';})()}${_dupHero?'':gr}${_dupHero?'':vd}<div class="ccols"><div class="ccol">${gp.length?`<details class="gdet" open><summary><span class="cclh good">잘한 점${cnt(gp.length)}</span></summary>${_wrap(gp,3,false)}</details>`:''}</div><div class="ccol"><div class="cclh bad">아쉬운 점${cnt(bp.length)}</div>${bp.length?_wrap(bp,4,true):'<div class="cnone">개선할 점이 없어요 — 깔끔한 한 판!</div>'}</div></div></div>`;
 }
 const FASTMAP=/(빨무|빠무|무한|fastest)/i.test((meta&&meta.map)||'');
 function factsBlock(p){

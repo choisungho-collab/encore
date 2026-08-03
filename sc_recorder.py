@@ -171,7 +171,7 @@ import queue as _queue
 from collections import deque as _deque
 GUI_Q = _queue.Queue(maxsize=4000)
 LOG_BUF = _deque(maxlen=400)   # 로그창이 닫혀 있어도 최근 로그를 항상 보관(열면 즉시 채움)
-APP_VERSION = "1.9.18"
+APP_VERSION = "1.9.20"
 REC_STATE = {"recording": False, "encoder": "", "ready": False}
 LAST_ERR = {"msg": "", "t": 0.0}
 UP_DONE = {"t": 0.0, "shown": 0.0}
@@ -1465,77 +1465,115 @@ def _hud_learn_templates(frames, anchors, lead):
     return tpl
 def _hud_read_all(frames, tpl):
     """전 프레임 판독 → (sup_used, sup_max, minerals, gas) 초당 리스트 (None=결측).
-    v1.9.17: 클러스터 범위를 학습된 평균 글자폭(_w)으로 등분해 절단 — 세그 융합 면역."""
+    v1.9.20: 압축 노이즈로 세그 경계가 프레임마다 밀리는 문제 대응 —
+    절단 후보(세그 정밀 / 폭 등분 n / n±1)를 전부 채점해 'd/d 패턴 + 최고 평균점수'를 채택."""
     np = _wl_np()
     keys = [k for k in tpl.keys() if k != "_w"]; T = np.stack([tpl[k] for k in keys])
     W0 = float(tpl.get("_w") or 9.0)
-    def _cls(gy):
-        sc = (T * gy).sum(axis=(1, 2))
-        i = int(np.argmax(sc))
-        if sc[i] < 0.55: return None
-        if len(sc) > 1:
-            j2 = int(np.argsort(sc)[-2])
-            if sc[i] - sc[j2] < 0.08: return None
-        return keys[i]
-    def _cluster_chars(g, y0, y1, cl):
+    def _best(gy):
+        sc = (T * gy).sum(axis=(1, 2)); i2 = int(np.argmax(sc))
+        return keys[i2], float(sc[i2])
+    def _cands(g, y0, y1, cl):
         span = _hud_trim_span(cl)
         if not span: return []
         s0, e = span
-        kept = [seg for seg in cl if seg[0] >= s0]
-        out1 = [_cls(_hud_cut(np, g, y0, y1, a2, c2)) for (a2, c2) in kept]   # ① 세그 정밀
-        if out1 and all(c is not None for c in out1): return out1
-        n = int(round((e - s0) / W0))                                          # ② 등분 폴백
-        if n < 1 or n > 7: return out1
-        step = (e - s0) / float(n)
-        out2 = [_cls(_hud_cut(np, g, y0, y1, s0 + k * step, s0 + (k + 1) * step)) for k in range(n)]
-        return out2 if sum(c is not None for c in out2) > sum(c is not None for c in out1) else out1
-    def _num(chs, maxd):
-        run = []
-        for c in reversed(chs):               # 말미에서부터 연속 디지트만(선두 잡음 무시)
-            if c is not None and c.isdigit(): run.append(c)
-            else: break
-        if not run: return None
-        t = "".join(reversed(run[:maxd] if len(run) > maxd else run))
-        return int(t) if 1 <= len(t) <= maxd else None
+        kept = [sg for sg in cl if sg[0] >= s0]
+        outs = []
+        if 1 <= len(kept) <= 7: outs.append(kept)
+        n0b = int(round((e - s0) / W0))
+        for n in {n0b, n0b - 1, n0b + 1}:
+            if 1 <= n <= 7:
+                st = (e - s0) / float(n)
+                outs.append([(s0 + k * st, s0 + (k + 1) * st) for k in range(n)])
+        res = []
+        seen = set()
+        for oi, cuts in enumerate(outs):
+            key = tuple(int(a) for a, _ in cuts)
+            if key in seen: continue
+            seen.add(key)
+            pair = [_best(_hud_cut(np, g, y0, y1, a, c)) for a, c in cuts]
+            chs = [p[0] for p in pair]
+            msc = sum(p[1] for p in pair) / max(1, len(pair))
+            res.append((chs, msc, oi == 0 and cuts is outs[0]))   # is_seg: 세그 정밀 후보
+        return res
+    def _pick_num(cands, maxd, floor=0.55):
+        def _run(chs):
+            run = []
+            for c in reversed(chs):
+                if c.isdigit(): run.append(c)
+                else: break
+            if not run: return None
+            t = "".join(reversed(run[:maxd] if len(run) > maxd else run))
+            return int(t) if 1 <= len(t) <= maxd else None
+        for chs, msc, is_seg in cands:                 # ① 세그 정밀이 신뢰되면 그대로
+            if is_seg and msc >= floor:
+                v = _run(chs)
+                if v is not None: return v
+        best = None                                     # ② 폴백: 점수 최고 후보
+        for chs, msc, _ in cands:
+            if msc < floor: continue
+            v = _run(chs)
+            if v is not None and (best is None or msc > best[1]):
+                best = (v, msc)
+        return best[0] if best else None
     su = []; sm = []; mn = []; gs = []
+    prev_u = prev_m = None
     for f in frames:
         info = _hud_glyph_groups(f, raw=True)
         groups = (info or {}).get("cl") or []
         u = m = a = b2 = None
         if groups:
             y0, y1 = info["y"]; gimg = info["g"]
-            chs = _cluster_chars(gimg, y0, y1, groups[-1])
-            for k in range(min(len(chs), 7), 2, -1):   # 접미 k글자에서 u/m 패턴 탐색
-                tail = chs[-k:]
-                if any(c is None for c in tail): continue
-                t = "".join(tail)
-                if t.count("/") != 1: continue
-                L, _, R = t.partition("/")
-                if L.isdigit() and R.isdigit() and 1 <= len(L) <= 3 and 1 <= len(R) <= 3:
-                    u, m = int(L), int(R); break
+            best = None
+            for chs, msc, is_seg in _cands(gimg, y0, y1, groups[-1]):
+                if msc < 0.45: continue
+                for k in range(min(len(chs), 7), 2, -1):
+                    t = "".join(chs[-k:])
+                    if t.count("/") != 1: continue
+                    L, _, R = t.partition("/")
+                    if L.isdigit() and R.isdigit() and 1 <= len(L) <= 3 and 1 <= len(R) <= 3:
+                        cu, cm = int(L), int(R)
+                        # 시계열 정합 사전: 인구는 1초에 ±6, 최대치는 감소하지 않음(몰살은 u 만 급락)
+                        plaus = 1 if (prev_u is None or (abs(cu - prev_u) <= 6 or (prev_u - cu) >= 15)) else 0
+                        if prev_m is not None and cm < prev_m - 1: plaus = 0
+                        key = (plaus, 1 if is_seg else 0, k, msc)
+                        if best is None or key > best[2]:
+                            best = (cu, cm, key)
+                        break
+            if best:
+                u, m = best[0], best[1]
+                prev_u, prev_m = u, (m if prev_m is None else max(prev_m, m))
             if len(groups) >= 3:
-                a = _num(_cluster_chars(gimg, y0, y1, groups[-3]), 5)
-                b2 = _num(_cluster_chars(gimg, y0, y1, groups[-2]), 5)
+                a = _pick_num(_cands(gimg, y0, y1, groups[-3]), 5)
+                b2 = _pick_num(_cands(gimg, y0, y1, groups[-2]), 5)
             elif len(groups) == 2:
-                a = _num(_cluster_chars(gimg, y0, y1, groups[-2]), 5)
+                a = _pick_num(_cands(gimg, y0, y1, groups[-2]), 5)
         su.append(u); sm.append(m); mn.append(a); gs.append(b2)
     return su, sm, mn, gs
 def _hud_clean(seq, lo, hi, max_jump=None):
-    """범위 필터 + 결측 전방채움 + (선택) 비정상 점프 제거. 반환은 int 리스트(초기 결측은 첫 유효값)."""
+    """범위 필터 + 3점 메디안(단발 오독 제거) + 지속확인 점프가드 + 전방채움.
+    v1.9.20: 예전 '급감 무조건 통과' 규칙은 단발 저값 오독 하나가 이후 전체를
+    잠그는 사고를 냈다(실측). 이제 급변(증감 모두)은 다음 샘플들이 그 값 근처에
+    머무를 때만 수용 — 진짜 몰살은 지속되고, 오독은 단발이라 걸러진다."""
+    raw = [v if (v is not None and lo <= v <= hi) else None for v in seq]
+    med = list(raw)
+    for k in range(1, len(raw) - 1):
+        a, b, c = raw[k - 1], raw[k], raw[k + 1]
+        if a is not None and c is not None:
+            if b is None:
+                med[k] = int(round((a + c) / 2.0))
+            else:
+                trio = sorted((a, b, c)); med[k] = trio[1]
     out = []; last = None
-    for v in seq:
-        if v is not None and lo <= v <= hi:
-            if max_jump is not None and last is not None and abs(v - last) > max_jump and not (v < last):
-                v = None                       # 급증만 의심(급감=몰살은 실제상황이라 통과)
-        else:
-            v = None
+    for k, v in enumerate(med):
+        if v is not None and max_jump is not None and last is not None and abs(v - last) > max_jump:
+            nxt = [x for x in med[k + 1:k + 4] if x is not None][:2]
+            if not any(abs(x - v) <= 12 for x in nxt):
+                v = None                        # 지속되지 않는 급변 = 오독
         if v is not None: last = v
         out.append(last)
     fv = next((x for x in out if x is not None), 0)
     return [fv if x is None else x for x in out]
-
-_HUD_WHY = None
-
 def extract_hud_series(analysis, video_path):
     """녹화자 실측 HUD 시계열 → analysis['hud'] 저장 + 실측 몰살/재-200 도출. 실패 시 None.
     실패 사유는 _HUD_WHY 에 남겨 상위(vdiag)에서 원인을 특정할 수 있게 한다."""
@@ -1753,7 +1791,10 @@ def enhance_highlights_with_audio(analysis, video_path):
     try:
         if not analysis: return
         hl = analysis.get("highlights")
-        if not hl: return
+        if not hl:
+            try: analysis.setdefault("meta", {}).setdefault("vdiag", {})["skip"] = "highlights 없음"
+            except Exception: pass
+            return
         meta = analysis.get("meta") or {}
         lead = 0.0
         try: lead = float(meta.get("lead_sec") or 0.0)
@@ -3018,17 +3059,41 @@ def reanalyze_all(log_fn=None):
             # 영상 소급: 이 매치를 '내가 녹화'해 로컬 아카이브에 영상이 남아 있으면
             # HUD 실측 OCR·오디오 교전 등급·종료 점수판까지 재분석에 포함(다운로드 불필요).
             # 반드시 lead_sec 보존 '이후'에 실행 — 게임초↔영상초 매핑의 기준값이라서.
+            _tmpv = None
             try:
-                _lv = None
+                _lv = None; _vsrc = "local"
                 for _bd in (REC_DIR, UPLOAD_DIR):
                     _c2 = os.path.join(_bd, mid, "game.mp4")
                     if os.path.isfile(_c2): _lv = _c2; break
+                if not _lv:
+                    # 로컬 원본이 용량 정리로 사라졌으면 클라우드 원본을 임시로 내려받아 소급한다.
+                    _vu = _media_url(m.get("video")) or m.get("video")
+                    if _vu:
+                        import requests as _rq, tempfile as _tf2
+                        _tmpv = _tf2.mktemp(suffix=".mp4")
+                        with _rq.get(_vu, stream=True, timeout=60) as _r2:
+                            _r2.raise_for_status()
+                            with open(_tmpv, "wb") as _f2:
+                                for _ck in _r2.iter_content(1 << 20):
+                                    if _ck: _f2.write(_ck)
+                        if os.path.getsize(_tmpv) > 100000:
+                            _lv = _tmpv; _vsrc = "cloud(%.0fMB)" % (os.path.getsize(_tmpv) / 1048576)
                 if _lv:
+                    a.setdefault("meta", {}).setdefault("vdiag", {})["vsrc"] = _vsrc
                     _t0 = time.time()
                     enhance_highlights_with_audio(a, _lv)
-                    lg("  · 로컬 영상 실측 소급 ✓ %s (%.0fs)" % (mid, time.time() - _t0))
+                    lg("  · 영상 실측 소급 ✓ %s [%s] (%.0fs)" % (mid, _vsrc, time.time() - _t0))
+                else:
+                    a.setdefault("meta", {}).setdefault("vdiag", {})["video"] = "영상 없음(로컬 정리·클라우드 URL 없음)"
+                    lg("  · 영상 소급 불가(%s): 로컬·클라우드 모두 없음" % mid)
             except Exception as _e:
+                try: a.setdefault("meta", {}).setdefault("vdiag", {})["video"] = "소급 실패: %s" % _e
+                except Exception: pass
                 lg("  · 영상 소급 스킵(%s): %s" % (mid, _e))
+            finally:
+                if _tmpv:
+                    try: os.remove(_tmpv)
+                    except Exception: pass
             players = meta.get("players") or []; saver = meta.get("saver"); winner = meta.get("winner")
             won = _compute_won(players, saver, winner)
             _patch_pv = {}
