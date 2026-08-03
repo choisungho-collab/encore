@@ -171,7 +171,7 @@ import queue as _queue
 from collections import deque as _deque
 GUI_Q = _queue.Queue(maxsize=4000)
 LOG_BUF = _deque(maxlen=400)   # 로그창이 닫혀 있어도 최근 로그를 항상 보관(열면 즉시 채움)
-APP_VERSION = "1.9.20"
+APP_VERSION = "1.9.21"
 REC_STATE = {"recording": False, "encoder": "", "ready": False}
 LAST_ERR = {"msg": "", "t": 0.0}
 UP_DONE = {"t": 0.0, "shown": 0.0}
@@ -1295,11 +1295,11 @@ _HUD_BAND = (0.74, 0.002, 0.258, 0.048)   # 우상단 자원 밴드 (x,y,w,h 분
 _HUD_W, _HUD_H = 560, 30
 _GW, _GH = 12, 18                          # 글리프 정규화 크기
 
-def _hud_band_frames(video_path, fps=1.0):
+def _hud_band_frames(video_path, fps=1.0, band=None):
     if not FFMPEG or not video_path or not os.path.isfile(video_path): return None
     try:
         np = _wl_np()
-        bx, by, bw, bh = _HUD_BAND
+        bx, by, bw, bh = (band or _HUD_BAND)
         vf = ("fps=%s,crop=iw*%s:ih*%s:iw*%s:ih*%s,scale=%d:%d,format=gray"
               % (fps, bw, bh, bx, by, _HUD_W, _HUD_H))
         p = subprocess.run([FFMPEG, "-v", "error", "-i", video_path, "-vf", vf,
@@ -1593,17 +1593,65 @@ def extract_hud_series(analysis, video_path):
         lead = 0.0
         try: lead = float(meta.get("lead_sec") or 0.0)
         except Exception: pass
-        frames = _hud_band_frames(video_path)
-        if frames is None:
-            _HUD_WHY = "HUD 밴드 프레임 추출 실패(ffmpeg/해상도)"; return None
-        tpl = _hud_learn_templates(frames, anchors, lead)
-        if tpl is None:
-            _HUD_WHY = "숫자 글리프 학습 실패(HUD 위치·스케일 불일치)"; return None
+        # ── 학습은 '등분 절단' 특성상 밴드·리드가 틀려도 구조상 성공한다(쓰레기 템플릿).
+        #    → 앵커 자가검증: 학습 직후 앵커 프레임을 되읽어 want 와 대조. 미달이면 밴드 후보를 옮겨 재시도.
+        def _selfcheck(frames2, tpl2):
+            ok2 = tot2 = 0
+            for sec2, u2, m2 in anchors[:14]:
+                fi2 = int(round(sec2 + lead))
+                if fi2 < 0 or fi2 >= len(frames2): continue
+                s1, s2, _, _ = _hud_read_all(frames2[fi2:fi2 + 1], tpl2)
+                tot2 += 1
+                if s1 and s1[0] == u2 and s2 and s2[0] == m2: ok2 += 1
+            return (ok2 / tot2) if tot2 else 0.0
+        _cands_band = [None, (0.74, 0.012, 0.258, 0.048), (0.74, 0.022, 0.258, 0.052),
+                       (0.70, 0.002, 0.298, 0.058), (0.76, 0.002, 0.238, 0.044)]
+        best = None   # (match, frames, tpl, band)
+        for _bd in _cands_band:
+            fr2 = _hud_band_frames(video_path, band=_bd)
+            if fr2 is None: continue
+            t2 = _hud_learn_templates(fr2, anchors, lead)
+            if t2 is None: continue
+            mt = _selfcheck(fr2, t2)
+            if best is None or mt > best[0]:
+                best = (mt, fr2, t2, _bd or _HUD_BAND)
+            if mt >= 0.75: break                      # 충분히 맞으면 조기 종료
+        if best is None:
+            # 학습조차 불가(클러스터 전무 등) — 그래도 증거는 남긴다
+            try:
+                fr0 = _hud_band_frames(video_path)
+                if fr0 is not None:
+                    import base64, io as _io
+                    from PIL import Image as _Im
+                    buf = _io.BytesIO()
+                    _Im.fromarray(fr0[len(fr0) // 2]).resize((280, 15)).save(buf, format="JPEG", quality=55)
+                    analysis.setdefault("meta", {}).setdefault("vdiag", {})["hud_probe"] = {
+                        "selfmatch": 0.0, "band": list(_HUD_BAND), "lead": round(lead, 2),
+                        "anchors": len(anchors), "band_jpg": base64.b64encode(buf.getvalue()).decode()}
+            except Exception: pass
+            _HUD_WHY = "글리프 학습 불가(전 밴드 후보) — 밴드에 숫자 없음 의심"; return None
+        match, frames, tpl, _band_used = best
+        try:
+            analysis.setdefault("meta", {}).setdefault("vdiag", {})["hud_probe"] = {
+                "selfmatch": round(match, 2), "band": list(_band_used),
+                "lead": round(lead, 2), "anchors": len(anchors)}
+        except Exception: pass
+        if match < 0.5:
+            # 증거 확보: 중간 프레임 밴드를 저해상 JPEG(b64)로 vdiag 에 동봉 → DB 에서 눈으로 확인 가능
+            try:
+                import base64, io as _io
+                from PIL import Image as _Im
+                mid = frames[len(frames) // 2]
+                buf = _io.BytesIO()
+                _Im.fromarray(mid).resize((280, 15)).save(buf, format="JPEG", quality=55)
+                analysis["meta"]["vdiag"]["hud_probe"]["band_jpg"] = base64.b64encode(buf.getvalue()).decode()
+            except Exception: pass
+            _HUD_WHY = "앵커 자가검증 실패(%.0f%%) — 밴드/리드 불일치 의심" % (match * 100); return None
         global _HUD_TPL_CACHE; _HUD_TPL_CACHE = tpl   # 같은 게임 파이프라인 내 재사용(점수판 OCR)
         su, sm, mn, gs = _hud_read_all(frames, tpl)
         conf = sum(1 for v in su if v is not None) / max(1, len(su))
-        if conf < 0.55:
-            _HUD_WHY = "판독 신뢰도 낮음(%.2f < 0.55)" % conf; return None
+        if conf < 0.45:
+            _HUD_WHY = "판독 신뢰도 낮음(%.2f < 0.45, 자가검증 %.0f%%)" % (conf, match * 100); return None
         su = _hud_clean(su, 0, 200, max_jump=40)
         sm = _hud_clean(sm, 1, 200, max_jump=40)
         mn = _hud_clean(mn, 0, 99999); gs = _hud_clean(gs, 0, 99999)
