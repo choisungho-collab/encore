@@ -171,7 +171,7 @@ import queue as _queue
 from collections import deque as _deque
 GUI_Q = _queue.Queue(maxsize=4000)
 LOG_BUF = _deque(maxlen=400)   # 로그창이 닫혀 있어도 최근 로그를 항상 보관(열면 즉시 채움)
-APP_VERSION = "1.9.23"
+APP_VERSION = "1.9.24"
 REC_STATE = {"recording": False, "encoder": "", "ready": False}
 LAST_ERR = {"msg": "", "t": 0.0}
 UP_DONE = {"t": 0.0, "shown": 0.0}
@@ -5905,7 +5905,11 @@ def run_gui(cfg, url):
                     _REPREC.update(armed=True, rep=paths[0], meta=_m0,
                                    exp=_len_sec((_m0 or {}).get("length") or "") or 900,
                                    t0=None, hold=False)
-                    log("리플 재녹화 대기 — 스타를 켜고 해당 리플레이를 재생하세요")
+                    try:
+                        os.startfile(paths[0])   # .rep 연결로 스타 실행 → 그 리플레이 자동 재생
+                        log("리플레이 자동 실행 — 스타가 켜지고 재생이 시작되면 녹화도 자동으로 붙습니다 (반드시 1배속!)")
+                    except Exception:
+                        log("리플 재녹화 대기 — 스타를 직접 켜고 해당 리플레이를 재생해 주세요 (1배속)")
             except Exception: pass
             def _run():
                 ok = 0
