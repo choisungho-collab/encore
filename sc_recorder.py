@@ -171,7 +171,7 @@ import queue as _queue
 from collections import deque as _deque
 GUI_Q = _queue.Queue(maxsize=4000)
 LOG_BUF = _deque(maxlen=400)   # 로그창이 닫혀 있어도 최근 로그를 항상 보관(열면 즉시 채움)
-APP_VERSION = "1.9.24"
+APP_VERSION = "1.9.25"
 REC_STATE = {"recording": False, "encoder": "", "ready": False}
 LAST_ERR = {"msg": "", "t": 0.0}
 UP_DONE = {"t": 0.0, "shown": 0.0}
@@ -5091,6 +5091,50 @@ def _game_det_update(flag, now=None):
 
 _REPREC = {"armed": False, "rep": None, "meta": None, "t0": None, "exp": 0, "hold": False}
 
+def _find_scr_exe():
+    """SC:R 실행파일 탐색 — 표준 설치경로 → 레지스트리(Uninstall) 순."""
+    cands = []
+    for env in ("%ProgramFiles(x86)%", "%ProgramFiles%"):
+        base = os.path.expandvars(env)
+        if base and not base.startswith("%"):
+            cands += [os.path.join(base, "StarCraft", "x86_64", "StarCraft.exe"),
+                      os.path.join(base, "StarCraft", "StarCraft.exe")]
+    try:
+        import winreg
+        for hive, key in ((winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\StarCraft"),
+                          (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\StarCraft")):
+            try:
+                with winreg.OpenKey(hive, key) as k:
+                    loc, _ = winreg.QueryValueEx(k, "InstallLocation")
+                    if loc:
+                        cands += [os.path.join(loc, "x86_64", "StarCraft.exe"),
+                                  os.path.join(loc, "StarCraft.exe")]
+            except OSError: pass
+    except Exception: pass
+    for c in cands:
+        if c and os.path.isfile(c): return c
+    return None
+
+def _launch_replay(rep_path):
+    """리플 자동 재생: 이미 실행 중이면 게임 내에서 열도록 안내, 아니면 exe+인자 실행.
+    반환: 안내 문자열(로그용)."""
+    try:
+        if sc_running(CFG.get("starcraft_process") or "StarCraft.exe"):
+            return ("스타가 이미 실행 중 — 게임 안에서 [Single Player → Replays] 로 이 파일을 재생하세요:\n      %s\n      (재생이 시작되면 자동 녹화됩니다)" % rep_path)
+    except Exception: pass
+    exe = _find_scr_exe()
+    if exe:
+        try:
+            subprocess.Popen([exe, rep_path], cwd=os.path.dirname(exe), **NOWIN)
+            return "리플레이 자동 실행(StarCraft.exe) — 재생이 시작되면 녹화가 붙습니다 (반드시 1배속!)"
+        except Exception as e:
+            pass
+    try:
+        os.startfile(rep_path)   # 연결이 돼 있는 PC 라면 이 경로로도 열림
+        return "리플레이 실행 시도 — 안 열리면 스타를 켜고 [Single Player → Replays] 에서 재생하세요"
+    except Exception:
+        return ("자동 실행 불가 — 스타를 켜고 [Single Player → Replays] 에서 이 파일을 재생하세요:\n      %s" % rep_path)
+
 def _finish_replay_capture(pend, rep_path):
     """리플레이 재녹화 마무리: 병합→길이 트림→배속 가드→분석+HUD 실측→
     기존 '분석 전용' 행에 영상 부착(patch), 없으면 신규 등록(ingest)."""
@@ -5180,6 +5224,9 @@ def recorder_loop(cfg):
                 try: threading.Thread(target=prebind_identity, daemon=True).start()
                 except Exception: pass
             if run:
+                if _REPREC["armed"] and active and not _REPREC["t0"]:
+                    _REPREC["t0"] = time.time()
+                    log("리플 재녹화 시작(실행 중 감지) — 1배속 유지, 예상 %ds 후 자동 저장" % _REPREC["exp"])
                 if not rec._recording() and not _REPREC["hold"]:
                     if active:
                         _ft = _ffmpeg_tail()
@@ -5905,11 +5952,7 @@ def run_gui(cfg, url):
                     _REPREC.update(armed=True, rep=paths[0], meta=_m0,
                                    exp=_len_sec((_m0 or {}).get("length") or "") or 900,
                                    t0=None, hold=False)
-                    try:
-                        os.startfile(paths[0])   # .rep 연결로 스타 실행 → 그 리플레이 자동 재생
-                        log("리플레이 자동 실행 — 스타가 켜지고 재생이 시작되면 녹화도 자동으로 붙습니다 (반드시 1배속!)")
-                    except Exception:
-                        log("리플 재녹화 대기 — 스타를 직접 켜고 해당 리플레이를 재생해 주세요 (1배속)")
+                    log(_launch_replay(paths[0]))
             except Exception: pass
             def _run():
                 ok = 0
