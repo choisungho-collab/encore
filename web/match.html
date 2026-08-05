@@ -1325,6 +1325,12 @@ body.pg-analysis .main,body.pg-analysis section.comm{display:none!important}
 .stnum,.stcell b,.stcell .v{font-family:var(--fn)}
 .strate,.stchip,.stchip b{font-family:var(--fn);font-weight:600}
 .fchip b,.fchip .v{font-family:var(--fn)}
+
+.reponly{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;padding:24px;background:radial-gradient(120% 120% at 50% 0%,#101625 0%,#0a0e16 60%)}
+.reponly .ro-ic{font-size:34px;opacity:.9}
+.reponly b{font-family:var(--fd);font-size:16px;color:var(--ink)}
+.reponly span{font-size:12.5px;color:var(--faint);max-width:420px;line-height:1.55}
+.reponly i{font-style:normal;font-size:11px;color:#8f9bb0;opacity:.8}
 </style>
 </head><body class="pg-watch">
 
@@ -2178,6 +2184,16 @@ if(VIDEO){(async()=>{try{
 
   try{_POV_PLAYERS=views.map(function(v){var ps=_pj(v),sp=ps.find(function(p){return p.name===v.saver;})||{};return {name:v.saver||v.uploader||'시점',race:sp.race,color:sp.color||'#8A93A0',team:sp.team};});}catch(e){}
   window.__povViews=views;try{renderSupplyChart();}catch(_e){}try{renderWinProb();}catch(_e){}
+  if(!VIDEO && !views.length){
+    try{
+      const st=document.querySelector('.stage');
+      if(st){st.classList.add('started');
+        st.innerHTML='<div class="reponly"><div class="ro-ic">📄</div>'+
+          '<b>리플레이 분석 전용</b>'+
+          '<span>영상 없이 .rep 파일로 등록된 판입니다 — 인구·승패·코치 리포트는 아래에 전부 있어요.</span>'+
+          '<i>레코더를 켜고 플레이하면 영상·실측 HUD·클립까지 함께 기록됩니다.</i></div>';}
+    }catch(e){}
+  }
   // 실측 hud 는 별도 2차 조회로 병합 — 이 조회가 실패해도 멀티뷰 탭/재생은 영향 없음
   try{
     const _ids=views.map(v=>String(v.id||'')).filter(Boolean);

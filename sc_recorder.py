@@ -171,7 +171,7 @@ import queue as _queue
 from collections import deque as _deque
 GUI_Q = _queue.Queue(maxsize=4000)
 LOG_BUF = _deque(maxlen=400)   # 로그창이 닫혀 있어도 최근 로그를 항상 보관(열면 즉시 채움)
-APP_VERSION = "1.9.21"
+APP_VERSION = "1.9.23"
 REC_STATE = {"recording": False, "encoder": "", "ready": False}
 LAST_ERR = {"msg": "", "t": 0.0}
 UP_DONE = {"t": 0.0, "shown": 0.0}
@@ -2703,6 +2703,55 @@ def prebind_identity():
     except Exception: pass
     return None
 
+def ingest_rep_only(rep_path, log_fn=None):
+    """영상 없이 .rep 만으로 경기 등록 — '레코더 안 켜고 한 판' 소급용.
+    인구곡선(생산누적)·승패(leaves/lastcmd)·코치·승률은 전부 생성되고,
+    HUD 실측·클립·오디오만 빠진다(영상이 없으니 원리상 불가)."""
+    lg = log_fn or log
+    try:
+        if not (rep_path and os.path.isfile(rep_path) and rep_path.lower().endswith(".rep")):
+            lg("rep 가져오기: .rep 파일이 아님"); return False
+        if not SCREP:
+            lg("rep 가져오기: screp 미설치"); return False
+        meta = parse_rep(rep_path)
+        analysis = extract_analysis(rep_path)
+        if not meta or not analysis or not (analysis.get("players")):
+            lg("rep 가져오기 실패(파싱): %s" % os.path.basename(rep_path)); return False
+        length_sec = _len_sec(meta.get("length") or "")
+        saver = meta.get("saver")
+        # 중복 가드: 같은 저장자·같은 맵·길이 ±2초가 이미 클라우드에 있으면 스킵
+        try:
+            for m0 in (sb_get_matches(limit=4000, cols="id,saver,map,length_sec") or []):
+                if (str(m0.get("saver") or "") == str(saver or "")
+                        and abs(int(m0.get("length_sec") or 0) - length_sec) <= 2
+                        and (m0.get("map") or "") == (meta.get("map") or "")):
+                    lg("  · 이미 등록된 판 — 스킵: %s (%s)" % (os.path.basename(rep_path), meta.get("length")))
+                    return True
+        except Exception: pass
+        gid = datetime.datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2)
+        base = os.path.join(UPLOAD_DIR, gid); os.makedirs(base, exist_ok=True)
+        rdst = os.path.join(base, "replay.rep")
+        try: shutil.copy2(rep_path, rdst)
+        except Exception: rdst = rep_path
+        rep_url = sb_upload(rdst, f"replays/{gid}.rep", "application/octet-stream")
+        players = meta.get("players") or []
+        winner = meta.get("winner")
+        won = _compute_won(players, saver, winner)
+        row = {"id": gid, "uploader": (CFG.get("username") or saver),
+               "uploaded": datetime.datetime.now().isoformat(timespec="seconds"),
+               "video": None, "thumb": None, "replay": rep_url, "video_size": 0,
+               "map": meta.get("map"), "matchup": meta.get("matchup"),
+               "length": meta.get("length"), "length_sec": length_sec,
+               "type": meta.get("type"), "winner": winner, "saver": saver,
+               "np": len(players), "players": players, "won": won,
+               "analysis": _slim_cloud_analysis(analysis)}
+        if not sb_insert_match(row):
+            lg("rep 가져오기: 클라우드 등록 실패 — %s" % os.path.basename(rep_path)); return False
+        lg("✓ rep 등록: %s · %s · %s (영상 없음 — 분석 전용)" % (meta.get("map"), meta.get("length"), saver))
+        return True
+    except Exception as e:
+        lg("rep 가져오기 오류: %s" % e); return False
+
 def upload_selftest():
     """서명 라우트(/api/storage) 상태를 '정확한 이유와 함께' 진단해 콘솔에 남긴다.
     이전엔 모든 실패를 '함수 배포 필요' 하나로 뭉뚱그려 원인 파악이 불가능했음 → 케이스별로 분리."""
@@ -5040,6 +5089,65 @@ def _game_det_update(flag, now=None):
                 log("Game screen ended (lobby/menu)")
         except Exception: pass
 
+_REPREC = {"armed": False, "rep": None, "meta": None, "t0": None, "exp": 0, "hold": False}
+
+def _finish_replay_capture(pend, rep_path):
+    """리플레이 재녹화 마무리: 병합→길이 트림→배속 가드→분석+HUD 실측→
+    기존 '분석 전용' 행에 영상 부착(patch), 없으면 신규 등록(ingest)."""
+    try:
+        _pipe("processing")
+        video = pend
+        if isinstance(video, dict):
+            video = _merge_audio(video.get("v"), video.get("w"), video.get("a"), video.get("t"))
+        if not (video and os.path.isfile(video) and os.path.getsize(video) > 200000):
+            log("리플 재녹화: 영상이 비어 있음 — 취소"); return
+        meta = _REPREC.get("meta") or (parse_rep(rep_path) if SCREP else {}) or {}
+        _gl = _len_sec(meta.get("length") or "")
+        if _gl:
+            _trim_lead(video, _gl)
+            _dout = _ffprobe_dur(video) or 0
+            if abs(_dout - _gl) > max(8.0, _gl * 0.08):
+                log("리플 재녹화: 길이 불일치(영상 %.0fs vs 게임 %ds) — 배속 재생 의심, 저장 취소. 1배속으로 다시 시도해 주세요." % (_dout, _gl))
+                try: os.remove(video)
+                except Exception: pass
+                return
+        analysis = extract_analysis(rep_path) if SCREP else None
+        try:
+            if analysis is not None:
+                enhance_highlights_with_audio(analysis, video)   # HUD 실측·오디오까지 소급
+        except Exception: pass
+        saver = meta.get("saver"); length_sec = _len_sec(meta.get("length") or "")
+        mid = None
+        try:
+            for m0 in (sb_get_matches(limit=4000, cols="id,saver,map,length_sec,video") or []):
+                if (not m0.get("video") and str(m0.get("saver") or "") == str(saver or "")
+                        and abs(int(m0.get("length_sec") or 0) - length_sec) <= 2
+                        and (m0.get("map") or "") == (meta.get("map") or "")):
+                    mid = m0.get("id"); break
+        except Exception: pass
+        if mid:
+            size = os.path.getsize(video)
+            v_url = sb_upload(video, f"videos/{mid}.mp4", "video/mp4")
+            ttmp = os.path.join(REC_DIR, "rep_thumb.jpg")
+            t_url = sb_upload(ttmp, f"thumbs/{mid}.jpg", "image/jpeg") if make_thumb(video, ttmp) else None
+            fields = {"video": v_url, "video_size": size,
+                      "analysis": _slim_cloud_analysis(analysis) if analysis else None}
+            if t_url: fields["thumb"] = t_url
+            fields = {k: v for k, v in fields.items() if v is not None}
+            if v_url and sb_patch_match(mid, fields):
+                log("✓ 리플 재녹화 부착: %s · %s — 영상+실측이 기존 판에 연결됨" % (meta.get("map"), meta.get("length")))
+                try: os.remove(video)
+                except Exception: pass
+            else:
+                log("리플 재녹화: 클라우드 부착 실패 — 신규 등록으로 전환")
+                ingest(video, rep_path, uploader=(CFG.get("username") or None))
+        else:
+            ingest(video, rep_path, uploader=(CFG.get("username") or None))
+    except Exception as e:
+        log("리플 재녹화 마무리 오류: %s" % e)
+    finally:
+        _pipe(None)
+
 def _dispatch(video, rep, t0=None, rep_mtime=None):
     try:
         _pipe("processing")
@@ -5065,11 +5173,14 @@ def recorder_loop(cfg):
             run = sc_running(proc)
             if run and not was:
                 log("StarCraft detected."); known = list_reps(autosave); active = rec.start()
+                if _REPREC["armed"] and active and not _REPREC["t0"]:
+                    _REPREC["t0"] = time.time()
+                    log("리플 재녹화 중 — 리플레이를 1배속으로 끝까지 재생하세요 (예상 %ds, 초과 시 자동 저장)" % _REPREC["exp"])
                 # 설계: 스타 실행 시 내 아이디로 미리 로그인 바인딩 → Archive 클릭 시 즉시 자동 로그인
                 try: threading.Thread(target=prebind_identity, daemon=True).start()
                 except Exception: pass
             if run:
-                if not rec._recording():
+                if not rec._recording() and not _REPREC["hold"]:
                     if active:
                         _ft = _ffmpeg_tail()
                         log("Recording stream dropped; restarting automatically." + (f"  (ffmpeg: {_ft})" if _ft else ""))
@@ -5080,6 +5191,11 @@ def recorder_loop(cfg):
                             _force_software_encoder("Recording failed repeatedly — treating it as a GPU encoder (NVENC) issue and "
                                                     "switching to the software (CPU) encoder. Quality stays the same.")
                             rec.verified = False; active = rec.start()
+                if _REPREC["t0"] and (time.time() - _REPREC["t0"] >= _REPREC["exp"] * 1.25 + 120):
+                    log("리플 재녹화: 예상 길이 도달 — 저장 시작")
+                    pend = rec.stop(merge=False); active = False; _REPREC["hold"] = True
+                    threading.Thread(target=_finish_replay_capture, args=(pend, _REPREC["rep"]), daemon=True).start()
+                    _REPREC.update(armed=False, t0=None)
                 cur = list_reps(autosave); new = [f for f in cur if f not in known]
                 if new:
                     newest = max(new, key=lambda f: cur[f])
@@ -5093,6 +5209,11 @@ def recorder_loop(cfg):
             if not run and was:
                 log("StarCraft closed.")
                 pend = rec.stop(merge=False); active = False; rec.verified = False
+                if _REPREC["t0"]:
+                    threading.Thread(target=_finish_replay_capture, args=(pend, _REPREC["rep"]), daemon=True).start()
+                    _REPREC.update(armed=False, t0=None, hold=False)
+                    pend = None
+                _REPREC["hold"] = False
                 cur = list_reps(autosave); new = [f for f in cur if f not in known]
                 if pend and new:
                     newest = max(new, key=lambda f: cur[f])
@@ -5767,7 +5888,34 @@ def run_gui(cfg, url):
         cv.tag_bind(tag,"<Leave>", lambda e,_r=rid,_f=fillc: (cv.itemconfig(_r, fill=_f), cv.configure(cursor="")))
         return x+w
     _bx=_cbtn(18, 120, "Archive", _ic_archive, open_gallery, "ghost")
-    _cbtn(_bx+10, 120, "Open folder", _ic_folder, open_folder, "sub")
+    _bx2=_cbtn(_bx+10, 120, "Open folder", _ic_folder, open_folder, "sub")
+    def _import_reps():
+        try:
+            from tkinter import filedialog
+            rd = CFG.get("replay_autosave_dir") or detect_replay_dir() or ""
+            paths = filedialog.askopenfilenames(title="리플레이(.rep) 선택 — 영상 없이 분석만 등록",
+                                                initialdir=rd or None,
+                                                filetypes=[("StarCraft Replay", "*.rep")])
+            if not paths: return
+            try:
+                from tkinter import messagebox
+                if messagebox.askyesno("리플 재녹화",
+                        "영상도 녹화할까요?\n\n예: 지금 스타크래프트에서 첫 번째 리플레이를 1배속 재생하면\n     자동 녹화되어 판에 영상·실측 HUD가 붙습니다.\n아니오: 분석만 등록"):
+                    _m0 = parse_rep(paths[0]) if SCREP else {}
+                    _REPREC.update(armed=True, rep=paths[0], meta=_m0,
+                                   exp=_len_sec((_m0 or {}).get("length") or "") or 900,
+                                   t0=None, hold=False)
+                    log("리플 재녹화 대기 — 스타를 켜고 해당 리플레이를 재생하세요")
+            except Exception: pass
+            def _run():
+                ok = 0
+                for p in paths:
+                    if ingest_rep_only(p): ok += 1
+                log("rep 가져오기 완료: %d/%d — 갤러리 새로고침하면 보입니다" % (ok, len(paths)))
+            threading.Thread(target=_run, daemon=True).start()
+        except Exception as e:
+            log("rep 가져오기 실패: %s" % e)
+    _cbtn(_bx2+10, 120, "Import rep", _ic_archive, _import_reps, "sub")
 
     # icons: gear + menu over the baked bottom bar (bottom-right)
     def _icon(x, glyph, cmd):
